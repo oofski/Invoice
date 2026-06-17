@@ -1,0 +1,91 @@
+# Builds the InvoiceIQ Windows desktop installer and publishes it to a GitHub
+# Release. electron-builder's NSIS target requires Windows, so this runs on a
+# windows-latest runner.
+name: Release Desktop
+
+on:
+  # Build + publish whenever a version tag is pushed (e.g. v1.0.0).
+  push:
+    tags:
+      - "v*"
+  # Allow manual runs from the Actions tab (does not create a Release unless a
+  # tag context is present; the artifact upload still works).
+  workflow_dispatch:
+
+# softprops/action-gh-release needs write access to create/update Releases.
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Install the Electron / electron-builder dev dependencies for the
+      # desktop wrapper.
+      - name: Install desktop dependencies
+        run: npm --prefix desktop install
+
+      # Install renderer dependencies. The renderer lives in desktop/renderer
+      # and is built before packaging. Resilient to a missing/empty renderer:
+      # if there is no package.json yet, this step is a no-op.
+      - name: Install renderer dependencies
+        shell: bash
+        run: |
+          if [ -f desktop/renderer/package.json ]; then
+            npm --prefix desktop/renderer install
+          else
+            echo "No desktop/renderer/package.json found; skipping renderer install."
+          fi
+
+      # Build the renderer with the backend URL baked in. VITE_API_BASE_URL is
+      # taken from a repository variable/secret of the same name and defaults to
+      # empty if unset. Resilient to a renderer that has no build script.
+      - name: Build renderer
+        shell: bash
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL || '' }}
+        run: |
+          if [ -f desktop/renderer/package.json ]; then
+            npm --prefix desktop/renderer run build
+          else
+            echo "No desktop/renderer/package.json found; skipping renderer build."
+          fi
+
+      # Package the app into an NSIS installer. `npm run dist` re-runs the
+      # renderer build (idempotent) and then electron-builder --win nsis.
+      # GH_TOKEN is provided so electron-builder can authenticate if needed,
+      # though we publish the Release in a dedicated step below.
+      - name: Build Windows installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL || '' }}
+        run: npm --prefix desktop run dist
+
+      # Always make the installer available as a workflow artifact for download.
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoiceiq-windows-installer
+          path: desktop/release/*.exe
+          if-no-files-found: error
+
+      # Create or update the GitHub Release for the pushed tag and attach the
+      # .exe. The Release download link is then available at
+      # https://github.com/<owner>/<repo>/releases/tag/<tag>. Only runs for tag
+      # pushes (a Release needs a tag).
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/release/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
