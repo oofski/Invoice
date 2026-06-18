@@ -10,6 +10,7 @@ import {
   hydrateInvoice,
 } from "../lib/db";
 import { processInvoiceAI, findDuplicate } from "../lib/process";
+import { putPdf, getPdf, pdfKey } from "../lib/storage";
 import { runTextract, parseTextract } from "../lib/textract";
 import { sendReminderEmail, sendRejectionEmail } from "../lib/email";
 import { uuid, nowIso, parseAmount, toIsoDate, hoursSince } from "../lib/util";
@@ -123,10 +124,12 @@ invoices.post("/upload", async (c) => {
     throw e;
   }
 
+  const key = pdfKey(id);
+  await putPdf(c.env, key, buf);
   await c.env.DB.prepare(
-    "INSERT INTO pdf_files (invoice_id, file_name, bytes, size) VALUES (?,?,?,?)",
+    "INSERT INTO pdf_files (invoice_id, file_name, mime, r2_key, size) VALUES (?,?,?,?,?)",
   )
-    .bind(id, fileName, buf, buf.byteLength)
+    .bind(id, fileName, "application/pdf", key, buf.byteLength)
     .run();
 
   await audit(c.env, {
@@ -227,16 +230,18 @@ invoices.get("/:id/pdf", async (c) => {
   const inv = await getInvoice(c.env, id);
   if (!inv) return c.json({ error: "Not found" }, 404);
   if (!canViewInvoice(c, inv)) return c.json({ error: "Forbidden" }, 403);
-  const pdf = await c.env.DB.prepare(
-    "SELECT bytes, mime, file_name FROM pdf_files WHERE invoice_id = ?",
+  const meta = await c.env.DB.prepare(
+    "SELECT r2_key, mime, file_name FROM pdf_files WHERE invoice_id = ?",
   )
     .bind(id)
-    .first<{ bytes: ArrayBuffer; mime: string; file_name: string }>();
-  if (!pdf?.bytes) return c.json({ error: "No PDF" }, 404);
-  return new Response(pdf.bytes, {
+    .first<{ r2_key: string; mime: string; file_name: string }>();
+  if (!meta?.r2_key) return c.json({ error: "No PDF" }, 404);
+  const obj = await getPdf(c.env, meta.r2_key);
+  if (!obj) return c.json({ error: "No PDF" }, 404);
+  return new Response(obj.body, {
     headers: {
-      "content-type": pdf.mime || "application/pdf",
-      "content-disposition": `inline; filename="${pdf.file_name ?? "invoice.pdf"}"`,
+      "content-type": meta.mime || "application/pdf",
+      "content-disposition": `inline; filename="${meta.file_name ?? "invoice.pdf"}"`,
     },
   });
 });

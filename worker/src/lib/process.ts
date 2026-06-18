@@ -1,5 +1,6 @@
 import type { Env, InvoiceRow } from "./types";
 import { runTextract, parseTextract, formatForClaude } from "./textract";
+import { getPdf } from "./storage";
 import { runPipeline } from "./ai/pipeline";
 import { audit, resolveApproverUser, getInvoice } from "./db";
 import { sendApprovalEmail } from "./email";
@@ -23,13 +24,16 @@ export async function processInvoiceAI(
   // Obtain Textract output (reuse stored raw -> no re-billing, Brief §13).
   let textractRaw: unknown = inv.textract_raw ? JSON.parse(inv.textract_raw) : null;
   if (!textractRaw) {
-    const pdf = await env.DB.prepare(
-      "SELECT bytes FROM pdf_files WHERE invoice_id = ?",
+    const meta = await env.DB.prepare(
+      "SELECT r2_key FROM pdf_files WHERE invoice_id = ?",
     )
       .bind(invoiceId)
-      .first<{ bytes: ArrayBuffer }>();
-    if (!pdf?.bytes) throw new Error("Invoice has no PDF to process");
-    textractRaw = await runTextract(env, pdf.bytes);
+      .first<{ r2_key: string }>();
+    if (!meta?.r2_key) throw new Error("Invoice has no PDF to process");
+    const obj = await getPdf(env, meta.r2_key);
+    if (!obj) throw new Error("Invoice PDF not found in storage");
+    const buf = await obj.arrayBuffer();
+    textractRaw = await runTextract(env, buf);
     await env.DB.prepare("UPDATE invoices SET textract_raw = ? WHERE id = ?")
       .bind(JSON.stringify(textractRaw), invoiceId)
       .run();

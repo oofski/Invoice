@@ -18,6 +18,7 @@ cd worker
 npm install
 npx wrangler login                       # authenticate to your Cloudflare acct
 npx wrangler d1 create invoiceiq          # copy the database_id into wrangler.toml
+npx wrangler r2 bucket create invoiceiq-pdfs   # PDF object storage (binding PDFS)
 npm run db:init                           # apply schema + seed to the remote D1
 
 # Secrets (never committed):
@@ -67,10 +68,10 @@ the signed NSIS `.exe` requires a Windows runner.)
    they set their own password on first login).
 
 ## Notes
-- **PDF storage:** invoice PDFs are stored as BLOBs in D1 (per the "D1 only"
-  choice). This is fine for typical invoices; D1 has per-row size limits, so for
-  very large scans or high volume switch `pdf_files` to Cloudflare R2 object
-  references (the Worker abstracts PDF read/write in one place).
+- **PDF storage:** invoice PDFs are stored in **Cloudflare R2** (object storage,
+  bucket `invoiceiq-pdfs`, binding `PDFS`) — built for large scans and high
+  volume. D1 only holds the R2 object key + metadata in `pdf_files`. PDF
+  read/write is abstracted in `worker/src/lib/storage.ts`.
 - **Auth:** email + password (PBKDF2 + session tokens). No HTTPS/domain setup is
   required of you — Cloudflare serves the Worker over HTTPS automatically and the
   desktop app calls it directly.

@@ -59,15 +59,14 @@ CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
 CREATE INDEX IF NOT EXISTS idx_invoices_approver ON invoices(approved_by);
 CREATE INDEX IF NOT EXISTS idx_invoices_business ON invoices(business);
 
--- --------------------------------------------------------- PDF FILES (D1)
--- PDFs are stored as BLOBs in D1 (per "D1 only" choice). NOTE: D1 row/result
--- size limits make this best for typical invoice PDFs (< ~1 MB); for large
--- volumes or large files, switch this table to Cloudflare R2 object refs.
+-- ------------------------------------------------------ PDF FILES (R2 refs)
+-- PDF bytes live in Cloudflare R2 (object storage) — scalable for large scans
+-- and high volume. This table only holds the R2 object key + metadata.
 CREATE TABLE IF NOT EXISTS pdf_files (
   invoice_id  TEXT PRIMARY KEY REFERENCES invoices(id) ON DELETE CASCADE,
   file_name   TEXT,
   mime        TEXT NOT NULL DEFAULT 'application/pdf',
-  bytes       BLOB NOT NULL,
+  r2_key      TEXT NOT NULL,
   size        INTEGER,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
