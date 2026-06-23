@@ -288,6 +288,8 @@ invoices.post("/:id/approve", async (c) => {
     return c.json({ error: "Only the assigned executive can approve" }, 403);
   if (inv.status === INVOICE_STATUS.EXPORTED)
     return c.json({ error: "Invoice already exported" }, 409);
+  if (!(await splitReady(c.env)))
+    return c.json({ error: "Splitting needs a one-time database setup — run the migration." }, 503);
 
   const body = await c.req.json().catch(() => ({}));
   const comment = (body as { comment?: string }).comment?.trim();
@@ -323,6 +325,16 @@ function canSplit(c: import("hono").Context<AppEnv>, inv: InvoiceRow): boolean {
   return u.role === ROLES.EXECUTIVE && sameName(inv.approved_by, u.name);
 }
 
+/** True once the split DB migration (invoice_allocations table) has been run. */
+async function splitReady(env: AppEnv["Bindings"]): Promise<boolean> {
+  try {
+    await env.DB.prepare("SELECT 1 FROM invoice_allocations LIMIT 1").first();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Rounds to cents (2 dp). */
 function roundCents(n: number): number {
   return Math.round(n * 100) / 100;
@@ -337,6 +349,8 @@ invoices.post("/:id/split-even", async (c) => {
     return c.json({ error: "Only the assigned executive can split" }, 403);
   if (inv.status === INVOICE_STATUS.EXPORTED)
     return c.json({ error: "Invoice already exported" }, 409);
+  if (!(await splitReady(c.env)))
+    return c.json({ error: "Splitting needs a one-time database setup — run the migration." }, 503);
 
   const classes = BUSINESS_CLASSES[inv.business ?? ""] ?? [];
   if (classes.length < 2)
@@ -418,6 +432,8 @@ invoices.post("/:id/split-lines", async (c) => {
     return c.json({ error: "Only the assigned executive can split" }, 403);
   if (inv.status === INVOICE_STATUS.EXPORTED)
     return c.json({ error: "Invoice already exported" }, 409);
+  if (!(await splitReady(c.env)))
+    return c.json({ error: "Splitting needs a one-time database setup — run the migration." }, 503);
 
   const body = await c.req.json().catch(() => ({}));
   const lines = (body as {
@@ -471,6 +487,8 @@ invoices.delete("/:id/split", async (c) => {
     return c.json({ error: "Only the assigned executive can split" }, 403);
   if (inv.status === INVOICE_STATUS.EXPORTED)
     return c.json({ error: "Invoice already exported" }, 409);
+  if (!(await splitReady(c.env)))
+    return c.json({ error: "Splitting needs a one-time database setup — run the migration." }, 503);
 
   await c.env.DB.prepare(
     "DELETE FROM invoice_allocations WHERE invoice_id = ?",
@@ -506,6 +524,8 @@ invoices.post("/:id/reject", async (c) => {
     return c.json({ error: "Only the assigned executive can reject" }, 403);
   if (inv.status === INVOICE_STATUS.EXPORTED)
     return c.json({ error: "Invoice already exported" }, 409);
+  if (!(await splitReady(c.env)))
+    return c.json({ error: "Splitting needs a one-time database setup — run the migration." }, 503);
 
   await c.env.DB.prepare("UPDATE invoices SET status = ? WHERE id = ?")
     .bind(INVOICE_STATUS.REJECTED, id)

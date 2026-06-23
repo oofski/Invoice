@@ -103,14 +103,20 @@ exportRoutes.post("/", async (c) => {
     byInvoice.set(li.invoice_id, arr);
   }
 
-  const allocRows = await c.env.DB.prepare(
-    `SELECT * FROM invoice_allocations WHERE invoice_id IN (${ph})`,
-  ).bind(...invoiceIds).all<InvoiceAllocationRow>();
+  // Tolerate a pre-migration DB (no invoice_allocations table yet): treat as
+  // "no allocations" so export keeps working until the migration is applied.
   const allocByInvoice = new Map<string, InvoiceAllocationRow[]>();
-  for (const a of allocRows.results ?? []) {
-    const arr = allocByInvoice.get(a.invoice_id) ?? [];
-    arr.push(a);
-    allocByInvoice.set(a.invoice_id, arr);
+  try {
+    const allocRows = await c.env.DB.prepare(
+      `SELECT * FROM invoice_allocations WHERE invoice_id IN (${ph})`,
+    ).bind(...invoiceIds).all<InvoiceAllocationRow>();
+    for (const a of allocRows.results ?? []) {
+      const arr = allocByInvoice.get(a.invoice_id) ?? [];
+      arr.push(a);
+      allocByInvoice.set(a.invoice_id, arr);
+    }
+  } catch {
+    // invoice_allocations table not present yet — proceed with no allocations.
   }
 
   const vendorMappings = await loadVendorMappings(c.env);
