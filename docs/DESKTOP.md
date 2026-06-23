@@ -22,10 +22,10 @@ npx wrangler r2 bucket create invoiceiq-pdfs   # PDF object storage (binding PDF
 npm run db:init                           # apply schema + seed to the remote D1
 
 # Secrets (never committed):
-npx wrangler secret put REDUCTO_API_KEY      # document parsing / OCR (reducto.ai)
-npx wrangler secret put ANTHROPIC_API_KEY
+npx wrangler secret put REDUCTO_API_KEY      # REQUIRED — Reducto parse + /extract (reducto.ai)
 npx wrangler secret put INGEST_TOKEN          # optional — SharePoint/Power Automate ingest
 npx wrangler secret put RESEND_API_KEY        # optional — only if using email
+# ANTHROPIC_API_KEY is no longer used (routing + GL coding are deterministic rules + Reducto extract).
 # Optional vars in wrangler.toml: REDUCTO_BASE_URL, RESEND_FROM_EMAIL, APP_URL
 
 npm run deploy                            # -> https://invoiceiq.<account>.workers.dev

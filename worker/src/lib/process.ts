@@ -1,8 +1,8 @@
 import type { Env, InvoiceRow } from "./types";
-import { ocrPdf, extractTextFromReducto } from "./reducto";
+import { uploadToReducto } from "./reducto";
+import { extractInvoice, normalizeExtract, type ExtractedInvoice } from "./extract";
 import { getPdf, putPdf, pdfKey } from "./storage";
-import { runPipeline } from "./ai/pipeline";
-import { runPrompt1 } from "./ai/prompts";
+import { runRulesPipeline } from "./pipeline";
 import { audit, resolveApproverUser, getInvoice } from "./db";
 import { sendApprovalEmail } from "./email";
 import { uuid, nowIso, parseAmount, toIsoDate } from "./util";
@@ -26,12 +26,12 @@ export async function processInvoiceAI(
   const inv = await getInvoice(env, invoiceId);
   if (!inv) throw new Error("Invoice not found");
 
-  // Obtain the parsed document text (reuse stored parse output if present).
-  let ocrRaw: unknown = inv.textract_raw ? JSON.parse(inv.textract_raw) : null;
-  let docText: string;
-  if (ocrRaw) {
-    docText = extractTextFromReducto(ocrRaw);
-  } else {
+  // Reuse the stored Reducto extraction if present (never re-bills the parser);
+  // otherwise re-extract from the PDF in R2 and store it.
+  let extracted: ExtractedInvoice | null = inv.textract_raw
+    ? normalizeExtract(JSON.parse(inv.textract_raw))
+    : null;
+  if (!extracted) {
     const meta = await env.DB.prepare(
       "SELECT r2_key, file_name FROM pdf_files WHERE invoice_id = ?",
     )
@@ -41,16 +41,16 @@ export async function processInvoiceAI(
     const obj = await getPdf(env, meta.r2_key);
     if (!obj) throw new Error("Invoice PDF not found in storage");
     const buf = await obj.arrayBuffer();
-    const parsed = await ocrPdf(env, buf, meta.file_name ?? "invoice.pdf");
-    ocrRaw = parsed.raw;
-    docText = parsed.text;
+    const reductoId = await uploadToReducto(env, buf, meta.file_name ?? "invoice.pdf");
+    const ex = await extractInvoice(env, reductoId);
+    extracted = ex.data;
     await env.DB.prepare("UPDATE invoices SET textract_raw = ? WHERE id = ?")
-      .bind(JSON.stringify(ocrRaw), invoiceId)
+      .bind(JSON.stringify(ex.data), invoiceId)
       .run();
   }
 
   try {
-    const result = await runPipeline(env, docText);
+    const result = await runRulesPipeline(env, extracted);
 
     const subtotal =
       inv.subtotal == null && result.prompt1.Subtotal
@@ -214,14 +214,16 @@ export async function ingestInvoicePdf(
 ): Promise<IngestResult> {
   const { buf, fileName, submittedBy, submissionType, override, source } = opts;
 
-  // Reducto parse -> Prompt 1 reads the header -> duplicate check BEFORE the
-  // heavier Claude steps (Prompt 2 + line-item coding). The stored parse output
-  // is reused by processInvoiceAI, so the parser is not re-billed.
-  const { raw, text } = await ocrPdf(env, buf, fileName);
-  const header = await runPrompt1(env, text);
-  const vendor = header.Vendor || "Unknown Vendor";
-  const invoiceNumber = header.InvoiceNumber || `NO-INV-${Date.now()}`;
-  const total = parseAmount(header.TotalAmount);
+  // Reducto /extract reads the header + line items up front. The duplicate check
+  // runs on the header BEFORE we persist; the extraction is stored and reused by
+  // processInvoiceAI, so Reducto is not billed twice. Business/Class/approver are
+  // filled in by the rules pipeline in processInvoiceAI.
+  const reductoId = await uploadToReducto(env, buf, fileName);
+  const { data } = await extractInvoice(env, reductoId);
+  const vendor = data.vendor || "Unknown Vendor";
+  const invoiceNumber = data.invoice_number || `NO-INV-${Date.now()}`;
+  const total =
+    data.total ?? data.line_items.reduce((s, l) => s + (l.amount ?? 0), 0);
 
   if (!override) {
     const dup = await findDuplicate(env, vendor, invoiceNumber, total);
@@ -246,18 +248,18 @@ export async function ingestInvoicePdf(
         id,
         vendor,
         invoiceNumber,
-        header.Subtotal ? parseAmount(header.Subtotal) : null,
-        header.SalesTax ? parseAmount(header.SalesTax) : 0,
+        data.subtotal,
+        data.sales_tax ?? 0,
         total,
-        toIsoDate(header.InvDate),
-        toIsoDate(header.DueDate) ?? toIsoDate(header.InvDate),
-        header.Business ?? null,
-        header.Class ?? null,
+        toIsoDate(data.invoice_date),
+        toIsoDate(data.due_date) ?? toIsoDate(data.invoice_date),
+        null,
+        null,
         INVOICE_STATUS.PROCESSING,
         1,
         submittedBy,
         submissionType,
-        JSON.stringify(raw),
+        JSON.stringify(data),
       )
       .run();
   } catch (e) {

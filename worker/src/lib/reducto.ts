@@ -92,6 +92,75 @@ export async function ocrPdf(
 }
 
 /**
+ * Structured extraction via Reducto /extract. Sends a JSON schema + system
+ * prompt and returns the structured object (`data`) plus the raw response.
+ * Tolerant of response-shape variations: result may be `result`/`data`/
+ * `extracted`/`output`, an array (we take [0]), a `{type:"url"}` pointer for
+ * large docs, and citation-wrapped fields (`{value, confidence, bbox,...}`).
+ */
+export async function runExtract(
+  env: Env,
+  documentUrl: string,
+  opts: { schema: unknown; systemPrompt?: string; arrayExtract?: boolean },
+): Promise<{ raw: unknown; data: unknown }> {
+  const body: Record<string, unknown> = {
+    input: documentUrl,
+    instructions: {
+      schema: opts.schema,
+      ...(opts.systemPrompt ? { system_prompt: opts.systemPrompt } : {}),
+    },
+    settings: { array_extract: opts.arrayExtract ?? true },
+  };
+  const res = await fetch(`${baseUrl(env)}/extract`, {
+    method: "POST",
+    headers: { ...authHeaders(env), "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`Reducto extract ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  }
+  const raw = await res.json();
+  let node = pickExtractResult(raw);
+  if (
+    node &&
+    typeof node === "object" &&
+    (node as Record<string, unknown>).type === "url" &&
+    typeof (node as Record<string, unknown>).url === "string"
+  ) {
+    const full = await (await fetch((node as Record<string, unknown>).url as string)).json();
+    node = pickExtractResult(full);
+    return { raw: full, data: unwrapCitations(node) };
+  }
+  return { raw, data: unwrapCitations(node) };
+}
+
+function pickExtractResult(raw: unknown): unknown {
+  const root = (raw ?? {}) as Record<string, unknown>;
+  let r: unknown = root.result ?? root.data ?? root.extracted ?? root.output ?? root;
+  if (Array.isArray(r)) r = r.length ? r[0] : {};
+  return r;
+}
+
+/** Unwraps Reducto citation wrappers `{value, confidence, bbox,...}` -> value. */
+function unwrapCitations(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(unwrapCitations);
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (
+      "value" in o &&
+      keys.some((k) => ["citation", "citations", "confidence", "bbox", "reasoning"].includes(k))
+    ) {
+      return unwrapCitations(o.value);
+    }
+    const out: Record<string, unknown> = {};
+    for (const k of keys) out[k] = unwrapCitations(o[k]);
+    return out;
+  }
+  return v;
+}
+
+/**
  * Flattens a Reducto parse response into a single markdown/text string for the
  * Claude prompts. Tolerant of response-shape variations (chunks with
  * content/embed/text/markdown, nested blocks, or a top-level markdown/content).

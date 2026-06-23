@@ -76,17 +76,17 @@ it's fine to commit.
 The API keys are kept out of the code. Add them to the Worker:
 
 1. Cloudflare → your **invoiceiq** Worker → **Settings → Variables and Secrets**.
-2. **Add** each of these as type **Secret** (encrypted, not "Text"):
+2. **Add** as type **Secret** (encrypted, not "Text"):
    | Name | Value |
    | --- | --- |
-   | `ANTHROPIC_API_KEY` | from console.anthropic.com |
-   | `REDUCTO_API_KEY` | from your Reducto dashboard |
+   | `REDUCTO_API_KEY` | from your Reducto dashboard — **the only required key** |
    | `INGEST_TOKEN` | *(optional)* a long random string — only if using SharePoint ingest |
 3. **Deploy** to apply. (If the Worker was already serving traffic, trigger a
    redeploy: **Deployments → … → Retry**, or push any commit.)
 
-> You don't need `RESEND_API_KEY` — email notifications are optional and the app
-> works fully without them.
+> You do **not** need `ANTHROPIC_API_KEY` — extraction is done by Reducto and
+> routing/GL coding by deterministic rules. You also don't need `RESEND_API_KEY`
+> (email notifications are optional and the app works fully without them).
 
 ## 8. Get your Worker URL
 On the Worker's page (or **Settings → Domains & Routes**) you'll see the address:
@@ -116,9 +116,9 @@ D1/R2 data persist across deploys.
 ## Troubleshooting
 - **Login says "network error":** the Server URL is wrong, or the deploy failed.
   Visit the `…workers.dev` URL directly — it must return the `status: ok` JSON.
-- **Upload fails / "AI processing failed":** a secret is missing or wrong. Re-check
-  `ANTHROPIC_API_KEY` and `REDUCTO_API_KEY` in **Settings → Variables and Secrets**,
-  then redeploy.
+- **Upload fails / "AI processing failed":** the `REDUCTO_API_KEY` secret is
+  missing or wrong. Re-check it in **Settings → Variables and Secrets**, then
+  redeploy.
 - **"D1_ERROR" / no such table:** step 4 didn't run — re-run `schema.sql` in the
   D1 Console.
 - **Build fails:** confirm **Root directory = `worker`** and the D1 **Database ID**

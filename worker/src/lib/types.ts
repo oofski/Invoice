@@ -14,7 +14,8 @@ export interface Env {
   PDFS: R2Bucket;
   REDUCTO_API_KEY: string;
   REDUCTO_BASE_URL?: string;
-  ANTHROPIC_API_KEY: string;
+  /** No longer used — routing + GL coding are deterministic rules + Reducto extract. */
+  ANTHROPIC_API_KEY?: string;
   RESEND_API_KEY: string;
   RESEND_FROM_EMAIL: string;
   SESSION_SECRET?: string;

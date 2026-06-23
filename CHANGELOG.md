@@ -20,11 +20,19 @@ installer on the GitHub Releases page.
   with no local `wrangler` install.
 
 ### Changed
-- **OCR/document parsing switched from AWS Textract to Reducto.** The Worker now
-  uploads the PDF to Reducto and parses it to text/markdown for the Claude
-  prompts; AWS is no longer required. New secret: `REDUCTO_API_KEY` (optional
-  `REDUCTO_BASE_URL`); removed all AWS env/keys. The 3 Claude prompts, routing,
-  GL coding, D1/R2, and the desktop UI are unchanged.
+- **AI pipeline replaced with Reducto `/extract` + a deterministic rules engine
+  — Anthropic/Claude is no longer used.** Reducto now does structured extraction
+  (header fields + line-by-line items, with a best-effort `suggested_category`
+  per line). Business/Class and the approver are decided by deterministic rules
+  (`vendor_mappings` / `location_mappings` + the brief's priority routing).
+  GL coding follows the 5-level hierarchy in code — tax → vendor map → keywords
+  → Reducto's suggestion → entity fallback → `REQUIRES_MANUAL_REVIEW` — so most
+  recurring invoices code with zero AI cost. `ANTHROPIC_API_KEY` is now optional
+  and unused; the only required AI secret is `REDUCTO_API_KEY`. The legacy Claude
+  prompt modules were removed (kept in git history).
+- **OCR/document parsing switched from AWS Textract to Reducto.** AWS is no
+  longer required; removed all AWS env/keys. D1/R2 and the desktop UI are
+  unchanged.
 
 ## [1.0.1] — 2026-06-23
 

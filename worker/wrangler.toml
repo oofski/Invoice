@@ -18,11 +18,11 @@ binding = "PDFS"
 bucket_name = "invoiceiq-pdfs"
 
 # --- Secrets (dashboard: Settings -> Variables and Secrets; or `wrangler secret put`) ---
-# REDUCTO_API_KEY           (document parsing / OCR — reducto.ai)
-# ANTHROPIC_API_KEY         (the 3 Claude prompts)
+# REDUCTO_API_KEY           (REQUIRED — Reducto parse + /extract; reducto.ai)
 # INGEST_TOKEN              (optional — shared secret for SharePoint/Power Automate ingestion)
 # RESEND_API_KEY            (optional — approval/reminder emails)
 # SESSION_SECRET            (optional extra entropy for tokens)
+# ANTHROPIC_API_KEY         (no longer used — routing + GL coding are rules + Reducto extract)
 
 [vars]
 RESEND_FROM_EMAIL = "invoices@example.com"
