@@ -12,9 +12,8 @@ import type {
 export interface Env {
   DB: D1Database;
   PDFS: R2Bucket;
-  AWS_REGION: string;
-  AWS_ACCESS_KEY_ID: string;
-  AWS_SECRET_ACCESS_KEY: string;
+  REDUCTO_API_KEY: string;
+  REDUCTO_BASE_URL?: string;
   ANTHROPIC_API_KEY: string;
   RESEND_API_KEY: string;
   RESEND_FROM_EMAIL: string;

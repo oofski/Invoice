@@ -5,6 +5,15 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [Unreleased]
+
+### Changed
+- **OCR/document parsing switched from AWS Textract to Reducto.** The Worker now
+  uploads the PDF to Reducto and parses it to text/markdown for the Claude
+  prompts; AWS is no longer required. New secret: `REDUCTO_API_KEY` (optional
+  `REDUCTO_BASE_URL`); removed all AWS env/keys. The 3 Claude prompts, routing,
+  GL coding, D1/R2, and the desktop UI are unchanged.
+
 ## [1.0.1] — 2026-06-23
 
 ### Added

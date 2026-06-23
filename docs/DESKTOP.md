@@ -22,11 +22,10 @@ npx wrangler r2 bucket create invoiceiq-pdfs   # PDF object storage (binding PDF
 npm run db:init                           # apply schema + seed to the remote D1
 
 # Secrets (never committed):
-npx wrangler secret put AWS_ACCESS_KEY_ID
-npx wrangler secret put AWS_SECRET_ACCESS_KEY
+npx wrangler secret put REDUCTO_API_KEY      # document parsing / OCR (reducto.ai)
 npx wrangler secret put ANTHROPIC_API_KEY
-npx wrangler secret put RESEND_API_KEY
-# Optional vars in wrangler.toml: AWS_REGION, RESEND_FROM_EMAIL, APP_URL
+npx wrangler secret put RESEND_API_KEY        # optional — only if using email
+# Optional vars in wrangler.toml: REDUCTO_BASE_URL, RESEND_FROM_EMAIL, APP_URL
 
 npm run deploy                            # -> https://invoiceiq.<account>.workers.dev
 ```
