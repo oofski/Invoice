@@ -1,5 +1,13 @@
-import { useState } from "react";
-import { Check, X, ChevronLeft, Calendar, Building2, Inbox } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  Check,
+  X,
+  ChevronLeft,
+  Calendar,
+  Building2,
+  Inbox,
+  RefreshCw,
+} from "lucide-react";
 import { PdfPane } from "@/components/PdfPane";
 import { LineItemsTable } from "@/components/LineItemsTable";
 import { Button, Spinner, EmptyState } from "@/components/ui/primitives";
@@ -18,12 +26,19 @@ interface DetailResponse {
 
 export function ApprovalView({ initialId }: { initialId?: string }) {
   const profile = useProfile();
-  const { data, loading, refetch } = useApi<{ invoices: InvoiceRow[] }>(
+  const { data, loading, error, refetch } = useApi<{ invoices: InvoiceRow[] }>(
     `/api/invoices?status=${INVOICE_STATUS.PENDING_APPROVAL}&limit=500`,
   );
   const [selectedId, setSelectedId] = useState<string | undefined>(initialId);
 
   const invoices = data?.invoices ?? [];
+
+  // No realtime — poll every 15s so newly-routed invoices appear without
+  // reopening the page (mirrors the Dashboard's polling approach).
+  useEffect(() => {
+    const id = setInterval(() => refetch(), 15000);
+    return () => clearInterval(id);
+  }, [refetch]);
 
   return (
     <div className="flex h-screen flex-col lg:flex-row">
@@ -35,13 +50,33 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
         )}
       >
         <div className="border-b border-slate-200 px-4 py-4">
-          <h1 className="text-lg font-bold text-slate-900">Approvals</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-lg font-bold text-slate-900">
+              Pending Approvals
+            </h1>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={loading}
+            >
+              <RefreshCw
+                className={cn("h-4 w-4", loading && "animate-spin")}
+              />
+              Refresh
+            </Button>
+          </div>
           <p className="text-sm text-slate-500">
             {invoices.length} awaiting your decision
           </p>
         </div>
         <div className="scroll-thin h-[calc(100vh-73px)] overflow-y-auto">
-          {loading ? (
+          {error ? (
+            <div className="px-4 py-4 text-sm text-red-600">
+              Couldn&apos;t load approvals: {error}. Check the server connection
+              and try Refresh.
+            </div>
+          ) : loading ? (
             <div className="flex justify-center py-10">
               <Spinner />
             </div>

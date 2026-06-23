@@ -5,6 +5,19 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.0.6] — 2026-06-23
+
+### Added
+- **Refresh on the Approvals screen.** A manual **Refresh** button plus
+  **auto-refresh every 15 seconds**, so an approver sees newly-routed invoices
+  without leaving and reopening the page. The list now also shows a load error
+  if the backend can't be reached (instead of looking like an empty queue).
+- **"Check for invoices" button** in the bottom-left of the sidebar (every
+  screen) that force-refreshes the app to re-scan the server for new invoices
+  and updates.
+- **"Remember me" on the login screen.** Optionally saves your email and
+  password on that device so the sign-in form is pre-filled next time.
+
 ## [1.0.5] — 2026-06-23
 
 ### Added
@@ -116,6 +129,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.0.6]: https://github.com/oofski/Invoice/releases/tag/v1.0.6
 [1.0.5]: https://github.com/oofski/Invoice/releases/tag/v1.0.5
 [1.0.4]: https://github.com/oofski/Invoice/releases/tag/v1.0.4
 [1.0.2]: https://github.com/oofski/Invoice/releases/tag/v1.0.2

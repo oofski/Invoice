@@ -14,6 +14,12 @@ import type { AuthUser } from "@/lib/types";
 
 type Mode = "login" | "bootstrap";
 
+// "Remember me" stores the login on this device (renderer localStorage).
+const REMEMBER_KEY = "iq_remember";
+const REMEMBER_EMAIL = "iq_login_email";
+const REMEMBER_PW = "iq_login_pw";
+const rememberedOn = () => localStorage.getItem(REMEMBER_KEY) === "1";
+
 /** Role -> landing route after login. */
 function landingFor(role: AuthUser["role"]): string {
   switch (role) {
@@ -32,8 +38,13 @@ export default function LoginPage() {
 
   // Shared
   const [serverUrl, setServerUrl] = useState(getApiBase());
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState(() =>
+    rememberedOn() ? localStorage.getItem(REMEMBER_EMAIL) ?? "" : "",
+  );
+  const [password, setPassword] = useState(() =>
+    rememberedOn() ? localStorage.getItem(REMEMBER_PW) ?? "" : "",
+  );
+  const [remember, setRemember] = useState(() => rememberedOn());
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +68,15 @@ export default function LoginPage() {
         { email, password },
       );
       setToken(res.token);
+      if (remember) {
+        localStorage.setItem(REMEMBER_KEY, "1");
+        localStorage.setItem(REMEMBER_EMAIL, email);
+        localStorage.setItem(REMEMBER_PW, password);
+      } else {
+        localStorage.removeItem(REMEMBER_KEY);
+        localStorage.removeItem(REMEMBER_EMAIL);
+        localStorage.removeItem(REMEMBER_PW);
+      }
       if (res.user.must_change_password) {
         navigate("/change-password", { replace: true });
       } else {
@@ -137,6 +157,15 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              />
+              Remember me on this device
+            </label>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <Button type="submit" loading={loading} className="w-full">
               <LogIn className="h-4 w-4" />

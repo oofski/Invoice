@@ -10,6 +10,7 @@ import {
   ScrollText,
   Users,
   Settings,
+  RefreshCw,
   LogOut,
   Menu,
   X,
@@ -122,6 +123,14 @@ export function AppShell() {
         })}
       </nav>
       <div className="border-t border-slate-800 p-3">
+        <button
+          onClick={() => window.location.reload()}
+          title="Re-scan the server for new invoices and updates"
+          className="mb-1 flex w-full items-center gap-2 rounded-lg bg-blue-600/90 px-3 py-2 text-sm font-medium text-white hover:bg-blue-600"
+        >
+          <RefreshCw className="h-4 w-4" />
+          Check for invoices
+        </button>
         <div className="mb-2 px-2">
           <p className="truncate text-sm font-medium text-white">
             {profile.name}
