@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   has_pdf         INTEGER NOT NULL DEFAULT 0,
   submitted_by    TEXT REFERENCES users(id),
   submission_type TEXT NOT NULL DEFAULT 'ACCOUNTANT',
+  split_type      TEXT,                         -- NULL | 'QUICK_EVEN' | 'PER_LINE'
   textract_raw    TEXT,                         -- JSON string
   ai_processed_at TEXT,
   exported_at     TEXT,
@@ -77,6 +78,8 @@ CREATE TABLE IF NOT EXISTS line_items (
   invoice_id          TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
   description         TEXT,
   amount              REAL,
+  business            TEXT,
+  class               TEXT,
   gl_category         TEXT,
   confidence_level    TEXT,
   logic_path          TEXT,
@@ -90,6 +93,22 @@ CREATE TABLE IF NOT EXISTS line_items (
 );
 CREATE INDEX IF NOT EXISTS idx_line_items_invoice ON line_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_line_items_review ON line_items(requires_review);
+
+-- ------------------------------------------------- INVOICE ALLOCATIONS
+-- Quick-even invoice splits: one row per (business:class) the invoice total is
+-- divided across. Per-line splits are stored on line_items.business/class.
+CREATE TABLE IF NOT EXISTS invoice_allocations (
+  id          TEXT PRIMARY KEY,
+  invoice_id  TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  business    TEXT NOT NULL,
+  class       TEXT NOT NULL,
+  percentage  REAL,
+  amount      REAL NOT NULL,
+  gl_account  TEXT,
+  source      TEXT NOT NULL,                    -- e.g. 'QUICK_EVEN'
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_allocations_invoice ON invoice_allocations(invoice_id);
 
 -- ----------------------------------------------------------- APPROVALS
 CREATE TABLE IF NOT EXISTS approvals (
@@ -172,6 +191,7 @@ INSERT OR IGNORE INTO location_mappings (id, address, keywords, business, class,
  ('loc-milwaukee','327 E St Paul 5th Floor','["327 E St Paul 5th Floor","IBW-Milwaukee","IBW Milwaukee"]','IBW','Milwaukee','Kari'),
  ('loc-madison','7021 Tree Ln','["7021 Tree Ln","IBW-Madison","IBW Madison","Madison"]','IBW','Madison','Kari'),
  ('loc-chicago','2828 N Clark St','["2828 N Clark St","Chicago"]','Chicago','Chicago','Bonnie'),
+ ('loc-nala','Nala','["Nala"]','Nala','Nala','Bonnie'),
  ('loc-admin','Admin / Corporate','["Admin","Corporate","Nala"]','Admin','None','None');
 
 INSERT OR IGNORE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES

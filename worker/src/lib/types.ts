@@ -48,6 +48,7 @@ export interface InvoiceRow {
   class: string | null;
   approved_by: string | null;
   status: string;
+  split_type: string | null;
   has_pdf: number;
   submitted_by: string | null;
   submission_type: string;
@@ -63,6 +64,8 @@ export interface LineItemRow {
   invoice_id: string;
   description: string | null;
   amount: number | null;
+  business: string | null;
+  class: string | null;
   gl_category: string | null;
   confidence_level: string | null;
   logic_path: string | null;
@@ -72,6 +75,18 @@ export interface LineItemRow {
   split_parent_id: string | null;
   split_percentage: number | null;
   sort_order: number | null;
+  created_at: string;
+}
+
+export interface InvoiceAllocationRow {
+  id: string;
+  invoice_id: string;
+  business: string;
+  class: string;
+  percentage: number | null;
+  amount: number;
+  gl_account: string | null;
+  source: string;
   created_at: string;
 }
 

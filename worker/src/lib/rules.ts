@@ -159,6 +159,26 @@ export function routeApprover(opts: {
   return { approver: "Bonnie", logic: "CATCH-ALL" };
 }
 
+// ------------------------------------------------------- GL account resolution
+/**
+ * Resolves the GL account to use for an invoice/allocation/line, in priority:
+ *   1. vendor mapping's gl_override (if a valid GL category)
+ *   2. vendor mapping flagged as inventory -> "Retail / Product Costs"
+ *   3. the supplied line GL category (if a valid GL category)
+ *   4. otherwise REQUIRES_MANUAL_REVIEW
+ */
+export function resolveGlAccount(
+  vendorMapping: VendorMappingRow | null | undefined,
+  lineGlCategory?: string | null,
+): string {
+  const ov = vendorMapping?.gl_override;
+  if (ov && GL_CATEGORIES_FLAT.includes(ov)) return ov;
+  if (vendorMapping?.is_inventory) return "Retail / Product Costs";
+  if (lineGlCategory && GL_CATEGORIES_FLAT.includes(lineGlCategory))
+    return lineGlCategory;
+  return REQUIRES_MANUAL_REVIEW;
+}
+
 // ------------------------------------------------------------------- GL coding
 /** The brief's LEVEL 3 keyword rules (kept deliberately small/safe). */
 function keywordCategory(desc: string): string | null {

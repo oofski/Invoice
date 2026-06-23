@@ -1,8 +1,16 @@
-import type { InvoiceRow, LineItemRow } from "./types";
+import type {
+  InvoiceRow,
+  LineItemRow,
+  InvoiceAllocationRow,
+  VendorMappingRow,
+} from "./types";
+import { resolveGlAccount } from "./rules";
 
 /**
  * QuickBooks Online "Bills" import CSV generator (Brief §06). One CSV row per GL
- * line; split parents excluded so amounts reconcile to the invoice total.
+ * line; split parents excluded so amounts reconcile to the invoice total. When
+ * an invoice has been split, the rows reflect the split (one per quick-even
+ * allocation, or one per per-line-coded line item).
  */
 export const QBO_BILLS_HEADER = [
   "Bill No", "Vendor", "Bill Date", "Due Date", "Terms",
@@ -12,6 +20,8 @@ export const QBO_BILLS_HEADER = [
 export interface ExportInvoice {
   invoice: InvoiceRow;
   lineItems: LineItemRow[];
+  allocations?: InvoiceAllocationRow[];
+  vendorMapping?: VendorMappingRow | null;
 }
 
 function field(value: string | number | null | undefined): string {
@@ -40,7 +50,58 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
 } {
   const rows = [QBO_BILLS_HEADER.map(field).join(",")];
   let rowCount = 0;
-  for (const { invoice, lineItems } of invoices) {
+  const memo = (invoice: InvoiceRow) =>
+    `InvoiceIQ export — approved by ${invoice.approved_by ?? "—"}`;
+  const pushRow = (cols: (string | number | null | undefined)[]) => {
+    rows.push(cols.map(field).join(","));
+    rowCount++;
+  };
+
+  for (const { invoice, lineItems, allocations, vendorMapping } of invoices) {
+    // ---- QUICK_EVEN: one row per allocation -----------------------------
+    if (allocations && allocations.length > 0) {
+      for (const a of allocations) {
+        pushRow([
+          invoice.invoice_number,
+          invoice.vendor,
+          toQboDate(invoice.inv_date),
+          toQboDate(invoice.due_date),
+          "Net 30",
+          a.gl_account ?? "",
+          `Even split — ${a.class} (${(a.percentage ?? 0)}%)`,
+          a.amount.toFixed(2),
+          `${a.business}:${a.class}`,
+          memo(invoice),
+        ]);
+      }
+      continue;
+    }
+
+    // ---- PER_LINE: any line item carries a business/class --------------
+    const coded = lineItems.filter((li) => li.business && li.class);
+    if (coded.length > 0) {
+      for (const li of leaves(coded)) {
+        const account =
+          li.gl_category ?? resolveGlAccount(vendorMapping, li.gl_category);
+        pushRow([
+          invoice.invoice_number,
+          invoice.vendor,
+          toQboDate(invoice.inv_date),
+          toQboDate(invoice.due_date),
+          "Net 30",
+          account,
+          li.description ?? "",
+          (li.amount ?? 0).toFixed(2),
+          li.class && li.class !== "None"
+            ? `${li.business}:${li.class}`
+            : (li.business ?? ""),
+          memo(invoice),
+        ]);
+      }
+      continue;
+    }
+
+    // ---- Default: existing behavior unchanged --------------------------
     const leaf = leaves(lineItems);
     const lines =
       leaf.length > 0
@@ -53,25 +114,20 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
             } as Partial<LineItemRow>,
           ];
     for (const li of lines) {
-      rows.push(
-        [
-          invoice.invoice_number,
-          invoice.vendor,
-          toQboDate(invoice.inv_date),
-          toQboDate(invoice.due_date),
-          "Net 30",
-          li.gl_category ?? "",
-          li.description ?? "",
-          (li.amount ?? 0).toFixed(2),
-          invoice.class && invoice.class !== "None"
-            ? `${invoice.business}:${invoice.class}`
-            : (invoice.business ?? ""),
-          `InvoiceIQ export — approved by ${invoice.approved_by ?? "—"}`,
-        ]
-          .map(field)
-          .join(","),
-      );
-      rowCount++;
+      pushRow([
+        invoice.invoice_number,
+        invoice.vendor,
+        toQboDate(invoice.inv_date),
+        toQboDate(invoice.due_date),
+        "Net 30",
+        li.gl_category ?? "",
+        li.description ?? "",
+        (li.amount ?? 0).toFixed(2),
+        invoice.class && invoice.class !== "None"
+          ? `${invoice.business}:${invoice.class}`
+          : (invoice.business ?? ""),
+        memo(invoice),
+      ]);
     }
   }
   return { csv: rows.join("\r\n"), rowCount };

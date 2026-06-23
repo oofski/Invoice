@@ -6,6 +6,7 @@ import type {
   UserRow,
 } from "./types";
 import { uuid, parseJson } from "./util";
+import { ROLES } from "./constants";
 
 /** Writes one audit_log row (Brief §13 — audit every state change). */
 export async function audit(
@@ -39,13 +40,23 @@ export async function audit(
   }
 }
 
-/** Converts a D1 line item row to an API-friendly object (booleans, etc.). */
-export function hydrateLineItem(li: LineItemRow) {
-  return {
+/**
+ * Converts a D1 line item row to an API-friendly object (booleans, etc.).
+ * When `role` is EXECUTIVE the GL coding fields (gl_category, confidence_level,
+ * logic_path) are omitted — executives never see the GL coding.
+ */
+export function hydrateLineItem(li: LineItemRow, role?: string) {
+  const out = {
     ...li,
     requires_review: !!li.requires_review,
     manually_overridden: !!li.manually_overridden,
   };
+  if (role === ROLES.EXECUTIVE) {
+    out.gl_category = null;
+    out.confidence_level = null;
+    out.logic_path = null;
+  }
+  return out;
 }
 
 export function hydrateInvoice(inv: InvoiceRow) {
@@ -70,6 +81,7 @@ export async function getInvoiceWithRelations(
   env: Env,
   id: string,
   includeAudit = false,
+  role?: string,
 ) {
   const invoice = await getInvoice(env, id);
   if (!invoice) return null;
@@ -111,7 +123,7 @@ export async function getInvoiceWithRelations(
 
   return {
     ...hydrateInvoice(invoice),
-    line_items: (lineItems.results ?? []).map(hydrateLineItem),
+    line_items: (lineItems.results ?? []).map((li) => hydrateLineItem(li, role)),
     approval: approval ?? null,
     submitter,
     ...(includeAudit ? { audit_log: auditLog } : {}),

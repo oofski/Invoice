@@ -12,15 +12,26 @@ import {
 import { processInvoiceAI, ingestInvoicePdf } from "../lib/process";
 import { getPdf, deletePdf } from "../lib/storage";
 import { sendReminderEmail, sendRejectionEmail } from "../lib/email";
-import { nowIso, hoursSince, sameName } from "../lib/util";
+import { nowIso, hoursSince, sameName, uuid } from "../lib/util";
+import {
+  findVendorMapping,
+  loadVendorMappings,
+  resolveGlAccount,
+} from "../lib/rules";
 import {
   AUDIT_ACTION,
   APPROVAL_STATUS,
+  BUSINESS_CLASSES,
   INVOICE_STATUS,
   OVERDUE_HOURS,
   ROLES,
 } from "../lib/constants";
-import type { InvoiceRow, ApprovalRow, UserRow } from "../lib/types";
+import type {
+  InvoiceRow,
+  ApprovalRow,
+  UserRow,
+  InvoiceAllocationRow,
+} from "../lib/types";
 
 export const invoices = new Hono<AppEnv>();
 
@@ -185,7 +196,7 @@ invoices.get("/:id/pdf", async (c) => {
 // ----- GET /:id --------------------------------------------------------
 invoices.get("/:id", async (c) => {
   const id = c.req.param("id");
-  const invoice = await getInvoiceWithRelations(c.env, id, true);
+  const invoice = await getInvoiceWithRelations(c.env, id, true, user(c).role);
   if (!invoice) return c.json({ error: "Not found" }, 404);
   if (!canViewInvoice(c, invoice)) return c.json({ error: "Forbidden" }, 403);
   return c.json({ invoice });
@@ -278,20 +289,200 @@ invoices.post("/:id/approve", async (c) => {
   if (inv.status === INVOICE_STATUS.EXPORTED)
     return c.json({ error: "Invoice already exported" }, 409);
 
+  const body = await c.req.json().catch(() => ({}));
+  const comment = (body as { comment?: string }).comment?.trim();
+
   await c.env.DB.prepare("UPDATE invoices SET status = ? WHERE id = ?")
     .bind(INVOICE_STATUS.APPROVED, id)
     .run();
-  await c.env.DB.prepare(
-    "UPDATE approvals SET status = ?, decided_at = ? WHERE invoice_id = ?",
-  )
-    .bind(APPROVAL_STATUS.APPROVED, nowIso(), id)
-    .run();
+  if (comment) {
+    await c.env.DB.prepare(
+      "UPDATE approvals SET status = ?, decision_note = ?, decided_at = ? WHERE invoice_id = ?",
+    )
+      .bind(APPROVAL_STATUS.APPROVED, comment, nowIso(), id)
+      .run();
+  } else {
+    await c.env.DB.prepare(
+      "UPDATE approvals SET status = ?, decided_at = ? WHERE invoice_id = ?",
+    )
+      .bind(APPROVAL_STATUS.APPROVED, nowIso(), id)
+      .run();
+  }
   await audit(c.env, {
     invoiceId: id, userId: u.id, action: AUDIT_ACTION.APPROVED,
     prevValue: { status: inv.status }, newValue: { status: INVOICE_STATUS.APPROVED },
-    note: `Approved by ${u.name}`,
+    note: comment ? `Approved by ${u.name}: ${comment}` : `Approved by ${u.name}`,
   });
   return c.json({ status: INVOICE_STATUS.APPROVED });
+});
+
+// ----- shared: gate split routes to assigned executive or admin ---------
+function canSplit(c: import("hono").Context<AppEnv>, inv: InvoiceRow): boolean {
+  const u = user(c);
+  if (u.role === ROLES.ADMIN) return true;
+  return u.role === ROLES.EXECUTIVE && sameName(inv.approved_by, u.name);
+}
+
+/** Rounds to cents (2 dp). */
+function roundCents(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// ----- POST /:id/split-even -------------------------------------------
+invoices.post("/:id/split-even", async (c) => {
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+  if (!canSplit(c, inv))
+    return c.json({ error: "Only the assigned executive can split" }, 403);
+
+  const classes = BUSINESS_CLASSES[inv.business ?? ""] ?? [];
+  if (classes.length < 2)
+    return c.json(
+      { error: "Nothing to split — this business has a single class" },
+      400,
+    );
+
+  const vendorMapping = findVendorMapping(
+    inv.vendor,
+    await loadVendorMappings(c.env),
+  );
+  const glAccount = resolveGlAccount(vendorMapping);
+
+  // Clear any existing split state.
+  await c.env.DB.prepare(
+    "DELETE FROM invoice_allocations WHERE invoice_id = ?",
+  ).bind(id).run();
+  await c.env.DB.prepare(
+    "UPDATE line_items SET business = NULL, class = NULL WHERE invoice_id = ?",
+  ).bind(id).run();
+
+  const n = classes.length;
+  const total = inv.total_amount;
+  const per = roundCents(total / n);
+  const pct = roundCents(100 / n);
+
+  const allocations: InvoiceAllocationRow[] = [];
+  let runningSum = 0;
+  const at = nowIso();
+  for (let i = 0; i < n; i++) {
+    const isLast = i === n - 1;
+    // Last row absorbs the rounding remainder so the sum equals total exactly.
+    const amount = isLast ? roundCents(total - runningSum) : per;
+    runningSum = roundCents(runningSum + amount);
+    const row: InvoiceAllocationRow = {
+      id: uuid(),
+      invoice_id: id,
+      business: inv.business ?? "",
+      class: classes[i],
+      percentage: pct,
+      amount,
+      gl_account: glAccount,
+      source: "QUICK_EVEN",
+      created_at: at,
+    };
+    allocations.push(row);
+    await c.env.DB.prepare(
+      `INSERT INTO invoice_allocations
+         (id, invoice_id, business, class, percentage, amount, gl_account, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        row.id, row.invoice_id, row.business, row.class,
+        row.percentage, row.amount, row.gl_account, row.source, row.created_at,
+      )
+      .run();
+  }
+
+  await c.env.DB.prepare("UPDATE invoices SET split_type = ? WHERE id = ?")
+    .bind("QUICK_EVEN", id)
+    .run();
+
+  await audit(c.env, {
+    invoiceId: id, userId: user(c).id, action: AUDIT_ACTION.INVOICE_SPLIT,
+    newValue: { split_type: "QUICK_EVEN", classes },
+    note: `Even split across ${n} classes by ${user(c).name}`,
+  });
+
+  return c.json({ allocations });
+});
+
+// ----- POST /:id/split-lines ------------------------------------------
+invoices.post("/:id/split-lines", async (c) => {
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+  if (!canSplit(c, inv))
+    return c.json({ error: "Only the assigned executive can split" }, 403);
+
+  const body = await c.req.json().catch(() => ({}));
+  const lines = (body as {
+    lines?: { lineItemId: string; business: string; class: string }[];
+  }).lines;
+  if (!Array.isArray(lines) || lines.length === 0)
+    return c.json({ error: "lines required" }, 400);
+
+  // Validate every line first (all-or-nothing).
+  for (const l of lines) {
+    const valid = BUSINESS_CLASSES[l.business] ?? [];
+    if (!valid.includes(l.class))
+      return c.json(
+        { error: `Invalid class "${l.class}" for business "${l.business}"` },
+        400,
+      );
+  }
+
+  for (const l of lines) {
+    await c.env.DB.prepare(
+      "UPDATE line_items SET business = ?, class = ? WHERE id = ? AND invoice_id = ?",
+    )
+      .bind(l.business, l.class, l.lineItemId, id)
+      .run();
+  }
+
+  // Per-line splits supersede any quick-even allocations.
+  await c.env.DB.prepare(
+    "DELETE FROM invoice_allocations WHERE invoice_id = ?",
+  ).bind(id).run();
+
+  await c.env.DB.prepare("UPDATE invoices SET split_type = ? WHERE id = ?")
+    .bind("PER_LINE", id)
+    .run();
+
+  await audit(c.env, {
+    invoiceId: id, userId: user(c).id, action: AUDIT_ACTION.INVOICE_SPLIT,
+    newValue: { split_type: "PER_LINE", lines },
+    note: `Per-line split (${lines.length} lines) by ${user(c).name}`,
+  });
+
+  return c.json({ ok: true });
+});
+
+// ----- DELETE /:id/split ----------------------------------------------
+invoices.delete("/:id/split", async (c) => {
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+  if (!canSplit(c, inv))
+    return c.json({ error: "Only the assigned executive can split" }, 403);
+
+  await c.env.DB.prepare(
+    "DELETE FROM invoice_allocations WHERE invoice_id = ?",
+  ).bind(id).run();
+  await c.env.DB.prepare(
+    "UPDATE line_items SET business = NULL, class = NULL WHERE invoice_id = ?",
+  ).bind(id).run();
+  await c.env.DB.prepare("UPDATE invoices SET split_type = NULL WHERE id = ?")
+    .bind(id)
+    .run();
+
+  await audit(c.env, {
+    invoiceId: id, userId: user(c).id, action: AUDIT_ACTION.SPLIT_CLEARED,
+    prevValue: { split_type: inv.split_type },
+    note: `Split cleared by ${user(c).name}`,
+  });
+
+  return c.json({ ok: true });
 });
 
 // ----- POST /:id/reject -----------------------------------------------

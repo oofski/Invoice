@@ -87,6 +87,7 @@ export const BUSINESS_ENTITIES = [
   "IBW",
   "Chicago",
   "Admin",
+  "Nala",
 ] as const;
 export type BusinessEntity = (typeof BUSINESS_ENTITIES)[number];
 
@@ -101,9 +102,25 @@ export const CLASSES = [
   "Milwaukee",
   "Madison",
   "Chicago",
+  "Nala",
+  "Admin",
   "None",
 ] as const;
 export type ClassName = (typeof CLASSES)[number];
+
+/**
+ * The set of classes that belong to each business entity. Used to drive
+ * invoice-splitting (split-even fans an invoice across these classes; split-
+ * lines validates that each line's class belongs to its business).
+ */
+export const BUSINESS_CLASSES: Record<string, string[]> = {
+  Neroli: ["Mequon", "Downtown", "Eastside", "North Shore", "Brookfield"],
+  SKNBar: ["Shorewood", "Pewaukee"],
+  IBW: ["Milwaukee", "Madison"],
+  Chicago: ["Chicago"],
+  Admin: ["Admin"],
+  Nala: ["Nala"],
+};
 
 export const APPROVERS = ["Lori", "Lisa", "Kari", "Bonnie", "Susan"] as const;
 export type Approver = (typeof APPROVERS)[number];
@@ -339,6 +356,8 @@ export const AUDIT_ACTION = {
   EXPORTED: "EXPORTED",
   INVOICE_UPDATED: "INVOICE_UPDATED",
   INVOICE_DELETED: "INVOICE_DELETED",
+  INVOICE_SPLIT: "INVOICE_SPLIT",
+  SPLIT_CLEARED: "SPLIT_CLEARED",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

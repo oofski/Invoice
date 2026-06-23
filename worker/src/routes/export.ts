@@ -3,9 +3,15 @@ import type { AppEnv } from "./helpers";
 import { user, isStaffOrAdmin } from "./helpers";
 import { audit } from "../lib/db";
 import { generateQboBillsCsv, buildExportFilename, type ExportInvoice } from "../lib/export";
+import { findVendorMapping, loadVendorMappings } from "../lib/rules";
 import { uuid, nowIso } from "../lib/util";
 import { INVOICE_STATUS, AUDIT_ACTION } from "../lib/constants";
-import type { InvoiceRow, LineItemRow, UserRow } from "../lib/types";
+import type {
+  InvoiceRow,
+  LineItemRow,
+  UserRow,
+  InvoiceAllocationRow,
+} from "../lib/types";
 
 export const exportRoutes = new Hono<AppEnv>();
 
@@ -96,9 +102,23 @@ exportRoutes.post("/", async (c) => {
     arr.push(li);
     byInvoice.set(li.invoice_id, arr);
   }
+
+  const allocRows = await c.env.DB.prepare(
+    `SELECT * FROM invoice_allocations WHERE invoice_id IN (${ph})`,
+  ).bind(...invoiceIds).all<InvoiceAllocationRow>();
+  const allocByInvoice = new Map<string, InvoiceAllocationRow[]>();
+  for (const a of allocRows.results ?? []) {
+    const arr = allocByInvoice.get(a.invoice_id) ?? [];
+    arr.push(a);
+    allocByInvoice.set(a.invoice_id, arr);
+  }
+
+  const vendorMappings = await loadVendorMappings(c.env);
   const exportInvoices: ExportInvoice[] = invoices.map((invoice) => ({
     invoice,
     lineItems: byInvoice.get(invoice.id) ?? [],
+    allocations: allocByInvoice.get(invoice.id) ?? [],
+    vendorMapping: findVendorMapping(invoice.vendor, vendorMappings),
   }));
 
   const { csv, rowCount } = generateQboBillsCsv(exportInvoices);
