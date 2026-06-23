@@ -1,0 +1,22 @@
+{
+  "name": "invoiceiq-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:init": "wrangler d1 execute invoiceiq --file=./src/db/schema.sql",
+    "db:init:local": "wrangler d1 execute invoiceiq --local --file=./src/db/schema.sql"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "aws4fetch": "^1.0.20"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^3.95.0"
+  }
+}

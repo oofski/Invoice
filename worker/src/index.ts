@@ -1,0 +1,49 @@
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import type { AppEnv } from "./routes/helpers";
+import { userFromToken, bearer } from "./lib/auth";
+import { authPublic, authProtected } from "./routes/auth";
+import { invoices } from "./routes/invoices";
+import { lineItems } from "./routes/lineItems";
+import { exportRoutes } from "./routes/export";
+import { vendors } from "./routes/vendors";
+import { audit } from "./routes/audit";
+import { dashboard } from "./routes/dashboard";
+import { users } from "./routes/users";
+
+/**
+ * InvoiceIQ Cloudflare Worker — the backend + D1 database for the desktop app.
+ * Bearer-token auth (no cookies), so permissive CORS is safe for the Electron
+ * renderer (which has a file:// / null origin).
+ */
+const app = new Hono<AppEnv>();
+
+app.use("*", cors({ origin: "*", allowHeaders: ["Content-Type", "Authorization"], allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
+
+app.get("/", (c) => c.json({ name: "InvoiceIQ API", status: "ok" }));
+
+// Public auth endpoints.
+app.route("/api/auth", authPublic);
+
+// Auth gate for everything below.
+app.use("/api/*", async (c, next) => {
+  // public auth routes already handled above; re-check to allow them through.
+  const path = new URL(c.req.url).pathname;
+  if (path === "/api/auth/login" || path === "/api/auth/bootstrap") return next();
+  const u = await userFromToken(c.env, bearer(c.req.header("authorization")));
+  if (!u) return c.json({ error: "Not authenticated" }, 401);
+  c.set("user", u);
+  await next();
+});
+
+// Protected routes.
+app.route("/api/auth", authProtected);
+app.route("/api/invoices", invoices);
+app.route("/api/line-items", lineItems);
+app.route("/api/export", exportRoutes);
+app.route("/api/vendors", vendors);
+app.route("/api/audit", audit);
+app.route("/api/dashboard", dashboard);
+app.route("/api/users", users);
+
+export default app;

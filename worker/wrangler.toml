@@ -1,0 +1,31 @@
+name = "invoiceiq"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# --- D1 database binding (Brief data store, now on Cloudflare D1) ---
+# Create the DB once with:  wrangler d1 create invoiceiq
+# then paste the returned database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "invoiceiq"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+# --- R2 bucket binding (invoice PDF storage) ---
+# Create the bucket once with:  wrangler r2 bucket create invoiceiq-pdfs
+[[r2_buckets]]
+binding = "PDFS"
+bucket_name = "invoiceiq-pdfs"
+
+# --- Secrets (set with `wrangler secret put <NAME>`; never commit) ---
+# AWS_ACCESS_KEY_ID
+# AWS_SECRET_ACCESS_KEY
+# ANTHROPIC_API_KEY
+# RESEND_API_KEY
+# SESSION_SECRET            (optional extra entropy for tokens)
+
+[vars]
+AWS_REGION = "us-east-1"
+RESEND_FROM_EMAIL = "invoices@example.com"
+# APP_URL is informational (used in emails); the desktop app is the primary client.
+APP_URL = "https://invoiceiq.example.com"
