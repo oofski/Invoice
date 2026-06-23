@@ -5,6 +5,33 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.0.9] — 2026-06-23
+
+### Added
+- **Easier PDF viewing for approvers.** When an executive (or anyone) opens an
+  invoice, the PDF pane now has **zoom in / zoom out** (50%–400%), **rotate 90°**,
+  and **Fit / Reset** buttons, and you can **scroll/pan** a zoomed page. This
+  makes line-by-line splitting on dense invoices much easier to read.
+- **Cross-entity quick split.** The Split screen's quick split is now a
+  **flexible % builder**: it pre-fills the invoice's business classes split
+  evenly, but you can change any percentage and **"Add target"** to send part of
+  the split to a *different entity* — e.g. an IBW invoice where part of the
+  thirds goes to **Chicago** (a separate EIN). Save is enabled only when the
+  percentages total 100 and every row has a business + class. On export these
+  fan out to the correct entity tab(s) with unique bill numbers.
+- **Per-line "Type" in line-by-line split.** Each line can be tagged
+  **Backbar**, **Retail**, **Equipment**, or **Other** (type-in). The GL account
+  is derived automatically from the Type — Backbar → *Service Costs*,
+  Retail → *Retail / Product Costs*, Equipment → *Equipment & Fixtures*; **Other**
+  flags the line for manual GL review. Executives set the Type but still never
+  see the GL account.
+
+### Changed
+- Extends the **D1 migration** with `line_items.item_type` (the prior
+  `invoice_allocations` table + `line_items.business/class` + `invoices.split_type`
+  are still required). Basic per-line split and existing flows stay safe before
+  the migration is run; cross-entity and typed splits need it.
+
 ## [1.0.8] — 2026-06-23
 
 ### Added
@@ -165,6 +192,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.0.9]: https://github.com/oofski/Invoice/releases/tag/v1.0.9
 [1.0.8]: https://github.com/oofski/Invoice/releases/tag/v1.0.8
 [1.0.7]: https://github.com/oofski/Invoice/releases/tag/v1.0.7
 [1.0.6]: https://github.com/oofski/Invoice/releases/tag/v1.0.6
