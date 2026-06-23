@@ -57,6 +57,27 @@ npm run dist            # -> desktop/release/InvoiceIQ Setup 1.0.0.exe
 (On Linux/macOS you can only produce an unpacked build via `npm run dist:dir`;
 the signed NSIS `.exe` requires a Windows runner.)
 
+## Auto-update (built in)
+
+The app self-updates via `electron-updater` reading the GitHub Release feed:
+
+- On launch and every 6 hours, an installed copy checks the repo's Releases for
+  a higher version. If found, it downloads in the background and prompts the
+  user to **Restart now** to install (or installs on next quit).
+- This works automatically for **public** repos. For a **private** repo,
+  electron-updater needs a read token to fetch releases — either make Releases
+  public or host a generic update feed.
+
+### Shipping a new version (e.g. 1.0.2)
+1. Bump `version` in `desktop/package.json`.
+2. Commit, then tag and push:
+   ```bash
+   git tag v1.0.2 && git push origin v1.0.2
+   ```
+3. CI builds and publishes the new installer + `latest.yml` to the Release.
+   Every installed app picks it up automatically within 6 hours (or on next
+   launch) — no manual re-download needed.
+
 ## 3. First run
 
 1. Install and launch InvoiceIQ.

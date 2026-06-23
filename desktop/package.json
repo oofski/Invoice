@@ -1,14 +1,18 @@
 {
   "name": "invoiceiq-desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "electron/main.js",
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
     "build:renderer": "npm --prefix renderer install && npm --prefix renderer run build",
     "dist": "npm run build:renderer && electron-builder --win nsis --publish never",
-    "dist:dir": "npm run build:renderer && electron-builder --win dir --publish never"
+    "dist:dir": "npm run build:renderer && electron-builder --win dir --publish never",
+    "release": "npm run build:renderer && electron-builder --win nsis --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "electron": "^33",
@@ -37,6 +41,14 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "InvoiceIQ"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "oofski",
+        "repo": "Invoice",
+        "releaseType": "release"
+      }
+    ]
   }
 }
