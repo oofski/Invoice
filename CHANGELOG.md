@@ -5,6 +5,21 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.0.8] — 2026-06-23
+
+### Added
+- **"Factor invoices for bill import"** (Export screen, accountant/admin). One
+  click turns the selected approved invoices into a **QuickBooks "Import Bills"
+  workbook (.xlsx) with one tab per business entity** (Neroli, SKNBarRx, IBW,
+  Chicago, Nala, Admin — only entities that have bills get a tab). Each tab is
+  in QBO's exact bill-import format: multi-line bills share one Bill Number with
+  the header fields blank on follow-on rows, `Category Details` rows carry the
+  GL account + amount, and the **Class** column is `business:class`. Split
+  invoices fan out to the correct entity tab(s) with unique bill numbers
+  (e.g. `1001-IBW`); sales tax is added as a reconciling line. Factoring marks
+  the invoices Exported and logs to export history, like the CSV export. The
+  workbook is generated client-side (SheetJS); the existing CSV export remains.
+
 ## [1.0.7] — 2026-06-23
 
 ### Added
@@ -150,6 +165,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.0.8]: https://github.com/oofski/Invoice/releases/tag/v1.0.8
 [1.0.7]: https://github.com/oofski/Invoice/releases/tag/v1.0.7
 [1.0.6]: https://github.com/oofski/Invoice/releases/tag/v1.0.6
 [1.0.5]: https://github.com/oofski/Invoice/releases/tag/v1.0.5
