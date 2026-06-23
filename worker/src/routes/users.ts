@@ -77,6 +77,26 @@ users.patch("/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// POST /:id/reset-password — issue a new temporary password (admin only)
+users.post("/:id/reset-password", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN)) return c.json({ error: "Forbidden" }, 403);
+  const id = c.req.param("id");
+  const target = await c.env.DB.prepare("SELECT id FROM users WHERE id = ?")
+    .bind(id)
+    .first<{ id: string }>();
+  if (!target) return c.json({ error: "Not found" }, 404);
+
+  const tempPassword = uuid().slice(0, 10) + "A9!";
+  const { hash, salt } = await hashPassword(tempPassword);
+  await c.env.DB.prepare(
+    "UPDATE users SET password_hash=?, password_salt=?, must_change_password=1 WHERE id=?",
+  )
+    .bind(hash, salt, id)
+    .run();
+  // Returned to the admin to share securely; the user must change it on login.
+  return c.json({ tempPassword });
+});
+
 // DELETE /:id — remove a user (admin only)
 users.delete("/:id", async (c) => {
   if (!hasRole(c, ROLES.ADMIN)) return c.json({ error: "Forbidden" }, 403);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { UserPlus, Copy, Check, Trash2 } from "lucide-react";
+import { UserPlus, Copy, Check, Trash2, KeyRound } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import {
   Card,
@@ -25,6 +25,8 @@ export default function AdminUsersPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [resetInfo, setResetInfo] = useState<{ name: string; password: string } | null>(null);
+  const [resetCopied, setResetCopied] = useState(false);
 
   const users = data?.users ?? [];
 
@@ -76,6 +78,38 @@ export default function AdminUsersPage() {
       toast.error(err instanceof ApiError ? err.message : "Update failed");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function resetPassword(u: UserRow) {
+    if (
+      !window.confirm(
+        `Reset ${u.name}'s password? They'll get a new temporary password and must change it on next login.`,
+      )
+    )
+      return;
+    setBusyId(u.id);
+    try {
+      const res = await api.post<{ tempPassword: string }>(
+        `/api/users/${u.id}/reset-password`,
+      );
+      setResetInfo({ name: u.name, password: res.tempPassword });
+      setResetCopied(false);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Reset failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function copyResetTemp() {
+    if (!resetInfo) return;
+    try {
+      await navigator.clipboard.writeText(resetInfo.password);
+      setResetCopied(true);
+      setTimeout(() => setResetCopied(false), 1500);
+    } catch {
+      toast.error("Copy failed — select the password manually");
     }
   }
 
@@ -204,18 +238,28 @@ export default function AdminUsersPage() {
                         </button>
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => deleteUser(u)}
-                          disabled={busyId === u.id || u.id === profile.id}
-                          title={
-                            u.id === profile.id
-                              ? "You can't delete your own account"
-                              : "Delete user"
-                          }
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" /> Delete
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => resetPassword(u)}
+                            disabled={busyId === u.id}
+                            title="Reset password"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <KeyRound className="h-3.5 w-3.5" /> Reset
+                          </button>
+                          <button
+                            onClick={() => deleteUser(u)}
+                            disabled={busyId === u.id || u.id === profile.id}
+                            title={
+                              u.id === profile.id
+                                ? "You can't delete your own account"
+                                : "Delete user"
+                            }
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -225,6 +269,47 @@ export default function AdminUsersPage() {
           )}
         </Card>
       </div>
+
+      <Modal
+        open={!!resetInfo}
+        onClose={() => {
+          setResetInfo(null);
+          setResetCopied(false);
+        }}
+        title="Password reset"
+      >
+        {resetInfo && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              New temporary password for <strong>{resetInfo.name}</strong>. Share
+              it securely — they'll be asked to change it on next sign-in.
+            </p>
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <code className="flex-1 break-all font-mono text-sm text-slate-800">
+                {resetInfo.password}
+              </code>
+              <Button size="sm" variant="secondary" onClick={copyResetTemp}>
+                {resetCopied ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+                {resetCopied ? "Copied" : "Copy"}
+              </Button>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                onClick={() => {
+                  setResetInfo(null);
+                  setResetCopied(false);
+                }}
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal open={addOpen} onClose={closeAdd} title="Create user">
         {tempPassword ? (

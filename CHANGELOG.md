@@ -19,6 +19,10 @@ installer on the GitHub Releases page.
   audit entry) and delete a user (User Management → Delete; nulls out their
   invoice/approval/export references and removes sessions). Guards prevent
   deleting your own account or the last active admin.
+- **Admin password reset.** User Management → Reset issues a new temporary
+  password for any user (shown to the admin to share; the user must change it on
+  next login). Secure by design — only admins can reset, so no name-based
+  self-service takeover risk.
 
 ## [1.0.2] — 2026-06-23
 
