@@ -1,6 +1,12 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Download, AlertTriangle, FileDown, History } from "lucide-react";
+import {
+  Download,
+  AlertTriangle,
+  FileDown,
+  History,
+  FileSpreadsheet,
+} from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Button, Spinner, EmptyState } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
@@ -8,8 +14,9 @@ import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import { INVOICE_STATUS } from "@/lib/constants";
+import { buildBillWorkbook } from "@/lib/workbook";
 import type { QueueInvoice } from "@/components/InvoiceTable";
-import type { ExportRow } from "@/lib/types";
+import type { ExportRow, FactorResponse } from "@/lib/types";
 
 function downloadBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob);
@@ -34,6 +41,7 @@ export default function ExportPage() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [factoring, setFactoring] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const invoices = data?.invoices ?? [];
@@ -88,6 +96,29 @@ export default function ExportPage() {
     }
   }
 
+  async function runFactor() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setFactoring(true);
+    try {
+      const res = await api.post<FactorResponse>("/api/export/factor", {
+        invoiceIds: ids,
+      });
+      const blob = buildBillWorkbook(res.entities, res.header);
+      downloadBlob(blob, res.fileName);
+      toast.success(
+        `Factored ${res.invoiceCount} invoices into ${res.entities.length} entity tab(s)`,
+      );
+      setSelected(new Set());
+      refetch();
+      refetchHistory();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Factoring failed");
+    } finally {
+      setFactoring(false);
+    }
+  }
+
   async function reDownload(row: ExportRow) {
     setDownloadingId(row.id);
     try {
@@ -106,14 +137,25 @@ export default function ExportPage() {
         title="Batch Export"
         subtitle="Generate a QuickBooks Bills import file for approved invoices"
         actions={
-          <Button
-            onClick={runExport}
-            loading={exporting}
-            disabled={selected.size === 0}
-          >
-            <Download className="h-4 w-4" />
-            Export {selected.size > 0 ? `(${selected.size})` : ""}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={runExport}
+              loading={exporting}
+              disabled={selected.size === 0}
+            >
+              <Download className="h-4 w-4" />
+              Export {selected.size > 0 ? `(${selected.size})` : ""}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={runFactor}
+              loading={factoring}
+              disabled={selected.size === 0}
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Factor invoices for bill import
+            </Button>
+          </div>
         }
       />
 

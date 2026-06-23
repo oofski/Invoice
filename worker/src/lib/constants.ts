@@ -91,6 +91,31 @@ export const BUSINESS_ENTITIES = [
 ] as const;
 export type BusinessEntity = (typeof BUSINESS_ENTITIES)[number];
 
+/**
+ * Display label for a business entity. The canonical entity name (used as the
+ * DB value and the `entity` field in exports) maps to a human-facing display
+ * name used for worksheet/tab names and QBO Class prefixes. Only SKNBar differs
+ * ("SKNBarRx"); all others display as themselves.
+ */
+export const ENTITY_LABEL: Record<string, string> = {
+  Neroli: "Neroli",
+  SKNBar: "SKNBarRx",
+  IBW: "IBW",
+  Chicago: "Chicago",
+  Admin: "Admin",
+  Nala: "Nala",
+};
+
+/** Short entity code used to disambiguate per-line fan-out bill numbers. */
+export const ENTITY_CODE: Record<string, string> = {
+  Neroli: "NER",
+  SKNBar: "SKN",
+  IBW: "IBW",
+  Chicago: "CHI",
+  Nala: "NALA",
+  Admin: "ADM",
+};
+
 export const CLASSES = [
   "Mequon",
   "Downtown",

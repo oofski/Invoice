@@ -124,6 +124,26 @@ export interface ExportRow {
   exported_by_name?: string;
 }
 
+/**
+ * One entity's worth of QBO bill-import rows, destined for its own .xlsx tab.
+ * Each row is keyed by the exact column names in `FactorResponse.header`.
+ */
+export interface EntitySheet {
+  entity: string;
+  sheetName: string;
+  rows: Record<string, string>[];
+}
+
+/** Response from `POST /api/export/factor` — a multi-tab QBO bill workbook. */
+export interface FactorResponse {
+  entities: EntitySheet[];
+  header: string[];
+  fileName: string;
+  totalRowCount: number;
+  invoiceCount: number;
+  exportId: string;
+}
+
 // ---------------------------------------------------------------------------
 // API response shapes (frontend contract)
 // ---------------------------------------------------------------------------

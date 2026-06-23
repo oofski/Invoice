@@ -147,6 +147,22 @@ export interface PipelineResult {
   finalApprover: Approver;
 }
 
+/**
+ * A single row in the QuickBooks Online "Import Bills" sheet, keyed by the exact
+ * ordered QBO column strings (see QBO_BILL_HEADER in export.ts). All values are
+ * strings; blank cells are "".
+ */
+export type QboBillRow = Record<string, string>;
+
+/** One logical QBO import sheet per business entity. */
+export interface EntitySheet {
+  /** Canonical business entity name (DB value). */
+  entity: string;
+  /** Display label used for the worksheet/tab name. */
+  sheetName: string;
+  rows: QboBillRow[];
+}
+
 /** The authenticated user attached to the Hono context. */
 export interface AuthUser {
   id: string;
