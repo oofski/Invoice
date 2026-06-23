@@ -1,5 +1,5 @@
 import type { Env, InvoiceRow } from "./types";
-import { runTextract, parseTextract, formatForClaude } from "./textract";
+import { ocrPdf, extractTextFromReducto } from "./reducto";
 import { getPdf } from "./storage";
 import { runPipeline } from "./ai/pipeline";
 import { audit, resolveApproverUser, getInvoice } from "./db";
@@ -12,7 +12,11 @@ import {
   APPROVAL_STATUS,
 } from "./constants";
 
-/** Runs Textract (reusing stored output if present) + the 3 Claude prompts. */
+/**
+ * Runs the OCR/parse step (Reducto) — reusing the stored parse output when
+ * present so reprocessing never re-bills the parser — then the 3 Claude prompts.
+ * NOTE: the `textract_raw` column now stores the Reducto parse response.
+ */
 export async function processInvoiceAI(
   env: Env,
   invoiceId: string,
@@ -21,29 +25,31 @@ export async function processInvoiceAI(
   const inv = await getInvoice(env, invoiceId);
   if (!inv) throw new Error("Invoice not found");
 
-  // Obtain Textract output (reuse stored raw -> no re-billing, Brief §13).
-  let textractRaw: unknown = inv.textract_raw ? JSON.parse(inv.textract_raw) : null;
-  if (!textractRaw) {
+  // Obtain the parsed document text (reuse stored parse output if present).
+  let ocrRaw: unknown = inv.textract_raw ? JSON.parse(inv.textract_raw) : null;
+  let docText: string;
+  if (ocrRaw) {
+    docText = extractTextFromReducto(ocrRaw);
+  } else {
     const meta = await env.DB.prepare(
-      "SELECT r2_key FROM pdf_files WHERE invoice_id = ?",
+      "SELECT r2_key, file_name FROM pdf_files WHERE invoice_id = ?",
     )
       .bind(invoiceId)
-      .first<{ r2_key: string }>();
+      .first<{ r2_key: string; file_name: string }>();
     if (!meta?.r2_key) throw new Error("Invoice has no PDF to process");
     const obj = await getPdf(env, meta.r2_key);
     if (!obj) throw new Error("Invoice PDF not found in storage");
     const buf = await obj.arrayBuffer();
-    textractRaw = await runTextract(env, buf);
+    const parsed = await ocrPdf(env, buf, meta.file_name ?? "invoice.pdf");
+    ocrRaw = parsed.raw;
+    docText = parsed.text;
     await env.DB.prepare("UPDATE invoices SET textract_raw = ? WHERE id = ?")
-      .bind(JSON.stringify(textractRaw), invoiceId)
+      .bind(JSON.stringify(ocrRaw), invoiceId)
       .run();
   }
 
-  const summary = parseTextract(textractRaw);
-  const textractText = formatForClaude(summary);
-
   try {
-    const result = await runPipeline(env, textractText);
+    const result = await runPipeline(env, docText);
 
     const subtotal =
       inv.subtotal == null && result.prompt1.Subtotal

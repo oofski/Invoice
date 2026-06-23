@@ -14,7 +14,7 @@ import {
 /** Prompt 1 — Extraction + Business Routing (Brief §05). */
 const PROMPT1_SYSTEM = `You are an expert accounts-payable data extraction engine for a multi-entity salon and wellness business (brands: Neroli, SKNBar, IBW, Chicago, and Admin/Corporate).
 
-You receive the structured output of AWS Textract Analyze Expense, already labeled. Extract the invoice header fields and determine the business entity, class, and first-pass approver by matching the delivery/ship-to address (or address keywords) against the LOCATION DICTIONARY.
+You receive the parsed text/markdown of an invoice document (from a document parser). Extract the invoice header fields and determine the business entity, class, and first-pass approver by matching the delivery/ship-to address (or address keywords) against the LOCATION DICTIONARY.
 
 LOCATION DICTIONARY:
 ${LOCATION_DICTIONARY.map((m) => `- "${m.keywords.join('", "')}" => Business=${m.business}, Class=${m.class}, FirstPassApprover=${m.default_approver}`).join("\n")}
@@ -27,13 +27,13 @@ RULES:
 - Money values are strings; SalesTax "0.00" if none. Dates MM/DD/YYYY; DueDate = InvDate if missing.
 - Output ONLY the JSON object, no prose, no code fences.`;
 
-export function runPrompt1(env: Env, textractText: string) {
+export function runPrompt1(env: Env, docText: string) {
   const user = `Return exactly this JSON shape:
 {"Vendor":"","Subtotal":"","SalesTax":"","TotalAmount":"","InvDate":"MM/DD/YYYY","DueDate":"MM/DD/YYYY","InvoiceNumber":"","Business":"Neroli|SKNBar|IBW|Chicago|Admin","Class":"Mequon|Downtown|Eastside|North Shore|Brookfield|Shorewood|Pewaukee|Milwaukee|Madison|Chicago|None","ApprovedBy":"Lori|Lisa|Kari|Bonnie|Susan"}
 
-Textract-extracted invoice data:
+Parsed invoice document:
 
-${textractText}`;
+${docText}`;
   return callClaudeJSON<Prompt1Output>(env, PROMPT1_SYSTEM, user, 1024);
 }
 
@@ -50,11 +50,11 @@ CATCH-ALL: => Bonnie
 Vendor matching is case-insensitive and tolerant of punctuation/spacing and LLC/Inc suffixes. ApprovedBy MUST be exactly one of: Lori, Lisa, Kari, Bonnie, Susan.
 Output ONLY this JSON: { "ApprovedBy": "Lori|Lisa|Kari|Bonnie|Susan" }`;
 
-export function runPrompt2(env: Env, textractText: string) {
+export function runPrompt2(env: Env, docText: string) {
   return callClaudeJSON<Prompt2Output>(
     env,
     PROMPT2_SYSTEM,
-    `Apply the routing rules to this invoice and return the approver.\n\n${textractText}`,
+    `Apply the routing rules to this invoice and return the approver.\n\n${docText}`,
     256,
   );
 }
@@ -75,11 +75,11 @@ If confidence < 90% set Category="${REQUIRES_MANUAL_REVIEW}", ConfidenceLevel="M
 Output ONLY a JSON array, one object per line item:
 [{"BusinessEntity":"","LineItemDescription":"","Amount":0.00,"Category":"","ConfidenceLevel":"HIGH|MEDIUM|LOW|MANUAL_REVIEW","LogicPathUsed":"LEVEL 1|LEVEL 2|LEVEL 3|LEVEL 4|LEVEL 5"}]`;
 
-export function runPrompt3(env: Env, textractText: string) {
+export function runPrompt3(env: Env, docText: string) {
   return callClaudeJSON<Prompt3Output>(
     env,
     PROMPT3_SYSTEM,
-    `Categorize every line item. If none are detected, create a single line item for the total.\n\n${textractText}`,
+    `Categorize every line item. If none are detected, create a single line item for the total.\n\n${docText}`,
     4096,
   );
 }

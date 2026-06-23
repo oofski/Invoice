@@ -15,12 +15,12 @@ import {
  */
 export async function runPipeline(
   env: Env,
-  textractText: string,
+  docText: string,
 ): Promise<PipelineResult> {
   const [prompt1, prompt2, prompt3Raw] = await Promise.all([
-    runPrompt1(env, textractText),
-    runPrompt2(env, textractText),
-    runPrompt3(env, textractText),
+    runPrompt1(env, docText),
+    runPrompt2(env, docText),
+    runPrompt3(env, docText),
   ]);
 
   const candidate = prompt2?.ApprovedBy as Approver;

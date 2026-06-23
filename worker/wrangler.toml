@@ -18,14 +18,14 @@ binding = "PDFS"
 bucket_name = "invoiceiq-pdfs"
 
 # --- Secrets (set with `wrangler secret put <NAME>`; never commit) ---
-# AWS_ACCESS_KEY_ID
-# AWS_SECRET_ACCESS_KEY
-# ANTHROPIC_API_KEY
-# RESEND_API_KEY
+# REDUCTO_API_KEY           (document parsing / OCR — reducto.ai)
+# ANTHROPIC_API_KEY         (the 3 Claude prompts)
+# RESEND_API_KEY            (optional — approval/reminder emails)
 # SESSION_SECRET            (optional extra entropy for tokens)
 
 [vars]
-AWS_REGION = "us-east-1"
 RESEND_FROM_EMAIL = "invoices@example.com"
+# Override only if Reducto gives you a different API base for your account:
+# REDUCTO_BASE_URL = "https://platform.reducto.ai"
 # APP_URL is informational (used in emails); the desktop app is the primary client.
 APP_URL = "https://invoiceiq.example.com"

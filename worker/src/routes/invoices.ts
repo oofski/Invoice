@@ -11,7 +11,8 @@ import {
 } from "../lib/db";
 import { processInvoiceAI, findDuplicate } from "../lib/process";
 import { putPdf, getPdf, pdfKey } from "../lib/storage";
-import { runTextract, parseTextract } from "../lib/textract";
+import { ocrPdf } from "../lib/reducto";
+import { runPrompt1 } from "../lib/ai/prompts";
 import { sendReminderEmail, sendRejectionEmail } from "../lib/email";
 import { uuid, nowIso, parseAmount, toIsoDate, hoursSince } from "../lib/util";
 import {
@@ -69,12 +70,14 @@ invoices.post("/upload", async (c) => {
   const buf = await file.arrayBuffer();
   const fileName = file.name ?? "invoice.pdf";
 
-  // Textract (cheap) -> header -> duplicate check BEFORE Claude (Brief §13).
-  const raw = await runTextract(c.env, buf);
-  const summary = parseTextract(raw);
-  const vendor = summary.vendor || "Unknown Vendor";
-  const invoiceNumber = summary.invoiceNumber || `NO-INV-${Date.now()}`;
-  const total = parseAmount(summary.total);
+  // Reducto parse -> Prompt 1 reads the header -> duplicate check BEFORE the
+  // heavier Claude steps (Prompt 2 + line-item coding). The stored parse output
+  // is reused by processInvoiceAI, so the parser is not re-billed.
+  const { raw, text } = await ocrPdf(c.env, buf, fileName);
+  const header = await runPrompt1(c.env, text);
+  const vendor = header.Vendor || "Unknown Vendor";
+  const invoiceNumber = header.InvoiceNumber || `NO-INV-${Date.now()}`;
+  const total = parseAmount(header.TotalAmount);
 
   if (!override) {
     const dup = await findDuplicate(c.env, vendor, invoiceNumber, total);
@@ -95,18 +98,20 @@ invoices.post("/upload", async (c) => {
   try {
     await c.env.DB.prepare(
       `INSERT INTO invoices (id, vendor, invoice_number, subtotal, sales_tax, total_amount,
-         inv_date, due_date, status, has_pdf, submitted_by, submission_type, textract_raw)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         inv_date, due_date, business, class, status, has_pdf, submitted_by, submission_type, textract_raw)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
       .bind(
         id,
         vendor,
         invoiceNumber,
-        summary.subtotal ? parseAmount(summary.subtotal) : null,
-        summary.tax ? parseAmount(summary.tax) : 0,
+        header.Subtotal ? parseAmount(header.Subtotal) : null,
+        header.SalesTax ? parseAmount(header.SalesTax) : 0,
         total,
-        toIsoDate(summary.invoiceDate),
-        toIsoDate(summary.dueDate) ?? toIsoDate(summary.invoiceDate),
+        toIsoDate(header.InvDate),
+        toIsoDate(header.DueDate) ?? toIsoDate(header.InvDate),
+        header.Business ?? null,
+        header.Class ?? null,
         INVOICE_STATUS.PROCESSING,
         1,
         u.id,
