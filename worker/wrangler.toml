@@ -9,7 +9,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "invoiceiq"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "3091c97d-d3f3-4deb-a5c5-f7521dbe1a3d"
 
 # --- R2 bucket binding (invoice PDF storage) ---
 # Create the bucket once with:  wrangler r2 bucket create invoiceiq-pdfs
