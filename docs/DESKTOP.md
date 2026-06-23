@@ -70,13 +70,18 @@ The app self-updates via `electron-updater` reading the GitHub Release feed:
 
 ### Shipping a new version (e.g. 1.0.2)
 1. Bump `version` in `desktop/package.json`.
-2. Commit, then tag and push:
-   ```bash
-   git tag v1.0.2 && git push origin v1.0.2
-   ```
-3. CI builds and publishes the new installer + `latest.yml` to the Release.
-   Every installed app picks it up automatically within 6 hours (or on next
-   launch) — no manual re-download needed.
+2. **Add a `CHANGELOG.md` entry** for the new version (what changed) — this is
+   the documentation record for every release.
+3. Trigger the build either way:
+   - **Tag:** `git tag v1.0.2 && git push origin v1.0.2`, or
+   - **Manual:** GitHub repo → **Actions → "Release Desktop" → Run workflow**
+     (builds + publishes the version currently in `desktop/package.json`).
+4. CI builds and publishes the installer + `latest.yml` to the Release. Every
+   installed app picks it up automatically within 6 hours (or on next launch) —
+   no manual re-download needed.
+
+The GitHub **Releases** page is the running history of shipped versions; keep it
+in sync with `CHANGELOG.md`.
 
 ## 3. First run
 

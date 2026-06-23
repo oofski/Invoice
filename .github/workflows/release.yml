@@ -61,24 +61,17 @@ jobs:
             echo "No desktop/renderer/package.json found; skipping renderer build."
           fi
 
-      # TAG PUSH: build + publish via electron-builder. `--publish always`
-      # uploads the .exe AND the auto-update metadata (latest.yml + .blockmap)
-      # to the GitHub Release for this tag, so installed apps can auto-update.
-      # The Release download link is then at:
-      #   https://github.com/<owner>/<repo>/releases/tag/<tag>
-      - name: Build + publish installer (tagged release)
-        if: startsWith(github.ref, 'refs/tags/')
+      # Build + publish via electron-builder. `--publish always` uploads the
+      # .exe AND the auto-update metadata (latest.yml + .blockmap) to a GitHub
+      # Release named after the version in desktop/package.json (e.g. v1.0.1),
+      # creating the tag if needed. Triggered by a version tag push OR a manual
+      # "Run workflow" (workflow_dispatch). The download link is then at:
+      #   https://github.com/<owner>/<repo>/releases/tag/v<version>
+      - name: Build + publish installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL || '' }}
         run: npm --prefix desktop run release
-
-      # MANUAL RUN (workflow_dispatch, no tag): build only, do not publish.
-      - name: Build installer (no publish)
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL || '' }}
-        run: npm --prefix desktop run dist
 
       # Always make the installer available as a workflow artifact too.
       - name: Upload installer artifact
