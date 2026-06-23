@@ -5,7 +5,7 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
-## [1.0.3] — 2026-06-23
+## [1.0.4] — 2026-06-23
 
 ### Added
 - **Settings page for every role** (admin/accountant/executive/staff) with
@@ -107,7 +107,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
-[1.0.3]: https://github.com/oofski/Invoice/releases/tag/v1.0.3
+[1.0.4]: https://github.com/oofski/Invoice/releases/tag/v1.0.4
 [1.0.2]: https://github.com/oofski/Invoice/releases/tag/v1.0.2
 [1.0.1]: https://github.com/oofski/Invoice/releases/tag/v1.0.1
 [1.0.0]: https://github.com/oofski/Invoice/releases/tag/v1.0.0

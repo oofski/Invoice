@@ -4,12 +4,17 @@
 name: Release Desktop
 
 on:
-  # Build + publish whenever a version tag is pushed (e.g. v1.0.0).
+  # Build + publish whenever a version tag is pushed (e.g. v1.0.0), OR whenever
+  # the app version changes on the dev branch (a push that edits
+  # desktop/package.json) — so bumping the version cuts a release with no clicks.
   push:
     tags:
       - "v*"
-  # Allow manual runs from the Actions tab (does not create a Release unless a
-  # tag context is present; the artifact upload still works).
+    branches:
+      - "claude/zen-goldberg-wgv2c4"
+    paths:
+      - "desktop/package.json"
+  # Allow manual runs from the Actions tab as well.
   workflow_dispatch:
 
 # electron-builder needs write access to create/update the GitHub Release and
