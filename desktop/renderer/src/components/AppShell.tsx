@@ -9,6 +9,7 @@ import {
   Building2,
   ScrollText,
   Users,
+  Settings,
   LogOut,
   Menu,
   X,
@@ -72,6 +73,12 @@ const NAV: NavItem[] = [
     label: "Users",
     icon: Users,
     roles: [ROLES.ADMIN],
+  },
+  {
+    href: "/settings",
+    label: "Settings",
+    icon: Settings,
+    roles: [ROLES.ACCOUNTANT, ROLES.STAFF, ROLES.EXECUTIVE, ROLES.ADMIN],
   },
 ];
 

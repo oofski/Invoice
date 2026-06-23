@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { UserPlus, Copy, Check } from "lucide-react";
+import { UserPlus, Copy, Check, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import {
   Card,
@@ -12,10 +12,12 @@ import { Modal } from "@/components/ui/Modal";
 import { useApi } from "@/hooks/useApi";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
+import { useProfile } from "@/components/ProfileProvider";
 import { ALL_ROLES, APPROVERS, BUSINESS_ENTITIES, type Role } from "@/lib/constants";
 import type { UserRow, AuthUser } from "@/lib/types";
 
 export default function AdminUsersPage() {
+  const profile = useProfile();
   const { data, loading, refetch } = useApi<{ users: UserRow[] }>("/api/users");
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", role: "executive" });
@@ -77,6 +79,24 @@ export default function AdminUsersPage() {
     }
   }
 
+  async function deleteUser(u: UserRow) {
+    if (u.id === profile.id) {
+      toast.error("You can't delete your own account");
+      return;
+    }
+    if (!window.confirm(`Delete ${u.name}? This cannot be undone.`)) return;
+    setBusyId(u.id);
+    try {
+      await api.del(`/api/users/${u.id}`);
+      toast.success("User deleted");
+      refetch();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Delete failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   function toggleEntity(user: UserRow, entity: string) {
     const current = user.entity_access ?? [];
     const next = current.includes(entity)
@@ -113,6 +133,7 @@ export default function AdminUsersPage() {
                     <th className="px-4 py-2.5 font-medium">Role</th>
                     <th className="px-4 py-2.5 font-medium">Entity Access</th>
                     <th className="px-4 py-2.5 font-medium">Status</th>
+                    <th className="px-4 py-2.5 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -180,6 +201,20 @@ export default function AdminUsersPage() {
                           }`}
                         >
                           {u.is_active ? "Active" : "Inactive"}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => deleteUser(u)}
+                          disabled={busyId === u.id || u.id === profile.id}
+                          title={
+                            u.id === profile.id
+                              ? "You can't delete your own account"
+                              : "Delete user"
+                          }
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Delete
                         </button>
                       </td>
                     </tr>

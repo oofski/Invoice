@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, RefreshCw, AlertTriangle } from "lucide-react";
+import { Link, useParams, useNavigate } from "react-router-dom";
+import { ArrowLeft, RefreshCw, AlertTriangle, Trash2 } from "lucide-react";
 import { PdfPane } from "@/components/PdfPane";
 import { InvoiceDataPanel } from "@/components/InvoiceDataPanel";
 import { LineItemsTable } from "@/components/LineItemsTable";
@@ -20,11 +20,13 @@ interface DetailResponse {
 
 export default function InvoiceDetailPage() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const profile = useProfile();
   const { data, loading, error, refetch } = useApi<DetailResponse>(
     `/api/invoices/${id}`,
   );
   const [reprocessing, setReprocessing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const invoice = data?.invoice;
   const lineItems = useMemo(() => invoice?.line_items ?? [], [invoice]);
@@ -56,6 +58,24 @@ export default function InvoiceDetailPage() {
       toast.error(err instanceof ApiError ? err.message : "Reprocess failed");
     } finally {
       setReprocessing(false);
+    }
+  }
+
+  async function deleteInvoice() {
+    if (
+      !window.confirm(
+        "Delete this invoice permanently? This removes its PDF, line items, and approval. This cannot be undone.",
+      )
+    )
+      return;
+    setDeleting(true);
+    try {
+      await api.del(`/api/invoices/${id}`);
+      toast.success("Invoice deleted");
+      navigate("/invoices", { replace: true });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Delete failed");
+      setDeleting(false);
     }
   }
 
@@ -91,18 +111,31 @@ export default function InvoiceDetailPage() {
         >
           <ArrowLeft className="h-4 w-4" /> Invoices
         </Link>
-        {(profile.role === ROLES.ACCOUNTANT ||
-          profile.role === ROLES.ADMIN) && (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={reprocess}
-            loading={reprocessing}
-          >
-            <RefreshCw className="h-4 w-4" />
-            Reprocess
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {(profile.role === ROLES.ACCOUNTANT ||
+            profile.role === ROLES.ADMIN) && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={reprocess}
+              loading={reprocessing}
+            >
+              <RefreshCw className="h-4 w-4" />
+              Reprocess
+            </Button>
+          )}
+          {profile.role === ROLES.ADMIN && (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={deleteInvoice}
+              loading={deleting}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">

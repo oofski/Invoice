@@ -338,6 +338,7 @@ export const AUDIT_ACTION = {
   REMINDER_SENT: "REMINDER_SENT",
   EXPORTED: "EXPORTED",
   INVOICE_UPDATED: "INVOICE_UPDATED",
+  INVOICE_DELETED: "INVOICE_DELETED",
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];

@@ -10,7 +10,7 @@ import {
   hydrateInvoice,
 } from "../lib/db";
 import { processInvoiceAI, ingestInvoicePdf } from "../lib/process";
-import { getPdf } from "../lib/storage";
+import { getPdf, deletePdf } from "../lib/storage";
 import { sendReminderEmail, sendRejectionEmail } from "../lib/email";
 import { nowIso, hoursSince, sameName } from "../lib/util";
 import {
@@ -226,6 +226,44 @@ invoices.patch("/:id", async (c) => {
   });
   const updated = await getInvoice(c.env, id);
   return c.json({ invoice: updated && hydrateInvoice(updated) });
+});
+
+// ----- DELETE /:id (admin only) ---------------------------------------
+invoices.delete("/:id", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN)) return c.json({ error: "Forbidden" }, 403);
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+
+  // Remove the PDF from R2 (best effort), then delete the invoice row. The
+  // pdf_files / line_items / approvals rows cascade via ON DELETE CASCADE.
+  const meta = await c.env.DB.prepare(
+    "SELECT r2_key FROM pdf_files WHERE invoice_id = ?",
+  )
+    .bind(id)
+    .first<{ r2_key: string }>();
+  if (meta?.r2_key) {
+    try {
+      await deletePdf(c.env, meta.r2_key);
+    } catch (e) {
+      console.error("[delete] R2 delete failed:", e);
+    }
+  }
+  await c.env.DB.prepare("DELETE FROM invoices WHERE id = ?").bind(id).run();
+
+  await audit(c.env, {
+    invoiceId: id,
+    userId: user(c).id,
+    action: AUDIT_ACTION.INVOICE_DELETED,
+    prevValue: {
+      vendor: inv.vendor,
+      invoice_number: inv.invoice_number,
+      total_amount: inv.total_amount,
+      status: inv.status,
+    },
+    note: `Invoice deleted by ${user(c).name}`,
+  });
+  return c.json({ ok: true });
 });
 
 // ----- POST /:id/approve ----------------------------------------------

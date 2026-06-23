@@ -136,6 +136,7 @@ export const api = {
       method: "PATCH",
       body: data === undefined ? undefined : JSON.stringify(data),
     }),
+  del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
   /** Multipart upload (FormData) — used by /api/invoices/upload. */
   postForm: <T>(path: string, form: FormData) =>
     request<T>(path, { method: "POST", body: form }),

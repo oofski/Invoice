@@ -1,16 +1,34 @@
 // InvoiceIQ preload script (CommonJS).
-// Runs in an isolated context and exposes a tiny, safe API to the renderer.
-// Keep this minimal: only expose primitive, non-sensitive values.
+// Runs in an isolated context and exposes a tiny, safe API to the renderer:
+// app info plus the auto-update controls (check / install / status events).
+// No Node or main-process objects are leaked — only these functions.
 
-const { contextBridge } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
 
-// process.versions / process.env are available in the preload context.
-// The app version is injected by Electron as an env var when packaged; fall
-// back to the renderer-independent default to avoid pulling in main-process
-// modules (app.getVersion() is a main-process API, not safe to call here).
-const appVersion = process.env.npm_package_version || "1.0.0";
+// Sync fallback version; the renderer prefers getVersion() (app.getVersion()
+// from the main process, which is correct in the packaged app).
+const fallbackVersion = process.env.npm_package_version || "";
 
 contextBridge.exposeInMainWorld("invoiceiq", {
   platform: process.platform,
-  version: appVersion,
+  isDesktop: true,
+  version: fallbackVersion,
+
+  // Authoritative app version from the main process.
+  getVersion: () => ipcRenderer.invoke("app:version"),
+
+  // Trigger an update check. Resolves with a status object
+  // ({ state: "checking" | "dev" | "error", ... }); ongoing progress arrives
+  // via onUpdateStatus.
+  checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+
+  // Quit and install a downloaded update ("Restart now").
+  installUpdate: () => ipcRenderer.invoke("updates:install"),
+
+  // Subscribe to update lifecycle events. Returns an unsubscribe function.
+  onUpdateStatus: (cb) => {
+    const handler = (_event, status) => cb(status);
+    ipcRenderer.on("updates:status", handler);
+    return () => ipcRenderer.removeListener("updates:status", handler);
+  },
 });

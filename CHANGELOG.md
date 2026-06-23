@@ -5,6 +5,21 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.0.3] — 2026-06-23
+
+### Added
+- **Settings page for every role** (admin/accountant/executive/staff) with
+  in-app update controls: shows the current version, a **Check for updates**
+  button, live status (checking/downloading/up-to-date), and a **Restart &
+  install** button when an update is ready — wired to the Electron auto-updater
+  over IPC. Also surfaces account info, a Change-password shortcut, sign out,
+  and the connected Server URL.
+- **Admin delete actions.** Admins can now delete an invoice (Invoice detail →
+  Delete; removes the PDF from R2 and cascades line items/approvals, with an
+  audit entry) and delete a user (User Management → Delete; nulls out their
+  invoice/approval/export references and removes sessions). Guards prevent
+  deleting your own account or the last active admin.
+
 ## [1.0.2] — 2026-06-23
 
 ### Fixed
@@ -88,6 +103,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.0.3]: https://github.com/oofski/Invoice/releases/tag/v1.0.3
 [1.0.2]: https://github.com/oofski/Invoice/releases/tag/v1.0.2
 [1.0.1]: https://github.com/oofski/Invoice/releases/tag/v1.0.1
 [1.0.0]: https://github.com/oofski/Invoice/releases/tag/v1.0.0

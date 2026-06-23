@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "./helpers";
-import { hasRole, isStaffOrAdmin } from "./helpers";
+import { hasRole, isStaffOrAdmin, user } from "./helpers";
 import { hashPassword } from "../lib/auth";
 import { uuid } from "../lib/util";
 import { ALL_ROLES, ROLES } from "../lib/constants";
@@ -74,5 +74,39 @@ users.patch("/:id", async (c) => {
   if (!sets.length) return c.json({ error: "No updatable fields" }, 400);
   params.push(c.req.param("id"));
   await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...params).run();
+  return c.json({ ok: true });
+});
+
+// DELETE /:id — remove a user (admin only)
+users.delete("/:id", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN)) return c.json({ error: "Forbidden" }, 403);
+  const id = c.req.param("id");
+  const me = user(c);
+  if (id === me.id)
+    return c.json({ error: "You can't delete your own account" }, 400);
+
+  const target = await c.env.DB.prepare("SELECT id, role FROM users WHERE id = ?")
+    .bind(id)
+    .first<{ id: string; role: string }>();
+  if (!target) return c.json({ error: "Not found" }, 404);
+
+  if (target.role === ROLES.ADMIN) {
+    const admins = await c.env.DB.prepare(
+      "SELECT COUNT(*) as n FROM users WHERE role = ? AND is_active = 1",
+    )
+      .bind(ROLES.ADMIN)
+      .first<{ n: number }>();
+    if ((admins?.n ?? 0) <= 1)
+      return c.json({ error: "Can't delete the last active admin" }, 400);
+  }
+
+  // Null out FK references first so the delete can't fail, then delete the user
+  // (sessions cascade). Invoices/approvals/exports keep their history.
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE invoices SET submitted_by = NULL WHERE submitted_by = ?").bind(id),
+    c.env.DB.prepare("UPDATE approvals SET assigned_to = NULL WHERE assigned_to = ?").bind(id),
+    c.env.DB.prepare("UPDATE exports SET exported_by = NULL WHERE exported_by = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id),
+  ]);
   return c.json({ ok: true });
 });

@@ -15,6 +15,7 @@ import ExportPage from "@/pages/ExportPage";
 import VendorsPage from "@/pages/VendorsPage";
 import AuditPage from "@/pages/AuditPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
+import SettingsPage from "@/pages/SettingsPage";
 
 /**
  * HashRouter is required so client routing works when the SPA is loaded from
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/vendors" element={<VendorsPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/admin/users" element={<AdminUsersPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Route>
 
         {/* Fallback */}
