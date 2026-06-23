@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS line_items (
   business            TEXT,
   class               TEXT,
   gl_category         TEXT,
+  item_type           TEXT,
   confidence_level    TEXT,
   logic_path          TEXT,
   requires_review     INTEGER NOT NULL DEFAULT 0,
@@ -222,3 +223,16 @@ INSERT OR IGNORE INTO vendor_mappings (id, vendor_name, business_entity, class, 
  ('ven-guthriefrey','Guthrie & Frey','Admin',NULL,'Bonnie',0,NULL),
  ('ven-globalsight','Global Sight','Admin',NULL,'Bonnie',0,NULL),
  ('ven-adelman','Adelman','Admin',NULL,'Bonnie',0,NULL);
+
+-- =====================================================================
+-- LIVE D1 MIGRATION — run once against an existing (pre-split) database.
+-- Each statement is standalone and idempotent-friendly; ADD COLUMN will
+-- error if the column already exists — ignore that specific error.
+-- =====================================================================
+ALTER TABLE line_items ADD COLUMN business TEXT;
+ALTER TABLE line_items ADD COLUMN class TEXT;
+ALTER TABLE line_items ADD COLUMN item_type TEXT;
+ALTER TABLE invoices ADD COLUMN split_type TEXT;
+CREATE TABLE IF NOT EXISTS invoice_allocations (id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE, business TEXT NOT NULL, class TEXT NOT NULL, percentage REAL, amount REAL NOT NULL, gl_account TEXT, source TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
+CREATE INDEX IF NOT EXISTS idx_allocations_invoice ON invoice_allocations(invoice_id);
+INSERT OR IGNORE INTO location_mappings (id, address, keywords, business, class, default_approver) VALUES ('loc-nala','Nala','["Nala"]','Nala','Nala','Bonnie');

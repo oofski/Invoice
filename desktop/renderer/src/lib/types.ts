@@ -69,6 +69,7 @@ export interface LineItemRow {
   sort_order: number | null;
   business: string | null;
   class: string | null;
+  item_type?: string | null;
 }
 
 /**
@@ -187,6 +188,38 @@ export interface DuplicateWarning {
 export interface SplitAllocation {
   amount: number;
   gl_category: string;
+}
+
+/**
+ * One target row in a flexible cross-entity split request body for
+ * `POST /api/invoices/:id/split-allocations`. Any entity is allowed (e.g. a
+ * Chicago row on an IBW invoice). Percentages must total 100 (±0.05).
+ */
+export interface SplitAllocationInput {
+  business: string;
+  class: string;
+  percentage: number;
+}
+
+export interface SplitAllocationsRequest {
+  allocations: SplitAllocationInput[];
+}
+
+export interface SplitAllocationsResponse {
+  allocations: InvoiceAllocation[];
+}
+
+/**
+ * One line in a per-line split request body for
+ * `POST /api/invoices/:id/split-lines`. `type` ∈ ITEM_TYPES; for "Other" the
+ * typed text is sent as `customType`. Both are omitted when not chosen.
+ */
+export interface SplitLineInput {
+  lineItemId: string;
+  business: string;
+  class: string;
+  type?: string;
+  customType?: string;
 }
 
 // Re-export commonly-used domain unions for convenience.

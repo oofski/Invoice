@@ -67,6 +67,7 @@ export interface LineItemRow {
   business: string | null;
   class: string | null;
   gl_category: string | null;
+  item_type: string | null;
   confidence_level: string | null;
   logic_path: string | null;
   requires_review: number;

@@ -84,9 +84,13 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
     const coded = lineItems.filter((li) => li.business && li.class);
     if (coded.length > 0) {
       for (const li of leaves(coded)) {
-        // Vendor mapping (gl_override / inventory) takes precedence; the line's
-        // own GL category is the fallback (resolveGlAccount handles the order).
-        const account = resolveGlAccount(vendorMapping, li.gl_category);
+        // When the exec set a per-line Type (item_type), the line's own GL
+        // category is authoritative — use it directly so a vendor gl_override
+        // can't win. Otherwise vendor mapping (gl_override / inventory) takes
+        // precedence with the line's GL category as the fallback.
+        const account = li.item_type
+          ? (li.gl_category ?? "")
+          : resolveGlAccount(vendorMapping, li.gl_category);
         pushRow([
           invoice.invoice_number,
           invoice.vendor,
@@ -242,22 +246,36 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
       memo: memo(invoice),
     };
 
-    // ---- QUICK_EVEN: one bill, one line per allocation ------------------
+    // ---- Allocations (quick-even / custom): group by business, one bill --
+    // per distinct business (each on its own sheet). Allocations may span
+    // multiple entities (custom cross-entity split), so a single-business
+    // split keeps the plain invoice number while a multi-business split
+    // appends the entity code to keep each bill number unique in QBO.
     if (allocations && allocations.length > 0) {
-      const primary = allocations[0].business;
-      const lines: FactorLine[] = allocations.map((a) => ({
-        account: a.gl_account ?? "",
-        amount: a.amount,
-        description: `Even split — ${a.class} (${a.percentage ?? 0}%)`,
-        business: a.business,
-        cls: a.class,
-      }));
-      bills.push({
-        ...billBase,
-        billNumber: invoice.invoice_number,
-        entity: primary,
-        lines,
-      });
+      const byBusiness = new Map<string, FactorLine[]>();
+      for (const a of allocations) {
+        const business = a.business;
+        const arr = byBusiness.get(business) ?? [];
+        arr.push({
+          account: a.gl_account ?? "",
+          amount: a.amount,
+          description: `Split — ${a.class} (${a.percentage ?? 0}%)`,
+          business,
+          cls: a.class,
+        });
+        byBusiness.set(business, arr);
+      }
+      const multiBusiness = byBusiness.size > 1;
+      for (const [business, lines] of byBusiness) {
+        bills.push({
+          ...billBase,
+          billNumber: multiBusiness
+            ? `${invoice.invoice_number}-${ENTITY_CODE[business] ?? business}`
+            : invoice.invoice_number,
+          entity: business,
+          lines,
+        });
+      }
       // Tax already baked into allocation amounts — no extra tax line.
       continue;
     }
@@ -270,7 +288,12 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
         const business = li.business as string;
         const arr = byBusiness.get(business) ?? [];
         arr.push({
-          account: resolveGlAccount(vendorMapping, li.gl_category),
+          // When the exec set a per-line Type (item_type), the line's own
+          // gl_category is authoritative — use it directly so a vendor
+          // gl_override can't win. Otherwise fall back to resolveGlAccount.
+          account: li.item_type
+            ? (li.gl_category ?? "")
+            : resolveGlAccount(vendorMapping, li.gl_category),
           amount: li.amount ?? 0,
           description: li.description ?? "",
           business,

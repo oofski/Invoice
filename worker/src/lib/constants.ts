@@ -358,6 +358,21 @@ export const GL_CATEGORIES = {
 /** Flat list of all 47 allowed GL categories. */
 export const GL_CATEGORIES_FLAT: string[] = Object.values(GL_CATEGORIES).flat();
 
+/**
+ * Per-line item "Type" the executive can set during a per-line split. Selecting a
+ * type auto-codes the line's GL account (TYPE_GL) so the accountant needn't
+ * re-code. "Other" carries no fixed GL — it routes to manual review.
+ */
+export const ITEM_TYPES = ["Backbar", "Retail", "Equipment", "Other"] as const;
+export type ItemType = (typeof ITEM_TYPES)[number];
+
+/** Maps an item Type to its GL category. Each value must be in GL_CATEGORIES_FLAT. */
+export const TYPE_GL: Record<string, string> = {
+  Backbar: "Service Costs",
+  Retail: "Retail / Product Costs",
+  Equipment: "Equipment & Fixtures",
+};
+
 /** Grouped list for rendering optgroup dropdowns in the UI. */
 export const GL_CATEGORY_GROUPS = Object.entries(GL_CATEGORIES).map(
   ([group, categories]) => ({ group, categories: [...categories] }),

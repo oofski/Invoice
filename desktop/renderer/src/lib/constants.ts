@@ -126,6 +126,15 @@ export const BUSINESS_CLASSES: Record<string, string[]> = {
 export const APPROVERS = ["Lori", "Lisa", "Kari", "Bonnie", "Susan"] as const;
 export type Approver = (typeof APPROVERS)[number];
 
+/**
+ * Per-line item types (mirror of the Worker constant). Drives the per-line
+ * split Type column; the server derives the GL account from the type, so no
+ * GL mapping lives client-side. "Other" lets the user type a free-form type
+ * that is sent as `customType`.
+ */
+export const ITEM_TYPES = ["Backbar", "Retail", "Equipment", "Other"] as const;
+export type ItemType = (typeof ITEM_TYPES)[number];
+
 // ---------------------------------------------------------------------------
 // Location dictionary (Brief §02) — seeds the `location_mappings` table.
 // ---------------------------------------------------------------------------

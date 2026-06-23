@@ -2,7 +2,13 @@ import { useState, useRef, useEffect } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
-import { Loader2, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  Loader2,
+  ZoomIn,
+  ZoomOut,
+  RotateCw,
+  Maximize2,
+} from "lucide-react";
 
 // Serve the pdf.js worker from the app directory so it loads under file:// in
 // Electron. The file is copied from node_modules by scripts/copy-pdf-worker.mjs
@@ -15,9 +21,18 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   document.baseURI,
 ).toString();
 
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 0.2;
+
 export default function PdfViewer({ url }: { url: string | null }) {
   const [numPages, setNumPages] = useState(0);
-  const [scale, setScale] = useState(1);
+  // Manual zoom multiplier. When `fitWidth` is true the page is sized to the
+  // container width and `zoom` is treated as 1 (a fresh "fit" baseline); the
+  // first explicit +/- drops out of fit mode so the indicator reflects reality.
+  const [zoom, setZoom] = useState(1);
+  const [fitWidth, setFitWidth] = useState(true);
+  const [rotation, setRotation] = useState(0); // 0 | 90 | 180 | 270
   const [width, setWidth] = useState<number>(600);
   const [error, setError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -32,6 +47,28 @@ export default function PdfViewer({ url }: { url: string | null }) {
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, []);
+
+  // Leaving fit-to-width mode snaps the multiplier to 1 so the displayed size
+  // is continuous (the page was already filling the width at "100%").
+  const zoomOut = () => {
+    setFitWidth(false);
+    setZoom((z) => Math.max(MIN_ZOOM, +(z - ZOOM_STEP).toFixed(2)));
+  };
+  const zoomIn = () => {
+    setFitWidth(false);
+    setZoom((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)));
+  };
+  const rotate = () => setRotation((r) => (r + 90) % 360);
+  const fitToWidth = () => {
+    setFitWidth(true);
+    setZoom(1);
+    setRotation(0);
+  };
+
+  // In fit mode the page fills the container width (rotation flips which page
+  // dimension maps to that width — react-pdf handles that internally). In zoom
+  // mode we render at the intrinsic page size scaled by `zoom`.
+  const pageProps = fitWidth ? { width } : { scale: zoom };
 
   if (!url) {
     return (
@@ -49,28 +86,49 @@ export default function PdfViewer({ url }: { url: string | null }) {
         </span>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setScale((s) => Math.max(0.5, s - 0.2))}
-            className="rounded p-1 text-slate-500 hover:bg-slate-200"
+            onClick={zoomOut}
+            disabled={!fitWidth && zoom <= MIN_ZOOM}
+            className="rounded p-1 text-slate-500 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Zoom out"
+            title="Zoom out"
           >
             <ZoomOut className="h-4 w-4" />
           </button>
-          <span className="w-10 text-center text-xs text-slate-500">
-            {Math.round(scale * 100)}%
+          <span className="w-12 text-center text-xs tabular-nums text-slate-500">
+            {fitWidth ? "Fit" : `${Math.round(zoom * 100)}%`}
           </span>
           <button
-            onClick={() => setScale((s) => Math.min(2.5, s + 0.2))}
-            className="rounded p-1 text-slate-500 hover:bg-slate-200"
+            onClick={zoomIn}
+            disabled={!fitWidth && zoom >= MAX_ZOOM}
+            className="rounded p-1 text-slate-500 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Zoom in"
+            title="Zoom in"
           >
             <ZoomIn className="h-4 w-4" />
+          </button>
+          <div className="mx-1 h-4 w-px bg-slate-300" aria-hidden />
+          <button
+            onClick={rotate}
+            className="rounded p-1 text-slate-500 hover:bg-slate-200"
+            aria-label="Rotate 90 degrees"
+            title="Rotate 90°"
+          >
+            <RotateCw className="h-4 w-4" />
+          </button>
+          <button
+            onClick={fitToWidth}
+            className="rounded p-1 text-slate-500 hover:bg-slate-200"
+            aria-label="Fit to width and reset"
+            title="Fit to width / reset"
+          >
+            <Maximize2 className="h-4 w-4" />
           </button>
         </div>
       </div>
 
       <div
         ref={containerRef}
-        className="scroll-thin flex-1 overflow-y-auto bg-slate-100 p-4"
+        className="scroll-thin flex-1 overflow-auto bg-slate-100 p-4"
       >
         {error ? (
           <div className="flex h-full items-center justify-center text-sm text-red-500">
@@ -94,10 +152,10 @@ export default function PdfViewer({ url }: { url: string | null }) {
               >
                 <Page
                   pageNumber={i + 1}
-                  width={width}
-                  scale={scale}
+                  rotate={rotation}
                   renderAnnotationLayer={false}
                   renderTextLayer={false}
+                  {...pageProps}
                 />
               </div>
             ))}

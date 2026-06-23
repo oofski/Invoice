@@ -22,9 +22,12 @@ import {
   AUDIT_ACTION,
   APPROVAL_STATUS,
   BUSINESS_CLASSES,
+  BUSINESS_ENTITIES,
   INVOICE_STATUS,
   OVERDUE_HOURS,
+  REQUIRES_MANUAL_REVIEW,
   ROLES,
+  TYPE_GL,
 } from "../lib/constants";
 import type {
   InvoiceRow,
@@ -423,6 +426,108 @@ invoices.post("/:id/split-even", async (c) => {
   return c.json({ allocations });
 });
 
+// ----- POST /:id/split-allocations ------------------------------------
+// Flexible cross-entity percentage split: fans an invoice across ANY
+// entity+class targets (e.g. an IBW invoice 1/3 to Chicago). Unlike split-even
+// (own-business classes only), each allocation names its own business + class.
+invoices.post("/:id/split-allocations", async (c) => {
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+  if (!canSplit(c, inv))
+    return c.json({ error: "Only the assigned executive can split" }, 403);
+  if (inv.status === INVOICE_STATUS.EXPORTED)
+    return c.json({ error: "Invoice already exported" }, 409);
+  if (!(await splitReady(c.env)))
+    return c.json({ error: "Splitting needs a one-time database setup — run the migration." }, 503);
+
+  const body = await c.req.json().catch(() => ({}));
+  const allocs = (body as {
+    allocations?: { business: string; class: string; percentage: number }[];
+  }).allocations;
+  if (!Array.isArray(allocs) || allocs.length === 0)
+    return c.json({ error: "At least one allocation is required" }, 400);
+
+  // Validate every allocation first (all-or-nothing).
+  for (const a of allocs) {
+    if (!(BUSINESS_ENTITIES as readonly string[]).includes(a.business))
+      return c.json({ error: `Invalid business "${a.business}"` }, 400);
+    const valid = BUSINESS_CLASSES[a.business] ?? [];
+    if (!valid.includes(a.class))
+      return c.json(
+        { error: `Invalid class "${a.class}" for business "${a.business}"` },
+        400,
+      );
+    if (typeof a.percentage !== "number" || !isFinite(a.percentage))
+      return c.json({ error: "Each allocation needs a numeric percentage" }, 400);
+  }
+  const pctSum = allocs.reduce((s, a) => s + a.percentage, 0);
+  if (Math.abs(pctSum - 100) > 0.05)
+    return c.json({ error: `Percentages must sum to 100 (got ${pctSum})` }, 400);
+
+  const vendorMapping = findVendorMapping(
+    inv.vendor,
+    await loadVendorMappings(c.env),
+  );
+  const glAccount = resolveGlAccount(vendorMapping);
+
+  // Clear any existing split state.
+  await c.env.DB.prepare(
+    "DELETE FROM invoice_allocations WHERE invoice_id = ?",
+  ).bind(id).run();
+  await c.env.DB.prepare(
+    "UPDATE line_items SET business = NULL, class = NULL WHERE invoice_id = ?",
+  ).bind(id).run();
+
+  const total = inv.total_amount;
+  const allocations: InvoiceAllocationRow[] = [];
+  let runningSum = 0;
+  const at = nowIso();
+  for (let i = 0; i < allocs.length; i++) {
+    const a = allocs[i];
+    const isLast = i === allocs.length - 1;
+    // Last row absorbs the rounding remainder so the sum equals total exactly.
+    const amount = isLast
+      ? roundCents(total - runningSum)
+      : roundCents((total * a.percentage) / 100);
+    runningSum = roundCents(runningSum + amount);
+    const row: InvoiceAllocationRow = {
+      id: uuid(),
+      invoice_id: id,
+      business: a.business,
+      class: a.class,
+      percentage: a.percentage,
+      amount,
+      gl_account: glAccount,
+      source: "CUSTOM",
+      created_at: at,
+    };
+    allocations.push(row);
+    await c.env.DB.prepare(
+      `INSERT INTO invoice_allocations
+         (id, invoice_id, business, class, percentage, amount, gl_account, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        row.id, row.invoice_id, row.business, row.class,
+        row.percentage, row.amount, row.gl_account, row.source, row.created_at,
+      )
+      .run();
+  }
+
+  await c.env.DB.prepare("UPDATE invoices SET split_type = ? WHERE id = ?")
+    .bind("CUSTOM", id)
+    .run();
+
+  await audit(c.env, {
+    invoiceId: id, userId: user(c).id, action: AUDIT_ACTION.INVOICE_SPLIT,
+    newValue: { split_type: "CUSTOM", allocations: allocs },
+    note: `Custom split across ${allocs.length} targets by ${user(c).name}`,
+  });
+
+  return c.json({ allocations });
+});
+
 // ----- POST /:id/split-lines ------------------------------------------
 invoices.post("/:id/split-lines", async (c) => {
   const id = c.req.param("id");
@@ -437,7 +542,13 @@ invoices.post("/:id/split-lines", async (c) => {
 
   const body = await c.req.json().catch(() => ({}));
   const lines = (body as {
-    lines?: { lineItemId: string; business: string; class: string }[];
+    lines?: {
+      lineItemId: string;
+      business: string;
+      class: string;
+      type?: string;
+      customType?: string;
+    }[];
   }).lines;
   if (!Array.isArray(lines) || lines.length === 0)
     return c.json({ error: "lines required" }, 400);
@@ -453,11 +564,31 @@ invoices.post("/:id/split-lines", async (c) => {
   }
 
   for (const l of lines) {
-    await c.env.DB.prepare(
-      "UPDATE line_items SET business = ?, class = ? WHERE id = ? AND invoice_id = ?",
-    )
-      .bind(l.business, l.class, l.lineItemId, id)
-      .run();
+    if (l.type) {
+      // The exec set a Type; it drives item_type + GL so the accountant
+      // needn't re-code. Known types map to a fixed GL (auto-confirmed);
+      // "Other" routes to manual review for the accountant to confirm.
+      const itemType =
+        l.type === "Other" ? l.customType || "Other" : l.type;
+      const glCategory =
+        l.type in TYPE_GL ? TYPE_GL[l.type] : REQUIRES_MANUAL_REVIEW;
+      const requiresReview = l.type in TYPE_GL ? 0 : 1;
+      await c.env.DB.prepare(
+        "UPDATE line_items SET business = ?, class = ?, item_type = ?, gl_category = ?, requires_review = ? WHERE id = ? AND invoice_id = ?",
+      )
+        .bind(
+          l.business, l.class, itemType, glCategory, requiresReview,
+          l.lineItemId, id,
+        )
+        .run();
+    } else {
+      // No type provided — leave gl_category / item_type unchanged.
+      await c.env.DB.prepare(
+        "UPDATE line_items SET business = ?, class = ? WHERE id = ? AND invoice_id = ?",
+      )
+        .bind(l.business, l.class, l.lineItemId, id)
+        .run();
+    }
   }
 
   // Per-line splits supersede any quick-even allocations.
