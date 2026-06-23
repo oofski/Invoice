@@ -7,9 +7,13 @@ import {
   Building2,
   Inbox,
   RefreshCw,
+  Split,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { PdfPane } from "@/components/PdfPane";
 import { LineItemsTable } from "@/components/LineItemsTable";
+import { SplitInvoiceModal } from "@/components/SplitInvoiceModal";
 import { Button, Spinner, EmptyState } from "@/components/ui/primitives";
 import { Modal } from "@/components/ui/Modal";
 import { useApi } from "@/hooks/useApi";
@@ -17,7 +21,7 @@ import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { useProfile } from "@/components/ProfileProvider";
 import { formatCurrency, formatDate, ageLabel, cn, sameName } from "@/lib/utils";
-import { INVOICE_STATUS, ROLES } from "@/lib/constants";
+import { INVOICE_STATUS, ROLES, BUSINESS_CLASSES } from "@/lib/constants";
 import type { InvoiceRow, InvoiceWithRelations } from "@/lib/types";
 
 interface DetailResponse {
@@ -160,18 +164,28 @@ function ApprovalDetail({
     `/api/invoices/${invoiceId}`,
   );
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [comment, setComment] = useState("");
+  const [showDetail, setShowDetail] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const invoice = data?.invoice;
   const isPending = invoice?.status === INVOICE_STATUS.PENDING_APPROVAL;
   const isAssigned =
     sameName(invoice?.approved_by, profile.name) || profile.role === ROLES.ADMIN;
+  const isExec = profile.role === ROLES.EXECUTIVE;
+  const classes = invoice?.business
+    ? (BUSINESS_CLASSES[invoice.business] ?? [])
+    : [];
+  const canSplit = classes.length >= 2;
 
   async function approve() {
     setBusy(true);
     try {
-      await api.post(`/api/invoices/${invoiceId}/approve`);
+      await api.post(`/api/invoices/${invoiceId}/approve`, {
+        comment: comment.trim() || undefined,
+      });
       toast.success("Invoice approved");
       onDecided();
     } catch (err) {
@@ -247,28 +261,63 @@ function ApprovalDetail({
                 {formatDate(invoice.due_date)}
               </span>
             </div>
+            {invoice.split_type && (
+              <div className="mt-3 flex justify-center">
+                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
+                  <Split className="h-3 w-3" />
+                  {invoice.split_type === "QUICK_EVEN"
+                    ? "Split: even"
+                    : invoice.split_type === "PER_LINE"
+                      ? "Split: per line"
+                      : "Split"}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Decision buttons */}
           {canDecide && isAssigned && isPending ? (
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              <Button
-                variant="success"
-                size="lg"
-                loading={busy}
-                onClick={approve}
-                className="py-4 text-base"
-              >
-                <Check className="h-5 w-5" /> Approve
-              </Button>
-              <Button
-                variant="danger"
-                size="lg"
-                onClick={() => setRejectOpen(true)}
-                className="py-4 text-base"
-              >
-                <X className="h-5 w-5" /> Reject
-              </Button>
+            <div className="mt-6 space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <Button
+                  variant="success"
+                  size="lg"
+                  loading={busy}
+                  onClick={approve}
+                  className="py-4 text-base"
+                >
+                  <Check className="h-5 w-5" /> Approve
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  onClick={() => setSplitOpen(true)}
+                  disabled={!canSplit}
+                  title={
+                    canSplit
+                      ? undefined
+                      : "This business has a single class — nothing to split."
+                  }
+                  className="py-4 text-base"
+                >
+                  <Split className="h-5 w-5" /> Split
+                </Button>
+                <Button
+                  variant="danger"
+                  size="lg"
+                  onClick={() => setRejectOpen(true)}
+                  className="py-4 text-base"
+                >
+                  <X className="h-5 w-5" /> Reject
+                </Button>
+              </div>
+              <textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                rows={2}
+                placeholder="Optional comment (added to the approval)…"
+                className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              />
             </div>
           ) : (
             <div className="mt-6 rounded-lg bg-slate-50 p-3 text-center text-sm text-slate-500">
@@ -278,21 +327,45 @@ function ApprovalDetail({
             </div>
           )}
 
-          {/* Expandable line items for GL override */}
+          {/* Line-by-line detail — collapsed by default, summary-first. */}
           <div className="mt-6">
-            <h3 className="mb-2 text-sm font-semibold text-slate-700">
-              Line Items
-            </h3>
-            <div className="rounded-xl border border-slate-200 bg-white">
-              <LineItemsTable
-                lineItems={invoice.line_items}
-                editable={canDecide && isAssigned && isPending}
-                onChange={refetch}
-              />
-            </div>
+            <button
+              onClick={() => setShowDetail((v) => !v)}
+              className="inline-flex items-center gap-1 text-sm font-semibold text-slate-700 hover:text-slate-900"
+            >
+              {showDetail ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+              Show line-by-line detail
+            </button>
+
+            {showDetail && (
+              <div className="mt-2 rounded-xl border border-slate-200 bg-white">
+                {isExec ? (
+                  <ExecLineItemsTable lineItems={invoice.line_items} />
+                ) : (
+                  <LineItemsTable
+                    lineItems={invoice.line_items}
+                    editable={canDecide && isAssigned && isPending}
+                    onChange={refetch}
+                  />
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {invoice && (
+        <SplitInvoiceModal
+          invoice={invoice}
+          open={splitOpen}
+          onClose={() => setSplitOpen(false)}
+          onDone={refetch}
+        />
+      )}
 
       <Modal
         open={rejectOpen}
@@ -324,6 +397,51 @@ function ApprovalDetail({
           </Button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * Read-only line item table for executives — shows description, amount, and the
+ * business/class only. GL category and confidence are deliberately omitted
+ * (the Worker hides GL from execs; this view must never surface it).
+ */
+function ExecLineItemsTable({
+  lineItems,
+}: {
+  lineItems: InvoiceWithRelations["line_items"];
+}) {
+  const rows = lineItems.filter((li) => !li.split_parent_id);
+  return (
+    <div className="scroll-thin overflow-x-auto">
+      <table className="w-full min-w-[480px] text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+            <th className="px-4 py-2.5 font-medium">Description</th>
+            <th className="px-4 py-2.5 text-right font-medium">Amount</th>
+            <th className="px-4 py-2.5 font-medium">Business / Class</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((li) => (
+            <tr key={li.id} className="border-b border-slate-100 align-top">
+              <td className="px-4 py-3 text-slate-800">
+                {li.description ?? "—"}
+              </td>
+              <td className="px-4 py-3 text-right font-medium text-slate-900">
+                {formatCurrency(Number(li.amount ?? 0))}
+              </td>
+              <td className="px-4 py-3 text-slate-700">
+                {li.business
+                  ? li.class && li.class !== "None"
+                    ? `${li.business} · ${li.class}`
+                    : li.business
+                  : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

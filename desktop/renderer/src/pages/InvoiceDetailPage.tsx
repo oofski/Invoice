@@ -11,7 +11,6 @@ import { useProfile } from "@/components/ProfileProvider";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { INVOICE_STATUS, ROLES } from "@/lib/constants";
-import { sameName } from "@/lib/utils";
 import type { InvoiceWithRelations } from "@/lib/types";
 
 interface DetailResponse {
@@ -36,14 +35,15 @@ export default function InvoiceDetailPage() {
     [lineItems],
   );
 
+  // GL coding is for accountant/admin/staff only. Executives are NEVER shown
+  // or allowed to edit the 47-category GL view (GL is hidden server-side too).
+  const canSeeGl =
+    profile.role === ROLES.ACCOUNTANT ||
+    profile.role === ROLES.ADMIN ||
+    profile.role === ROLES.STAFF;
+
   const canEdit =
-    !!invoice &&
-    invoice.status !== INVOICE_STATUS.EXPORTED &&
-    (profile.role === ROLES.ACCOUNTANT ||
-      profile.role === ROLES.ADMIN ||
-      profile.role === ROLES.STAFF ||
-      (profile.role === ROLES.EXECUTIVE &&
-        sameName(invoice.approved_by, profile.name)));
+    !!invoice && invoice.status !== INVOICE_STATUS.EXPORTED && canSeeGl;
 
   const canSeeAudit =
     profile.role === ROLES.ACCOUNTANT || profile.role === ROLES.ADMIN;
@@ -159,18 +159,20 @@ export default function InvoiceDetailPage() {
             </div>
           )}
 
-          <div className="mt-6">
-            <h3 className="mb-2 text-sm font-semibold text-slate-700">
-              Line Items {canEdit && "· GL Coding"}
-            </h3>
-            <Card>
-              <LineItemsTable
-                lineItems={lineItems}
-                editable={canEdit}
-                onChange={refetch}
-              />
-            </Card>
-          </div>
+          {canSeeGl && (
+            <div className="mt-6">
+              <h3 className="mb-2 text-sm font-semibold text-slate-700">
+                Line Items {canEdit && "· GL Coding"}
+              </h3>
+              <Card>
+                <LineItemsTable
+                  lineItems={lineItems}
+                  editable={canEdit}
+                  onChange={refetch}
+                />
+              </Card>
+            </div>
+          )}
 
           {canSeeAudit && invoice.audit_log && (
             <div className="mt-6">

@@ -40,6 +40,7 @@ export interface InvoiceRow {
   due_date: string | null;
   business: string | null;
   class: string | null;
+  split_type: string | null;
   approved_by: string | null;
   status: InvoiceStatus;
   pdf_url: string | null;
@@ -66,6 +67,24 @@ export interface LineItemRow {
   split_parent_id: string | null;
   split_percentage: number | null;
   sort_order: number | null;
+  business: string | null;
+  class: string | null;
+}
+
+/**
+ * An invoice-level split allocation row (one per business/class slice) returned
+ * by `POST /api/invoices/:id/split-even`.
+ */
+export interface InvoiceAllocation {
+  id: string;
+  invoice_id: string;
+  business: string;
+  class: string;
+  percentage: number | null;
+  amount: number;
+  gl_account: string | null;
+  source: string;
+  created_at: string;
 }
 
 export interface ApprovalRow {
