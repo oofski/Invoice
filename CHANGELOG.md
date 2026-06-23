@@ -5,6 +5,27 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.0.7] — 2026-06-23
+
+### Added
+- **Invoice splitting for approvers.** When an executive opens an invoice they
+  get a simple view — **Approve**, **Split**, **Reject**, and an optional
+  **Comments** box — with line items hidden behind a "Show line-by-line detail"
+  toggle. Two split modes: **Quick even split** (splits evenly across the
+  business's classes — e.g. Neroli → 20% ×5) and **Per-line split** (assign each
+  line a Business + Class, with the Class list constrained to that Business).
+  The GL account on split rows comes from the vendor mapping. New endpoints:
+  `POST /api/invoices/:id/split-even`, `/split-lines`, `DELETE /:id/split`;
+  `approve` now accepts an optional comment.
+- **New `Nala` business entity** (business = class), alongside the existing
+  entities/classes.
+
+### Changed
+- **GL coding is now accountant/admin/staff only** — executives can no longer
+  see or edit the 47-category GL view (enforced server-side and in the UI).
+- Requires a one-time **D1 migration** (new `invoice_allocations` table +
+  `line_items.business/class` + `invoices.split_type`).
+
 ## [1.0.6] — 2026-06-23
 
 ### Added
@@ -129,6 +150,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.0.7]: https://github.com/oofski/Invoice/releases/tag/v1.0.7
 [1.0.6]: https://github.com/oofski/Invoice/releases/tag/v1.0.6
 [1.0.5]: https://github.com/oofski/Invoice/releases/tag/v1.0.5
 [1.0.4]: https://github.com/oofski/Invoice/releases/tag/v1.0.4

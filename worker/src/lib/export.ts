@@ -81,8 +81,9 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
     const coded = lineItems.filter((li) => li.business && li.class);
     if (coded.length > 0) {
       for (const li of leaves(coded)) {
-        const account =
-          li.gl_category ?? resolveGlAccount(vendorMapping, li.gl_category);
+        // Vendor mapping (gl_override / inventory) takes precedence; the line's
+        // own GL category is the fallback (resolveGlAccount handles the order).
+        const account = resolveGlAccount(vendorMapping, li.gl_category);
         pushRow([
           invoice.invoice_number,
           invoice.vendor,

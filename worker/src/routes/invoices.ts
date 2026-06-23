@@ -335,6 +335,8 @@ invoices.post("/:id/split-even", async (c) => {
   if (!inv) return c.json({ error: "Not found" }, 404);
   if (!canSplit(c, inv))
     return c.json({ error: "Only the assigned executive can split" }, 403);
+  if (inv.status === INVOICE_STATUS.EXPORTED)
+    return c.json({ error: "Invoice already exported" }, 409);
 
   const classes = BUSINESS_CLASSES[inv.business ?? ""] ?? [];
   if (classes.length < 2)
@@ -414,6 +416,8 @@ invoices.post("/:id/split-lines", async (c) => {
   if (!inv) return c.json({ error: "Not found" }, 404);
   if (!canSplit(c, inv))
     return c.json({ error: "Only the assigned executive can split" }, 403);
+  if (inv.status === INVOICE_STATUS.EXPORTED)
+    return c.json({ error: "Invoice already exported" }, 409);
 
   const body = await c.req.json().catch(() => ({}));
   const lines = (body as {
@@ -465,6 +469,8 @@ invoices.delete("/:id/split", async (c) => {
   if (!inv) return c.json({ error: "Not found" }, 404);
   if (!canSplit(c, inv))
     return c.json({ error: "Only the assigned executive can split" }, 403);
+  if (inv.status === INVOICE_STATUS.EXPORTED)
+    return c.json({ error: "Invoice already exported" }, 409);
 
   await c.env.DB.prepare(
     "DELETE FROM invoice_allocations WHERE invoice_id = ?",
