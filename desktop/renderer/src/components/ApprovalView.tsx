@@ -8,7 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { useProfile } from "@/components/ProfileProvider";
-import { formatCurrency, formatDate, ageLabel, cn } from "@/lib/utils";
+import { formatCurrency, formatDate, ageLabel, cn, sameName } from "@/lib/utils";
 import { INVOICE_STATUS, ROLES } from "@/lib/constants";
 import type { InvoiceRow, InvoiceWithRelations } from "@/lib/types";
 
@@ -131,7 +131,7 @@ function ApprovalDetail({
   const invoice = data?.invoice;
   const isPending = invoice?.status === INVOICE_STATUS.PENDING_APPROVAL;
   const isAssigned =
-    invoice?.approved_by === profile.name || profile.role === ROLES.ADMIN;
+    sameName(invoice?.approved_by, profile.name) || profile.role === ROLES.ADMIN;
 
   async function approve() {
     setBusy(true);

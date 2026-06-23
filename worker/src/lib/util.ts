@@ -38,6 +38,15 @@ export function hoursSince(iso: string | null | undefined): number {
   return Number.isNaN(t) ? 0 : (Date.now() - t) / 3_600_000;
 }
 
+/**
+ * Case-insensitive, whitespace-tolerant comparison of two person names. Used to
+ * match an invoice's approver (approved_by) to an executive user's name so that
+ * "Lisa", "lisa", and "Lisa " all resolve to the same person.
+ */
+export function sameName(a: string | null | undefined, b: string | null | undefined): boolean {
+  return (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+}
+
 /** Safe JSON parse for TEXT columns. */
 export function parseJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;

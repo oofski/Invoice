@@ -11,6 +11,7 @@ import { useProfile } from "@/components/ProfileProvider";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { INVOICE_STATUS, ROLES } from "@/lib/constants";
+import { sameName } from "@/lib/utils";
 import type { InvoiceWithRelations } from "@/lib/types";
 
 interface DetailResponse {
@@ -40,7 +41,7 @@ export default function InvoiceDetailPage() {
       profile.role === ROLES.ADMIN ||
       profile.role === ROLES.STAFF ||
       (profile.role === ROLES.EXECUTIVE &&
-        invoice.approved_by === profile.name));
+        sameName(invoice.approved_by, profile.name)));
 
   const canSeeAudit =
     profile.role === ROLES.ACCOUNTANT || profile.role === ROLES.ADMIN;

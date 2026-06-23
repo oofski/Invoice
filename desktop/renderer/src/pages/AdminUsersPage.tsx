@@ -12,7 +12,7 @@ import { Modal } from "@/components/ui/Modal";
 import { useApi } from "@/hooks/useApi";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
-import { ALL_ROLES, BUSINESS_ENTITIES, type Role } from "@/lib/constants";
+import { ALL_ROLES, APPROVERS, BUSINESS_ENTITIES, type Role } from "@/lib/constants";
 import type { UserRow, AuthUser } from "@/lib/types";
 
 export default function AdminUsersPage() {
@@ -221,11 +221,33 @@ export default function AdminUsersPage() {
               <label className="mb-1 block text-sm font-medium text-slate-700">
                 Name
               </label>
-              <Input
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Jane Doe"
-              />
+              {form.role === "executive" ? (
+                <>
+                  <Select
+                    value={form.name}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, name: e.target.value }))
+                    }
+                  >
+                    <option value="">Select approver…</option>
+                    {APPROVERS.map((a) => (
+                      <option key={a} value={a}>
+                        {a}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="mt-1 text-xs text-slate-400">
+                    An executive's name must match the approver they handle, so
+                    invoices route to them.
+                  </p>
+                </>
+              ) : (
+                <Input
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Jane Doe"
+                />
+              )}
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">

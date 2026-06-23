@@ -12,7 +12,7 @@ import {
 import { processInvoiceAI, ingestInvoicePdf } from "../lib/process";
 import { getPdf } from "../lib/storage";
 import { sendReminderEmail, sendRejectionEmail } from "../lib/email";
-import { nowIso, hoursSince } from "../lib/util";
+import { nowIso, hoursSince, sameName } from "../lib/util";
 import {
   AUDIT_ACTION,
   APPROVAL_STATUS,
@@ -31,7 +31,8 @@ function scopeClause(c: import("hono").Context<AppEnv>): {
 } {
   const u = user(c);
   if (u.role === ROLES.EXECUTIVE)
-    return { clause: " AND approved_by = ?", params: [u.name] };
+    // Case-insensitive / whitespace-tolerant so "Lisa" matches "lisa" / "Lisa ".
+    return { clause: " AND lower(trim(approved_by)) = lower(trim(?))", params: [u.name] };
   if (u.role === ROLES.STAFF)
     return { clause: " AND submitted_by = ?", params: [u.id] };
   return { clause: "", params: [] };
@@ -233,7 +234,7 @@ invoices.post("/:id/approve", async (c) => {
   const inv = await getInvoice(c.env, id);
   if (!inv) return c.json({ error: "Not found" }, 404);
   const u = user(c);
-  const assigned = u.role === ROLES.EXECUTIVE && inv.approved_by === u.name;
+  const assigned = u.role === ROLES.EXECUTIVE && sameName(inv.approved_by, u.name);
   if (!assigned && u.role !== ROLES.ADMIN)
     return c.json({ error: "Only the assigned executive can approve" }, 403);
   if (inv.status === INVOICE_STATUS.EXPORTED)
@@ -265,7 +266,7 @@ invoices.post("/:id/reject", async (c) => {
   const inv = await getInvoice(c.env, id);
   if (!inv) return c.json({ error: "Not found" }, 404);
   const u = user(c);
-  const assigned = u.role === ROLES.EXECUTIVE && inv.approved_by === u.name;
+  const assigned = u.role === ROLES.EXECUTIVE && sameName(inv.approved_by, u.name);
   if (!assigned && u.role !== ROLES.ADMIN)
     return c.json({ error: "Only the assigned executive can reject" }, 403);
   if (inv.status === INVOICE_STATUS.EXPORTED)

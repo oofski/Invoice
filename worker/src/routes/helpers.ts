@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import type { Env, AuthUser } from "../lib/types";
 import { ROLES } from "../lib/constants";
+import { sameName } from "../lib/util";
 
 export type AppEnv = { Bindings: Env; Variables: { user: AuthUser } };
 
@@ -24,7 +25,7 @@ export function canViewInvoice(
 ): boolean {
   const u = user(c);
   if (u.role === ROLES.ACCOUNTANT || u.role === ROLES.ADMIN) return true;
-  if (u.role === ROLES.EXECUTIVE) return invoice.approved_by === u.name;
+  if (u.role === ROLES.EXECUTIVE) return sameName(invoice.approved_by, u.name);
   if (u.role === ROLES.STAFF) return invoice.submitted_by === u.id;
   return false;
 }

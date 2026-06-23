@@ -5,9 +5,23 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
-## [Unreleased]
+## [1.0.2] — 2026-06-23
+
+### Fixed
+- **Executives could miss invoices routed to them due to name matching.** The
+  link between an invoice's approver and an executive account is the person's
+  name; it was an exact, case-sensitive match, so an account named "lisa" or
+  "Lisa " (or otherwise not exactly the approver name) saw an empty queue. Name
+  matching is now case-insensitive and whitespace-tolerant everywhere (queue
+  filter, view/approve/reject checks, approver→user resolution).
 
 ### Added
+- **Guardrail in the admin "Create user" form:** when the role is *executive*,
+  the Name field is now a dropdown of the approver names (Lori/Lisa/Kari/Bonnie/
+  Susan) so routing always connects.
+- **Worker returns real error messages** (Hono `onError`) instead of a bare
+  500, so failures (e.g. a missing `REDUCTO_API_KEY`) are diagnosable from the
+  app and the Worker logs.
 - **SharePoint auto-ingest.** New token-authed Worker endpoint
   `POST /ingest/upload` lets an external automation (a SharePoint document
   library wired to a Power Automate flow) drop PDFs straight into InvoiceIQ —
@@ -74,5 +88,6 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.0.2]: https://github.com/oofski/Invoice/releases/tag/v1.0.2
 [1.0.1]: https://github.com/oofski/Invoice/releases/tag/v1.0.1
 [1.0.0]: https://github.com/oofski/Invoice/releases/tag/v1.0.0

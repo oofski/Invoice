@@ -51,6 +51,14 @@ export function formatDate(value: string | null | undefined): string {
   });
 }
 
+/**
+ * Case-insensitive, whitespace-tolerant name comparison — matches an invoice's
+ * approver (approved_by) to an executive's profile name (mirrors the Worker).
+ */
+export function sameName(a: string | null | undefined, b: string | null | undefined): boolean {
+  return (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+}
+
 /** Whole hours elapsed since an ISO timestamp. */
 export function hoursSince(iso: string | null | undefined): number {
   if (!iso) return 0;

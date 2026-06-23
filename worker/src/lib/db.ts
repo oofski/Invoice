@@ -123,7 +123,7 @@ export async function resolveApproverUser(
   name: string,
 ): Promise<UserRow | null> {
   return env.DB.prepare(
-    "SELECT * FROM users WHERE name = ? AND is_active = 1 ORDER BY created_at ASC LIMIT 1",
+    "SELECT * FROM users WHERE lower(trim(name)) = lower(trim(?)) AND is_active = 1 ORDER BY created_at ASC LIMIT 1",
   )
     .bind(name)
     .first<UserRow>();
