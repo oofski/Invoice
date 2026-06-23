@@ -71,9 +71,19 @@ users.patch("/:id", async (c) => {
   }
   if ("is_active" in b) { sets.push("is_active = ?"); params.push(b.is_active ? 1 : 0); }
   if ("name" in b) { sets.push("name = ?"); params.push(b.name); }
+  if ("email" in b) {
+    const email = String(b.email ?? "").trim().toLowerCase();
+    if (!email) return c.json({ error: "Email can't be empty" }, 400);
+    sets.push("email = ?"); params.push(email);
+  }
   if (!sets.length) return c.json({ error: "No updatable fields" }, 400);
   params.push(c.req.param("id"));
-  await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...params).run();
+  try {
+    await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...params).run();
+  } catch (e) {
+    if (String(e).includes("UNIQUE")) return c.json({ error: "Email already exists" }, 409);
+    throw e;
+  }
   return c.json({ ok: true });
 });
 

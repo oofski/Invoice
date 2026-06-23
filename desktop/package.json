@@ -1,7 +1,7 @@
 {
   "name": "invoiceiq-desktop",
   "private": true,
-  "version": "1.0.4",
+  "version": "1.0.5",
   "main": "electron/main.js",
   "type": "commonjs",
   "scripts": {

@@ -5,6 +5,15 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.0.5] — 2026-06-23
+
+### Added
+- **Edit users (admin).** User Management now has an **Edit** action per user to
+  change their **name, email, and role** in one place (executives still pick
+  their name from the approver dropdown so routing stays connected). The Worker
+  `PATCH /api/users/:id` now also accepts `email`, with a friendly "Email already
+  exists" error on a collision.
+
 ## [1.0.4] — 2026-06-23
 
 ### Added
@@ -107,6 +116,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.0.5]: https://github.com/oofski/Invoice/releases/tag/v1.0.5
 [1.0.4]: https://github.com/oofski/Invoice/releases/tag/v1.0.4
 [1.0.2]: https://github.com/oofski/Invoice/releases/tag/v1.0.2
 [1.0.1]: https://github.com/oofski/Invoice/releases/tag/v1.0.1

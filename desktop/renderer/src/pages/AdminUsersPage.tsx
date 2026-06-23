@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { UserPlus, Copy, Check, Trash2, KeyRound } from "lucide-react";
+import { UserPlus, Copy, Check, Trash2, KeyRound, Pencil } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import {
   Card,
@@ -27,6 +27,9 @@ export default function AdminUsersPage() {
   const [copied, setCopied] = useState(false);
   const [resetInfo, setResetInfo] = useState<{ name: string; password: string } | null>(null);
   const [resetCopied, setResetCopied] = useState(false);
+  const [editUser, setEditUser] = useState<UserRow | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", email: "", role: "" });
+  const [editing, setEditing] = useState(false);
 
   const users = data?.users ?? [];
 
@@ -78,6 +81,34 @@ export default function AdminUsersPage() {
       toast.error(err instanceof ApiError ? err.message : "Update failed");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  function openEdit(u: UserRow) {
+    setEditUser(u);
+    setEditForm({ name: u.name, email: u.email, role: u.role });
+  }
+
+  async function saveEdit() {
+    if (!editUser) return;
+    if (!editForm.name || !editForm.email) {
+      toast.error("Name and email are required");
+      return;
+    }
+    setEditing(true);
+    try {
+      await api.patch(`/api/users/${editUser.id}`, {
+        name: editForm.name,
+        email: editForm.email,
+        role: editForm.role,
+      });
+      toast.success("User updated");
+      setEditUser(null);
+      refetch();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Update failed");
+    } finally {
+      setEditing(false);
     }
   }
 
@@ -240,6 +271,14 @@ export default function AdminUsersPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
                           <button
+                            onClick={() => openEdit(u)}
+                            disabled={busyId === u.id}
+                            title="Edit user"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Pencil className="h-3.5 w-3.5" /> Edit
+                          </button>
+                          <button
                             onClick={() => resetPassword(u)}
                             disabled={busyId === u.id}
                             title="Reset password"
@@ -269,6 +308,82 @@ export default function AdminUsersPage() {
           )}
         </Card>
       </div>
+
+      <Modal open={!!editUser} onClose={() => setEditUser(null)} title="Edit user">
+        {editUser && (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Name
+              </label>
+              {editForm.role === "executive" ? (
+                <>
+                  <Select
+                    value={editForm.name}
+                    onChange={(e) =>
+                      setEditForm((f) => ({ ...f, name: e.target.value }))
+                    }
+                  >
+                    <option value="">Select approver…</option>
+                    {APPROVERS.map((a) => (
+                      <option key={a} value={a}>
+                        {a}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="mt-1 text-xs text-slate-400">
+                    An executive's name must match the approver they handle.
+                  </p>
+                </>
+              ) : (
+                <Input
+                  value={editForm.name}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, name: e.target.value }))
+                  }
+                />
+              )}
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Email
+              </label>
+              <Input
+                type="email"
+                value={editForm.email}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, email: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Role
+              </label>
+              <Select
+                value={editForm.role}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, role: e.target.value }))
+                }
+              >
+                {ALL_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="secondary" onClick={() => setEditUser(null)}>
+                Cancel
+              </Button>
+              <Button onClick={saveEdit} loading={editing}>
+                Save changes
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={!!resetInfo}
