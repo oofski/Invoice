@@ -9,12 +9,10 @@ import {
   resolveApproverUser,
   hydrateInvoice,
 } from "../lib/db";
-import { processInvoiceAI, findDuplicate } from "../lib/process";
-import { putPdf, getPdf, pdfKey } from "../lib/storage";
-import { ocrPdf } from "../lib/reducto";
-import { runPrompt1 } from "../lib/ai/prompts";
+import { processInvoiceAI, ingestInvoicePdf } from "../lib/process";
+import { getPdf } from "../lib/storage";
 import { sendReminderEmail, sendRejectionEmail } from "../lib/email";
-import { uuid, nowIso, parseAmount, toIsoDate, hoursSince } from "../lib/util";
+import { nowIso, hoursSince } from "../lib/util";
 import {
   AUDIT_ACTION,
   APPROVAL_STATUS,
@@ -70,83 +68,15 @@ invoices.post("/upload", async (c) => {
   const buf = await file.arrayBuffer();
   const fileName = file.name ?? "invoice.pdf";
 
-  // Reducto parse -> Prompt 1 reads the header -> duplicate check BEFORE the
-  // heavier Claude steps (Prompt 2 + line-item coding). The stored parse output
-  // is reused by processInvoiceAI, so the parser is not re-billed.
-  const { raw, text } = await ocrPdf(c.env, buf, fileName);
-  const header = await runPrompt1(c.env, text);
-  const vendor = header.Vendor || "Unknown Vendor";
-  const invoiceNumber = header.InvoiceNumber || `NO-INV-${Date.now()}`;
-  const total = parseAmount(header.TotalAmount);
-
-  if (!override) {
-    const dup = await findDuplicate(c.env, vendor, invoiceNumber, total);
-    if (dup)
-      return c.json(
-        {
-          duplicate: true,
-          existingInvoiceId: dup.id,
-          vendor,
-          invoice_number: invoiceNumber,
-          total_amount: total,
-        },
-        409,
-      );
-  }
-
-  const id = uuid();
-  try {
-    await c.env.DB.prepare(
-      `INSERT INTO invoices (id, vendor, invoice_number, subtotal, sales_tax, total_amount,
-         inv_date, due_date, business, class, status, has_pdf, submitted_by, submission_type, textract_raw)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    )
-      .bind(
-        id,
-        vendor,
-        invoiceNumber,
-        header.Subtotal ? parseAmount(header.Subtotal) : null,
-        header.SalesTax ? parseAmount(header.SalesTax) : 0,
-        total,
-        toIsoDate(header.InvDate),
-        toIsoDate(header.DueDate) ?? toIsoDate(header.InvDate),
-        header.Business ?? null,
-        header.Class ?? null,
-        INVOICE_STATUS.PROCESSING,
-        1,
-        u.id,
-        submissionType,
-        JSON.stringify(raw),
-      )
-      .run();
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("UNIQUE"))
-      return c.json(
-        { duplicate: true, vendor, invoice_number: invoiceNumber, total_amount: total },
-        409,
-      );
-    throw e;
-  }
-
-  const key = pdfKey(id);
-  await putPdf(c.env, key, buf);
-  await c.env.DB.prepare(
-    "INSERT INTO pdf_files (invoice_id, file_name, mime, r2_key, size) VALUES (?,?,?,?,?)",
-  )
-    .bind(id, fileName, "application/pdf", key, buf.byteLength)
-    .run();
-
-  await audit(c.env, {
-    invoiceId: id,
-    userId: u.id,
-    action: AUDIT_ACTION.INVOICE_UPLOADED,
-    newValue: { vendor, invoice_number: invoiceNumber, total_amount: total, submission_type: submissionType },
-    note: `Uploaded ${fileName}`,
+  const result = await ingestInvoicePdf(c.env, {
+    buf,
+    fileName,
+    submittedBy: u.id,
+    submissionType,
+    override,
   });
-
-  const result = await processInvoiceAI(c.env, id, u.id);
-  return c.json({ invoiceId: id, ...result }, 201);
+  if (result.duplicate) return c.json(result, 409);
+  return c.json(result, 201);
 });
 
 // ----- POST /process ---------------------------------------------------

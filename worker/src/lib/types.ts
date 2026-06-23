@@ -18,6 +18,8 @@ export interface Env {
   RESEND_API_KEY: string;
   RESEND_FROM_EMAIL: string;
   SESSION_SECRET?: string;
+  /** Shared secret for unattended ingestion (e.g. SharePoint via Power Automate). */
+  INGEST_TOKEN?: string;
   APP_URL?: string;
 }
 

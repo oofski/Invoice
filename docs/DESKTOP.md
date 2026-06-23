@@ -24,11 +24,17 @@ npm run db:init                           # apply schema + seed to the remote D1
 # Secrets (never committed):
 npx wrangler secret put REDUCTO_API_KEY      # document parsing / OCR (reducto.ai)
 npx wrangler secret put ANTHROPIC_API_KEY
+npx wrangler secret put INGEST_TOKEN          # optional — SharePoint/Power Automate ingest
 npx wrangler secret put RESEND_API_KEY        # optional — only if using email
 # Optional vars in wrangler.toml: REDUCTO_BASE_URL, RESEND_FROM_EMAIL, APP_URL
 
 npm run deploy                            # -> https://invoiceiq.<account>.workers.dev
 ```
+
+> **Prefer the Cloudflare dashboard (no CLI)?** See **`docs/CLOUDFLARE.md`** for a
+> click-by-click setup that creates D1, R2, the Worker, and secrets entirely from
+> the Cloudflare dashboard + GitHub web UI — no local `wrangler` install needed.
+> To auto-ingest invoices from a SharePoint folder, see **`docs/SHAREPOINT.md`**.
 
 ## 2. Build the Windows installer (the download link)
 

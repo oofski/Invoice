@@ -17,9 +17,10 @@ database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 binding = "PDFS"
 bucket_name = "invoiceiq-pdfs"
 
-# --- Secrets (set with `wrangler secret put <NAME>`; never commit) ---
+# --- Secrets (dashboard: Settings -> Variables and Secrets; or `wrangler secret put`) ---
 # REDUCTO_API_KEY           (document parsing / OCR — reducto.ai)
 # ANTHROPIC_API_KEY         (the 3 Claude prompts)
+# INGEST_TOKEN              (optional — shared secret for SharePoint/Power Automate ingestion)
 # RESEND_API_KEY            (optional — approval/reminder emails)
 # SESSION_SECRET            (optional extra entropy for tokens)
 

@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import type { AppEnv } from "./routes/helpers";
 import { userFromToken, bearer } from "./lib/auth";
 import { authPublic, authProtected } from "./routes/auth";
+import { ingest } from "./routes/ingest";
 import { invoices } from "./routes/invoices";
 import { lineItems } from "./routes/lineItems";
 import { exportRoutes } from "./routes/export";
@@ -24,6 +25,10 @@ app.get("/", (c) => c.json({ name: "InvoiceIQ API", status: "ok" }));
 
 // Public auth endpoints.
 app.route("/api/auth", authPublic);
+
+// Unattended ingestion (SharePoint / Power Automate) — token-authed, NOT a user
+// session, so it lives outside the `/api/*` gate below.
+app.route("/ingest", ingest);
 
 // Auth gate for everything below.
 app.use("/api/*", async (c, next) => {

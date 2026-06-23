@@ -1,7 +1,8 @@
 import type { Env, InvoiceRow } from "./types";
 import { ocrPdf, extractTextFromReducto } from "./reducto";
-import { getPdf } from "./storage";
+import { getPdf, putPdf, pdfKey } from "./storage";
 import { runPipeline } from "./ai/pipeline";
+import { runPrompt1 } from "./ai/prompts";
 import { audit, resolveApproverUser, getInvoice } from "./db";
 import { sendApprovalEmail } from "./email";
 import { uuid, nowIso, parseAmount, toIsoDate } from "./util";
@@ -170,6 +171,130 @@ export async function processInvoiceAI(
     });
     throw err;
   }
+}
+
+/**
+ * Shared end-to-end ingestion for a single PDF: Reducto parse -> Prompt 1 header
+ * -> duplicate check -> persist invoice + PDF (R2) -> full AI pipeline. Used by
+ * both the interactive accountant upload route and unattended sources (e.g. the
+ * SharePoint / Power Automate `/ingest` endpoint), so every path runs identical
+ * logic, duplicate detection, and audit trail.
+ */
+export interface IngestOptions {
+  buf: ArrayBuffer;
+  fileName: string;
+  /** users.id to attribute the upload to, or null for an unattributed source. */
+  submittedBy: string | null;
+  submissionType: "ACCOUNTANT" | "STAFF";
+  /** Skip duplicate detection (vendor + invoice# + total) when true. */
+  override: boolean;
+  /** Human label for the audit note, e.g. "SharePoint". */
+  source?: string;
+}
+
+export type IngestResult =
+  | {
+      duplicate: true;
+      existingInvoiceId?: string;
+      vendor: string;
+      invoice_number: string;
+      total_amount: number;
+    }
+  | {
+      duplicate: false;
+      invoiceId: string;
+      status: string;
+      approver: string;
+      lineItemCount: number;
+    };
+
+export async function ingestInvoicePdf(
+  env: Env,
+  opts: IngestOptions,
+): Promise<IngestResult> {
+  const { buf, fileName, submittedBy, submissionType, override, source } = opts;
+
+  // Reducto parse -> Prompt 1 reads the header -> duplicate check BEFORE the
+  // heavier Claude steps (Prompt 2 + line-item coding). The stored parse output
+  // is reused by processInvoiceAI, so the parser is not re-billed.
+  const { raw, text } = await ocrPdf(env, buf, fileName);
+  const header = await runPrompt1(env, text);
+  const vendor = header.Vendor || "Unknown Vendor";
+  const invoiceNumber = header.InvoiceNumber || `NO-INV-${Date.now()}`;
+  const total = parseAmount(header.TotalAmount);
+
+  if (!override) {
+    const dup = await findDuplicate(env, vendor, invoiceNumber, total);
+    if (dup)
+      return {
+        duplicate: true,
+        existingInvoiceId: dup.id,
+        vendor,
+        invoice_number: invoiceNumber,
+        total_amount: total,
+      };
+  }
+
+  const id = uuid();
+  try {
+    await env.DB.prepare(
+      `INSERT INTO invoices (id, vendor, invoice_number, subtotal, sales_tax, total_amount,
+         inv_date, due_date, business, class, status, has_pdf, submitted_by, submission_type, textract_raw)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    )
+      .bind(
+        id,
+        vendor,
+        invoiceNumber,
+        header.Subtotal ? parseAmount(header.Subtotal) : null,
+        header.SalesTax ? parseAmount(header.SalesTax) : 0,
+        total,
+        toIsoDate(header.InvDate),
+        toIsoDate(header.DueDate) ?? toIsoDate(header.InvDate),
+        header.Business ?? null,
+        header.Class ?? null,
+        INVOICE_STATUS.PROCESSING,
+        1,
+        submittedBy,
+        submissionType,
+        JSON.stringify(raw),
+      )
+      .run();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("UNIQUE"))
+      return {
+        duplicate: true,
+        vendor,
+        invoice_number: invoiceNumber,
+        total_amount: total,
+      };
+    throw e;
+  }
+
+  const key = pdfKey(id);
+  await putPdf(env, key, buf);
+  await env.DB.prepare(
+    "INSERT INTO pdf_files (invoice_id, file_name, mime, r2_key, size) VALUES (?,?,?,?,?)",
+  )
+    .bind(id, fileName, "application/pdf", key, buf.byteLength)
+    .run();
+
+  await audit(env, {
+    invoiceId: id,
+    userId: submittedBy,
+    action: AUDIT_ACTION.INVOICE_UPLOADED,
+    newValue: {
+      vendor,
+      invoice_number: invoiceNumber,
+      total_amount: total,
+      submission_type: submissionType,
+    },
+    note: source ? `Ingested ${fileName} from ${source}` : `Uploaded ${fileName}`,
+  });
+
+  const result = await processInvoiceAI(env, id, submittedBy);
+  return { duplicate: false, invoiceId: id, ...result };
 }
 
 /** Duplicate detection (vendor + invoice# + total) — Brief §13. */

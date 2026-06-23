@@ -7,6 +7,18 @@ installer on the GitHub Releases page.
 
 ## [Unreleased]
 
+### Added
+- **SharePoint auto-ingest.** New token-authed Worker endpoint
+  `POST /ingest/upload` lets an external automation (a SharePoint document
+  library wired to a Power Automate flow) drop PDFs straight into InvoiceIQ —
+  they run the identical pipeline (Reducto → 3 Claude prompts → approval
+  routing) as an in-app upload. New optional secret: `INGEST_TOKEN`. Setup guide
+  in `docs/SHAREPOINT.md`. The shared ingestion logic is factored into
+  `ingestInvoicePdf()` so the in-app upload and SharePoint path never diverge.
+- **Dashboard deployment guide** (`docs/CLOUDFLARE.md`) — stand up D1, R2, the
+  Worker, and secrets entirely from the Cloudflare dashboard + GitHub web UI,
+  with no local `wrangler` install.
+
 ### Changed
 - **OCR/document parsing switched from AWS Textract to Reducto.** The Worker now
   uploads the PDF to Reducto and parses it to text/markdown for the Claude
