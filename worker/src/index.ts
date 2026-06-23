@@ -51,4 +51,13 @@ app.route("/api/audit", audit);
 app.route("/api/dashboard", dashboard);
 app.route("/api/users", users);
 
+// Surface real error messages to the client (and the Worker logs) instead of a
+// bare 500, so failures like a misconfigured Reducto key or an unexpected
+// Reducto API response are diagnosable from the app.
+app.onError((err, c) => {
+  console.error("[worker error]", err);
+  const message = err instanceof Error ? err.message : "Internal server error";
+  return c.json({ error: message }, 500);
+});
+
 export default app;
