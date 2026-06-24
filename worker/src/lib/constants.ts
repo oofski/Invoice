@@ -355,8 +355,75 @@ export const GL_CATEGORIES = {
   ],
 } as const;
 
-/** Flat list of all 47 allowed GL categories. */
-export const GL_CATEGORIES_FLAT: string[] = Object.values(GL_CATEGORIES).flat();
+/**
+ * Group B (v1.1.4) NEW canonical category names introduced by the entity-
+ * specific COA expansion (IBW account splits, salon/spa payroll splits, and the
+ * full Nala §7 discrete admin accounts). These are appended to the universal
+ * allow-list (`GL_CATEGORIES_FLAT`) so resolveGlAccount / export / the Reducto
+ * enum keep accepting them. Legacy / replaced names are intentionally NOT here
+ * (they live in ENTITY_COA_LEGACY) but they still appear in GL_CATEGORIES, so
+ * the union below keeps them in the flat list too.
+ */
+export const GL_EXTRA_CATEGORIES: string[] = [
+  // IBW account splits + rename
+  "Bank Fees",
+  "Credit Card Processing",
+  "Professional Services",
+  "Outside Services",
+  "Guest Amenities",
+  // Salon/spa payroll splits (SKNBar & Neroli)
+  "Service Payroll",
+  "Retail Payroll",
+  // Nala (Corporate/Administrative) §7 discrete accounts
+  "Bank Service Charges",
+  "Credit Card Fees",
+  "Employee Education",
+  "Computer and Internet Expenses",
+  "Insurance Expense - Health",
+  "Lodging",
+  "Transportation",
+  "Meals and Entertainment",
+  "Automobile Expense",
+  "Advertising and Promotion",
+  "Marketing Web/Internet",
+  "Printing/Collateral",
+  "Direct Client Marketing",
+  "Depreciation Expense",
+  "Meeting & Events",
+  "Parking/Mileage",
+  "Fees & Penalties",
+  "Telephone Expense",
+  "Insurance Expense",
+  "Office Supplies",
+  "Payroll-Wages/Salary/Commission",
+  "Payroll-Employer Taxes",
+];
+
+/**
+ * Flat universal allow-list of every accepted GL category NAME. It is the
+ * unique union of: the curated `GL_CATEGORIES` groups (the historical 47, which
+ * also covers the legacy/replaced names), the Group B `GL_EXTRA_CATEGORIES`,
+ * and every key across all `ENTITY_COA` maps. Populated by `buildGlFlat()`
+ * AFTER the entity COA maps are declared (see end of COA section) so it can
+ * include their keys without a temporal-dead-zone reference.
+ */
+export const GL_CATEGORIES_FLAT: string[] = [];
+
+/** Internal: assembles the unique union into GL_CATEGORIES_FLAT (idempotent). */
+function buildGlFlat(entityCoa: Record<string, Record<string, string>>): void {
+  const seen = new Set<string>();
+  const push = (name: string) => {
+    if (!seen.has(name)) {
+      seen.add(name);
+      GL_CATEGORIES_FLAT.push(name);
+    }
+  };
+  Object.values(GL_CATEGORIES).flat().forEach(push);
+  GL_EXTRA_CATEGORIES.forEach(push);
+  for (const coa of Object.values(entityCoa)) {
+    Object.keys(coa).forEach(push);
+  }
+}
 
 /**
  * Per-line item "Type" the executive can set during a per-line split. Selecting a
@@ -405,12 +472,13 @@ export const ENTITY_COA: Record<string, Record<string, string>> = {
     "Sales/Use Tax": "5400",
     "Accounting Services": "6000",
     "Corp Management Fee": "6005",
-    // note: spec splits Bank Fees 6040 / Credit Card Processing 6100 — the
-    // split into a separate Credit Card Processing account is deferred to a
-    // later phase; use the primary 6040 for the current canonical category.
-    "Bank Fees & CC Processing": "6040",
+    // Group B (v1.1.4): the spec splits the combined account into two discrete
+    // accounts. New coding uses these; the legacy combined name resolves via
+    // ENTITY_COA_LEGACY.
+    "Bank Fees": "6040",
+    "Credit Card Processing": "6100",
     "Bad Debt": "6045",
-    "Guest Relations": "6053", // spec "Guest Amenities"
+    "Guest Amenities": "6053", // spec "Guest Amenities" (was "Guest Relations")
     "Computer & IT": "6060",
     Depreciation: "6070",
     Discounts: "6075",
@@ -424,10 +492,10 @@ export const ENTITY_COA: Record<string, Record<string, string>> = {
     "Insurance - Business": "6160",
     "Insurance - Health": "6180",
     "Licenses & Permits": "6220",
-    // note: spec splits Professional Services 6224 / Outside Services 6240 —
-    // the split into a separate Professional Services account is deferred to a
-    // later phase; use the primary 6240 for the current canonical category.
-    "Professional / Outside Services": "6240",
+    // Group B (v1.1.4): split into two discrete accounts. New coding uses
+    // these; the legacy combined name resolves via ENTITY_COA_LEGACY.
+    "Professional Services": "6224",
+    "Outside Services": "6240",
     Marketing: "6235",
     "Penalties & Fees": "6255",
     "Occupancy - Rent": "6280",
@@ -449,8 +517,10 @@ export const ENTITY_COA: Record<string, Record<string, string>> = {
   // SKNBarRX (Clinical/Spa Mapping).
   SKNBar: {
     "Service Costs": "5000",
+    "Service Payroll": "5010",
     "Retail / Product Costs": "5100",
     "Sales/Use Tax": "5400",
+    "Retail Payroll": "5500",
     "Accounting Services": "6000",
     "Corp Management Fee": "6005",
     "Bank Fees & CC Processing": "6040",
@@ -483,8 +553,10 @@ export const ENTITY_COA: Record<string, Record<string, string>> = {
   // Neroli (Salon/Spa Mapping).
   Neroli: {
     "Service Costs": "5000",
+    "Service Payroll": "5010",
     "Retail / Product Costs": "5100",
     "Sales/Use Tax": "5400",
+    "Retail Payroll": "5500",
     "Accounting Services": "6000",
     "Corp Management Fee": "6005",
     "Bank Fees & CC Processing": "6040",
@@ -517,25 +589,68 @@ export const ENTITY_COA: Record<string, Record<string, string>> = {
   },
 
   // Nala (Corporate/Administrative Mapping). Admin resolves here via
-  // ENTITY_COA_ALIAS. Only the current canonical names with a clear admin-COA
-  // equivalent are mapped; the spec's brand-new admin accounts (Lodging,
-  // Transportation, Meals & Entertainment, Office Supplies, etc.) are NEW
-  // categories deferred to a later phase and are intentionally NOT added here.
+  // ENTITY_COA_ALIAS. Group B (v1.1.4): the canonical set is now the spec §7
+  // discrete admin accounts (the dropdown offer set). The Group-A generic names
+  // that were replaced live in ENTITY_COA_LEGACY so historical rows still
+  // resolve / validate.
   Nala: {
-    "Bank Fees & CC Processing": "6040", // spec "Bank Service Charges"
+    "Bank Service Charges": "6040",
+    "Credit Card Fees": "6042",
     "Dues & Subscriptions": "6090",
+    "Employee Education": "6114",
     Freight: "6150",
-    "Computer & IT": "6170", // spec "Computer and Internet Expenses"
-    "Insurance - Health": "6180", // spec "Insurance Expense - Health"
-    Marketing: "6235", // spec "Marketing Web/Internet"
-    "Penalties & Fees": "6255", // spec "Fees & Penalties"
+    "Computer and Internet Expenses": "6170",
+    "Insurance Expense - Health": "6180",
+    Lodging: "6229-1",
+    Transportation: "6229-3",
+    "Meals and Entertainment": "6229-4",
+    "Automobile Expense": "6229-5",
+    "Advertising and Promotion": "6230",
+    "Marketing Web/Internet": "6235",
+    "Printing/Collateral": "6237",
+    "Direct Client Marketing": "6238",
+    "Depreciation Expense": "6240",
+    "Meeting & Events": "6245",
+    "Parking/Mileage": "6250",
+    "Fees & Penalties": "6255",
     Supplies: "6300",
-    Telephone: "6310", // spec "Telephone Expense"
-    "Payroll - Wages": "6600", // spec "Payroll-Wages/Salary/Commission"
-    "Payroll - Taxes": "6605", // spec "Payroll-Employer Taxes"
+    "Telephone Expense": "6310",
+    "Insurance Expense": "6330",
+    "Office Supplies": "6490",
+    "Payroll-Wages/Salary/Commission": "6600",
+    "Payroll-Employer Taxes": "6605",
     "Corp Management Fee": "7000",
-    Depreciation: "6240", // spec "Depreciation Expense"
     "Reconciliation Discrepancies": "None",
+  },
+};
+
+/**
+ * Per-entity fallback map of REPLACED legacy category names → account number.
+ * These names are NOT offered in the dropdown and are NOT part of the canonical
+ * ENTITY_COA, but they remain RESOLVABLE and VALID so that historical rows
+ * stored under an old combined / generic name still export with the correct
+ * number and pass entity-aware validation. `glAccountNumber` consults this map
+ * only after ENTITY_COA misses (Group B v1.1.4).
+ */
+export const ENTITY_COA_LEGACY: Record<string, Record<string, string>> = {
+  // IBW & Chicago: the combined accounts that were split into discrete ones.
+  IBW: {
+    "Bank Fees & CC Processing": "6040", // split into Bank Fees / Credit Card Processing
+    "Professional / Outside Services": "6240", // split into Professional Services / Outside Services
+    "Guest Relations": "6053", // renamed to "Guest Amenities"
+  },
+
+  // Nala & Admin: the Group-A generic names replaced by the spec §7 discrete set.
+  Nala: {
+    "Bank Fees & CC Processing": "6040", // -> Bank Service Charges
+    "Computer & IT": "6170", // -> Computer and Internet Expenses
+    "Insurance - Health": "6180", // -> Insurance Expense - Health
+    Marketing: "6235", // -> Marketing Web/Internet
+    "Penalties & Fees": "6255", // -> Fees & Penalties
+    Telephone: "6310", // -> Telephone Expense
+    "Payroll - Wages": "6600", // -> Payroll-Wages/Salary/Commission
+    "Payroll - Taxes": "6605", // -> Payroll-Employer Taxes
+    Depreciation: "6240", // -> Depreciation Expense
   },
 };
 
@@ -548,12 +663,87 @@ export const ENTITY_COA_ALIAS: Record<string, string> = {
   Admin: "Nala",
 };
 
+// Now that every ENTITY_COA map is declared, assemble the universal allow-list
+// (curated groups ∪ Group B extras ∪ all entity-COA keys), deduplicated.
+buildGlFlat(ENTITY_COA);
+
 /**
- * Derives the 4-digit GL account number (as a string) for a given business
- * entity + canonical GL category NAME. Resolves the entity through
- * `ENTITY_COA_ALIAS` first. Returns "" when the entity or category is unknown
- * (null-safe) or when that entity's COA has no equivalent for the category.
- * Note: some values are non-numeric sentinels ("Varies" / "None").
+ * Maps EVERY category NAME (existing curated + Group B new + every entity-COA
+ * key) to one of the three high-level reporting groups. Cost of Sales covers
+ * the direct service/retail/kit cost and payroll-cost accounts; Revenue covers
+ * the curated Revenue group; everything else (and any unknown name) defaults to
+ * Operating Expenses. Group B v1.1.4.
+ */
+export const CATEGORY_GROUP_OF: Record<string, string> = (() => {
+  const map: Record<string, string> = {};
+  // Seed from the curated groups first so "Revenue" / "Cost of Sales" win.
+  for (const [group, categories] of Object.entries(GL_CATEGORIES)) {
+    for (const cat of categories) map[cat] = group;
+  }
+  // Explicit Cost-of-Sales additions (Group B payroll-cost splits).
+  const costOfSales = [
+    "Service Costs",
+    "Retail / Product Costs",
+    "Kit Costs",
+    "Sales/Use Tax",
+    "Service Payroll",
+    "Retail Payroll",
+  ];
+  for (const cat of costOfSales) map[cat] = "Cost of Sales";
+  // Every remaining category name (entity-COA keys + extras) defaults to
+  // Operating Expenses unless already classified as Revenue / Cost of Sales.
+  for (const cat of GL_CATEGORIES_FLAT) {
+    if (!map[cat]) map[cat] = "Operating Expenses";
+  }
+  return map;
+})();
+
+/**
+ * L2 absolute vendor → category overrides (Categorization Logic Hierarchy
+ * Level 2, spec §5). An exact / substring vendor match here bypasses keyword
+ * and entity-conditional logic. Consumed by the routing/categorization logic
+ * agent (rules.ts) — defined here as a shared constant.
+ */
+export const VENDOR_CATEGORY: Record<string, string> = {
+  ADP: "Payroll - Wages",
+  "AT&T": "Telephone",
+  "Facebook Ads": "Marketing",
+  "Fromm International": "Kit Costs",
+  "State Farm": "Insurance - Business",
+};
+
+// ---------------------------------------------------------------------------
+// Routing keyword patterns (Personnel Routing Logic, spec §4) — consumed by
+// the routing logic agent (rules.ts). Defined here as shared constants.
+// ---------------------------------------------------------------------------
+
+/**
+ * Bonnie — the overriding safety net (entire org): building / facility /
+ * renovation / company-wide / administrative expenses.
+ */
+export const BONNIE_KEYWORDS =
+  /\b(construction|renovation|remodel|build[- ]?out|buildout|facility|facilities|hvac|roof|plumbing|electrical|contractor|capital improvement|leasehold|company[- ]?wide|corporate|administrative|admin)\b/i;
+
+/** Lisa — standard inventory and supply-side expenses (IBW / Chicago). */
+export const LISA_INVENTORY_KEYWORDS =
+  /\b(inventory|supplies|supply|product|kit|backbar|retail|stock|reorder)\b/i;
+
+/** Kari — "wonky" items, recurring subscriptions, one-off / admin items. */
+export const KARI_WONKY_KEYWORDS =
+  /\b(subscription|recurring|monthly|annual|membership|software|saas|license|one[- ]?off|one[- ]?time|miscellaneous|reimbursement|dues)\b/i;
+
+/** Aveda vendor match — drives Retail vs. Backbar product differentiation. */
+export const AVEDA_VENDOR_PATTERN = /\baveda\b/i;
+
+/**
+ * Derives the GL account number (as a string) for a given business entity +
+ * GL category NAME. Resolves the entity through `ENTITY_COA_ALIAS` first, then
+ * looks up the canonical `ENTITY_COA` map, falling back to the
+ * `ENTITY_COA_LEGACY` map so that historical rows stored under a replaced
+ * (combined / generic) name still resolve to the correct number. Returns ""
+ * when the entity or category is unknown (null-safe) or when neither map has an
+ * equivalent. Note: some values are non-numeric sentinels ("Varies" / "None")
+ * or are suffixed (e.g. "6229-1").
  */
 export function glAccountNumber(
   entity: string | null | undefined,
@@ -561,9 +751,40 @@ export function glAccountNumber(
 ): string {
   if (!entity || !category) return "";
   const resolved = ENTITY_COA_ALIAS[entity] ?? entity;
+  return (
+    ENTITY_COA[resolved]?.[category] ??
+    ENTITY_COA_LEGACY[resolved]?.[category] ??
+    ""
+  );
+}
+
+/**
+ * True when `category` is acceptable for the given business entity. Used by the
+ * line-item GL-category PATCH and split-allocation validation (Group B v1.1.4).
+ *
+ * Accepts when:
+ *  - category is the manual-review sentinel; OR
+ *  - the entity (alias-resolved) offers it in its canonical COA; OR
+ *  - the entity offers it in its legacy COA (historical names); OR
+ *  - it equals the value currently stored on the row (grandfathering an edit
+ *    that doesn't change the category); OR
+ *  - the entity is null/unknown — in which case we fall back to the universal
+ *    GL_CATEGORIES_FLAT allow-list.
+ */
+export function isCategoryValidForEntity(
+  entity: string | null | undefined,
+  category: string | null | undefined,
+  currentStoredValue?: string | null,
+): boolean {
+  if (!category) return false;
+  if (category === REQUIRES_MANUAL_REVIEW) return true;
+  if (currentStoredValue && category === currentStoredValue) return true;
+  if (!entity) return GL_CATEGORIES_FLAT.includes(category);
+  const resolved = ENTITY_COA_ALIAS[entity] ?? entity;
   const coa = ENTITY_COA[resolved];
-  if (!coa) return "";
-  return coa[category] ?? "";
+  const legacy = ENTITY_COA_LEGACY[resolved];
+  if (!coa && !legacy) return GL_CATEGORIES_FLAT.includes(category);
+  return Boolean(coa?.[category]) || Boolean(legacy?.[category]);
 }
 
 // ---------------------------------------------------------------------------

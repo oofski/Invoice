@@ -10,6 +10,12 @@ import {
   REQUIRES_MANUAL_REVIEW,
   CONFIDENCE_LEVEL,
   APPROVERS,
+  VENDOR_CATEGORY,
+  BONNIE_KEYWORDS,
+  LISA_INVENTORY_KEYWORDS,
+  KARI_WONKY_KEYWORDS,
+  AVEDA_VENDOR_PATTERN,
+  isCategoryValidForEntity,
   type Approver,
   type BusinessEntity,
   type ClassName,
@@ -40,6 +46,23 @@ function vendorInList(vendor: string, list: string[]): boolean {
     const nv = normalizeVendor(v);
     return nv && (n.includes(nv) || nv.includes(n));
   });
+}
+
+/**
+ * L2 absolute vendor → category lookup (Categorization Hierarchy Level 2). Does a
+ * normalized substring match of the invoice vendor against `VENDOR_CATEGORY`
+ * keys. Returns the mapped category NAME or null. Entity-validity gating is the
+ * caller's responsibility (codeLineItem only uses the result when valid for the
+ * entity, otherwise it falls through).
+ */
+export function vendorCategory(vendor: string): string | null {
+  const n = normalizeVendor(vendor);
+  if (!n) return null;
+  for (const [key, cat] of Object.entries(VENDOR_CATEGORY)) {
+    const nv = normalizeVendor(key);
+    if (nv && (n.includes(nv) || nv.includes(n))) return cat;
+  }
+  return null;
 }
 
 export async function loadVendorMappings(env: Env): Promise<VendorMappingRow[]> {
@@ -120,43 +143,70 @@ const KNOWN_RULE_VENDORS = [
   ...RULE5_BONNIE_VENDORS,
 ];
 
-/** Prompt 2 routing rules, in strict priority order (Brief §05). */
+/**
+ * Personnel routing rules, in strict priority order (Group B v1.1.4, spec §4).
+ * Susan stays on top; Bonnie is an org-wide safety net that overrides entity
+ * rules; schools (IBW/Chicago) split between Lisa (inventory/supply) and Kari
+ * (everything else); salons (Neroli/SKNBar) route to Lori; then the admin-
+ * configured per-vendor default, falling back to Bonnie as the catch-all.
+ */
 export function routeApprover(opts: {
   business: BusinessEntity;
   vendor: string;
   vendorMapping: VendorMappingRow | null;
   total: number;
   descriptions: string[];
+  /** Coded GL categories of this invoice's lines (any REQUIRES_MANUAL_REVIEW => Bonnie). */
+  glCategories?: string[];
+  /** Whether header-level sales tax is present (reserved; not yet rule-bearing). */
+  salesTaxPresent?: boolean;
 }): { approver: Approver; logic: string } {
-  const { business, vendor, vendorMapping, total, descriptions } = opts;
+  const { business, vendor, vendorMapping, total, descriptions, glCategories } =
+    opts;
 
-  // RULE 1 — high dollar or construction => Susan
+  // RULE 1 — high dollar or construction => Susan (kept on top)
   const hasConstruction = descriptions.some((d) => /construction/i.test(d));
-  if (total > SUSAN_THRESHOLD || hasConstruction) return { approver: "Susan", logic: "RULE 1" };
+  if (total > SUSAN_THRESHOLD || hasConstruction)
+    return { approver: "Susan", logic: "RULE 1" };
+
+  // RULE 2 — Bonnie safety net (org-wide; overrides entity rules below):
+  //   building/facility/renovation keywords, Bonnie vendors, any line that
+  //   needs manual review, or the Admin/Nala (corporate) entities.
+  const hasBonnieKeyword = descriptions.some((d) => BONNIE_KEYWORDS.test(d));
+  const needsManualReview = glCategories?.includes(REQUIRES_MANUAL_REVIEW) ?? false;
+  if (
+    hasBonnieKeyword ||
+    vendorInList(vendor, RULE5_BONNIE_VENDORS) ||
+    needsManualReview ||
+    business === "Admin" ||
+    business === "Nala"
+  )
+    return { approver: "Bonnie", logic: "RULE 2" };
 
   const isIbwChicago = business === "IBW" || business === "Chicago";
-  const isNeroliSkn = business === "Neroli" || business === "SKNBar";
 
-  // RULE 2 — IBW/Chicago + Lisa vendors
-  if (isIbwChicago && vendorInList(vendor, RULE2_LISA_VENDORS)) return { approver: "Lisa", logic: "RULE 2" };
+  // RULE 3 — Schools (IBW/Chicago): Lisa for inventory/supply, else Kari.
+  if (isIbwChicago) {
+    const isLisa =
+      vendorInList(vendor, RULE2_LISA_VENDORS) ||
+      Boolean(vendorMapping?.is_inventory) ||
+      descriptions.some((d) => LISA_INVENTORY_KEYWORDS.test(d));
+    if (isLisa) return { approver: "Lisa", logic: "RULE 3 LISA" };
+    // Kari covers RULE3_KARI_VENDORS, wonky/recurring items, or unknown vendor.
+    return { approver: "Kari", logic: "RULE 3 KARI" };
+  }
 
-  // RULE 3 — IBW/Chicago + Kari vendors OR unknown vendor
-  const knownVendor = vendorMapping != null || vendorInList(vendor, KNOWN_RULE_VENDORS);
-  if (isIbwChicago && (vendorInList(vendor, RULE3_KARI_VENDORS) || !knownVendor))
-    return { approver: "Kari", logic: "RULE 3" };
+  // RULE 4 — Salons (Neroli/SKNBar): Lori. (Major building expenses already
+  // siphoned to Bonnie in RULE 2.)
+  if (business === "Neroli" || business === "SKNBar")
+    return { approver: "Lori", logic: "RULE 4" };
 
-  // RULE 4 — Neroli/SKNBar + Lori vendors
-  if (isNeroliSkn && vendorInList(vendor, RULE4_LORI_VENDORS)) return { approver: "Lori", logic: "RULE 4" };
-
-  // RULE 5 — Bonnie vendors OR Admin entity
-  if (vendorInList(vendor, RULE5_BONNIE_VENDORS) || business === "Admin")
-    return { approver: "Bonnie", logic: "RULE 5" };
-
-  // Admin-configured per-vendor default, then catch-all.
+  // RULE 5 — admin-configured per-vendor default (if a valid approver), else
+  // Bonnie as the org-wide catch-all.
   const vm = vendorMapping?.default_approver;
   if (vm && (APPROVERS as readonly string[]).includes(vm))
-    return { approver: vm as Approver, logic: "VENDOR MAP" };
-  return { approver: "Bonnie", logic: "CATCH-ALL" };
+    return { approver: vm as Approver, logic: "RULE 5 VENDOR MAP" };
+  return { approver: "Bonnie", logic: "RULE 5 CATCH-ALL" };
 }
 
 // ------------------------------------------------------- GL account resolution
@@ -180,8 +230,10 @@ export function resolveGlAccount(
 }
 
 // ------------------------------------------------------------------- GL coding
-/** The brief's LEVEL 3 keyword rules (kept deliberately small/safe). */
+/** The brief's LEVEL 3 keyword rules (kept deliberately small/safe, ≥90% sure). */
 function keywordCategory(desc: string): string | null {
+  if (/\btuition\b/.test(desc)) return "Tuition Revenue";
+  if (/\bconsultant\b/.test(desc)) return "Professional / Outside Services";
   if (/clean/.test(desc)) return "Repairs & Maintenance";
   if (/\brent\b/.test(desc)) return "Occupancy - Rent";
   if (/freight|shipping/.test(desc)) return "Freight";
@@ -189,46 +241,131 @@ function keywordCategory(desc: string): string | null {
   return null;
 }
 
+/** True when a tax-isolation L1 match should fire (broadened, but not "taxable"/"tax-exempt"). */
+function isTaxLine(desc: string): boolean {
+  // Never treat "taxable" / "tax-exempt" / "non-taxable" as a tax line.
+  if (/\btax(able|[- ]?exempt)\b/.test(desc) || /non[- ]?tax/.test(desc)) return false;
+  // sales/use/state tax, "tax code", or a standalone tax line.
+  if (/(sales|use|state)\s*tax/.test(desc)) return true;
+  if (/tax\s*code/.test(desc)) return true;
+  if (/^\s*tax\s*$/.test(desc)) return true;
+  return false;
+}
+
+/** True when a line looks product-like (drives the L2.5 retail/backbar split). */
+function isProductLike(desc: string, vendorMapping: VendorMappingRow | null): boolean {
+  if (vendorMapping?.is_inventory) return true;
+  return /\b(product|retail|backbar|shampoo|conditioner|color|aveda|sku|case|unit|bottle|jar)\b/i.test(
+    desc,
+  );
+}
+
 /**
- * 5-level GL hierarchy with Reducto's suggestion slotted between the keyword
- * level and the entity fallback (Brief §05/§13):
- *   L1 tax -> L2 vendor map -> L3 keywords -> Reducto suggestion -> L4 entity -> L5 manual.
+ * Ordered GL categorization hierarchy (Group B v1.1.4, spec §5):
+ *   L1 tax isolation -> L2 absolute vendor match + vendor mapping
+ *   -> L2.5 retail vs backbar (conservative) -> L3 keywords -> Reducto suggestion
+ *   -> L4 entity default -> L5 manual review.
+ *
+ * EVERY concrete-category return is entity-gated via `isCategoryValidForEntity`:
+ * if a level's category isn't in this entity's COA (canonical or legacy) the
+ * level is skipped and we fall through, ultimately to L5 manual review. This
+ * guarantees a coded line always exports with a real account number for its
+ * entity (e.g. a Nala/Admin "state tax"/"rent"/"tuition" line has no such admin
+ * account, so it routes to manual review rather than a bare unmapped name).
  */
 export function codeLineItem(opts: {
   description: string;
+  vendor: string;
   vendorMapping: VendorMappingRow | null;
   business: BusinessEntity;
   suggestedCategory?: string;
+  salesTaxPresent: boolean;
+  /** Per-line tax amount when itemized; null/undefined => fall back to header tax. */
+  lineTax?: number | null;
 }): { category: string; confidence: ConfidenceLevel; logic: string } {
   const desc = (opts.description || "").toLowerCase();
+  const { business, vendor, vendorMapping, salesTaxPresent, lineTax } = opts;
 
-  // LEVEL 1 — tax isolation (never overridden)
-  if (/(sales|use)\s*tax/.test(desc)) return { category: "Sales/Use Tax", confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 1" };
+  type Coded = { category: string; confidence: ConfidenceLevel; logic: string };
+  // Returns a concrete-category result ONLY if it is valid for this entity's COA
+  // (canonical or legacy); otherwise null so the caller falls through to the next
+  // level — never code a line to a category the entity can't export with a number.
+  const gated = (category: string, confidence: ConfidenceLevel, logic: string): Coded | null =>
+    isCategoryValidForEntity(business, category) ? { category, confidence, logic } : null;
 
-  // LEVEL 2 — vendor mapping (gl_override / inventory)
-  if (opts.vendorMapping) {
-    const ov = opts.vendorMapping.gl_override;
+  // L1 — tax isolation (absolute, never overridden) — but only if valid for entity.
+  if (isTaxLine(desc)) {
+    const r = gated("Sales/Use Tax", CONFIDENCE_LEVEL.HIGH, "LEVEL 1");
+    if (r) return r;
+  }
+
+  // L2 — absolute vendor → category match (entity-gated). If the mapped category
+  // is not valid for this entity, fall through rather than force an invalid one.
+  const vCat = vendorCategory(vendor);
+  if (vCat && isCategoryValidForEntity(business, vCat))
+    return { category: vCat, confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 2 VENDOR" };
+
+  // L2 — admin vendor mapping (gl_override / inventory).
+  if (vendorMapping) {
+    const ov = vendorMapping.gl_override;
     if (ov && GL_CATEGORIES_FLAT.includes(ov))
       return { category: ov, confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 2" };
-    if (opts.vendorMapping.is_inventory)
+    if (vendorMapping.is_inventory)
       return { category: "Retail / Product Costs", confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 2" };
   }
 
-  // LEVEL 3 — keyword rules
-  const kw = keywordCategory(desc);
-  if (kw) return { category: kw, confidence: CONFIDENCE_LEVEL.MEDIUM, logic: "LEVEL 3" };
+  // L2.5 — Retail vs Backbar (CONSERVATIVE). Only for product-like lines AND when
+  // the tax signal is clear; otherwise do not guess and fall through.
+  if (isProductLike(desc, vendorMapping)) {
+    const clearTaxAbsent = lineTax != null ? lineTax === 0 : !salesTaxPresent;
+    const clearTaxPresent = lineTax != null ? lineTax > 0 : salesTaxPresent;
+    const isAvedaRetail = AVEDA_VENDOR_PATTERN.test(vendor);
+    // RETAIL: only when it's an Aveda (retail-distributed) vendor AND untaxed.
+    if (isAvedaRetail && clearTaxAbsent) {
+      const r = gated("Retail / Product Costs", CONFIDENCE_LEVEL.HIGH, "L2.5 RETAIL");
+      if (r) return r;
+    }
+    // BACKBAR: product-like + taxed.
+    if (clearTaxPresent) {
+      const r = gated("Service Costs", CONFIDENCE_LEVEL.HIGH, "L2.5 BACKBAR");
+      if (r) return r;
+    }
+    // Ambiguous product line (or category invalid for entity) — do not guess; fall through.
+  }
 
-  // Reducto's suggestion (only if it's a valid allowed category)
+  // L3 — keyword rules (≥90% confident).
+  const kw = keywordCategory(desc);
+  if (kw) {
+    const r = gated(kw, CONFIDENCE_LEVEL.MEDIUM, "LEVEL 3");
+    if (r) return r;
+  }
+
+  // Reducto's suggestion (entity-gated, only if valid for this entity).
   const sugg = opts.suggestedCategory;
-  if (sugg && sugg !== REQUIRES_MANUAL_REVIEW && GL_CATEGORIES_FLAT.includes(sugg))
+  if (sugg && sugg !== REQUIRES_MANUAL_REVIEW && isCategoryValidForEntity(business, sugg))
     return { category: sugg, confidence: CONFIDENCE_LEVEL.MEDIUM, logic: "REDUCTO" };
 
-  // LEVEL 4 — entity fallback
-  if (opts.business === "SKNBar")
-    return { category: "Service Costs", confidence: CONFIDENCE_LEVEL.LOW, logic: "LEVEL 4" };
-  if (opts.business === "IBW" && /student|tuition|kit/.test(desc))
-    return { category: "Student Expenses", confidence: CONFIDENCE_LEVEL.LOW, logic: "LEVEL 4" };
+  // L4 — entity default (concrete, LOW confidence — not forced to manual review).
+  // Gated for safety/consistency: the entity defaults below are all valid for
+  // their entity, so gating doesn't change them, but the professional-services /
+  // contractor branch can fire for any entity and must be entity-checked.
+  if (/professional services|contractor/.test(desc)) {
+    const r = gated("Professional / Outside Services", CONFIDENCE_LEVEL.LOW, "LEVEL 4");
+    if (r) return r;
+  }
+  if (business === "SKNBar") {
+    const r = gated("Service Costs", CONFIDENCE_LEVEL.LOW, "LEVEL 4");
+    if (r) return r;
+  }
+  if (business === "IBW" || business === "Chicago") {
+    const r = gated("Student Expenses", CONFIDENCE_LEVEL.LOW, "LEVEL 4");
+    if (r) return r;
+  }
+  if (business === "Neroli") {
+    const r = gated("Repairs & Maintenance", CONFIDENCE_LEVEL.LOW, "LEVEL 4");
+    if (r) return r;
+  }
 
-  // LEVEL 5 — manual review
+  // L5 — manual review.
   return { category: REQUIRES_MANUAL_REVIEW, confidence: CONFIDENCE_LEVEL.MANUAL_REVIEW, logic: "LEVEL 5" };
 }

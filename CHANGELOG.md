@@ -5,6 +5,46 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.1.4] — 2026-06-24
+
+### Added
+- **Entity-aware GL categories.** When coding a line, the GL dropdown now shows
+  **only the accounts that belong to that entity's chart** — Neroli shows
+  Neroli's accounts, IBW the school accounts, Nala the corporate/admin
+  accounts — each with its real number. Historical entries coded to a different
+  account still appear (marked "historical") so nothing breaks.
+- **New accounts** matching the spec: schools get **Bank Fees (6040)** and
+  **Credit Card Processing (6100)** split out, **Professional Services (6224)**
+  and **Outside Services (6240)**, **Guest Amenities (6053)**, **Student
+  Education Fund (6130)**; salons/spas get **Service Payroll (5010)** and
+  **Retail Payroll (5500)**; and Nala gets its full corporate/admin set
+  (Lodging, Transportation, Meals & Entertainment, Automobile, Advertising &
+  Promotion, Printing/Collateral, Direct Client Marketing, Meeting & Events,
+  Parking/Mileage, Office Supplies, Employee Education, Credit Card Fees, …).
+- **Smarter auto-categorization (5-level engine).** Known vendors auto-code
+  instantly (ADP → Payroll - Wages, AT&T → Telephone, Facebook Ads → Marketing,
+  Fromm International → Kit Costs, State Farm → Insurance - Business). **Retail
+  vs. backbar is auto-detected conservatively** — a clear Aveda retail order
+  with no tax charged to us codes to Retail/Product Costs (5100); products
+  taxed to us (used in-house) code to Service Costs / backbar (5000); anything
+  unclear is left for you to confirm. Every auto-coded category is guaranteed to
+  exist in that entity's chart, otherwise it's flagged **Requires manual
+  review** — no account is ever coded to a chart it doesn't belong to.
+
+### Changed
+- **Approval routing follows the new hierarchy.** Large (>$10k) or construction
+  invoices still go to **Susan** first. Building/renovation, company-wide,
+  administrative (Nala/Admin), or anything uncertain routes to **Bonnie** as the
+  safety net — including major building expenses at the salons. School
+  inventory/supplies → **Lisa**; recurring subscriptions, one-offs, and
+  odd/admin school items → **Kari**; salon & spa product/service goods →
+  **Lori**. Anything we can't match with high confidence is flagged for manual
+  review and routed to Bonnie.
+
+### Notes
+- No database migration — categories and numbers are derived from the
+  (entity, category) pair at display/export time.
+
 ## [1.1.3] — 2026-06-24
 
 ### Added
@@ -260,6 +300,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.1.4]: https://github.com/oofski/Invoice/releases/tag/v1.1.4
 [1.1.3]: https://github.com/oofski/Invoice/releases/tag/v1.1.3
 [1.1.2]: https://github.com/oofski/Invoice/releases/tag/v1.1.2
 [1.1.1]: https://github.com/oofski/Invoice/releases/tag/v1.1.1

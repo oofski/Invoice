@@ -14,6 +14,12 @@ export interface ExtractedLineItem {
   description: string;
   amount: number | null;
   suggested_category?: string;
+  /**
+   * Optional per-line sales/use tax amount (Group B v1.1.4). Used by the
+   * retail-vs-backbar differentiation (B2) when present; if Reducto returns
+   * nothing it stays null/undefined and the logic falls back to header-level tax.
+   */
+  tax?: number | null;
 }
 
 export interface ExtractedInvoice {
@@ -55,6 +61,10 @@ const INVOICE_SCHEMA = {
             enum: [...GL_CATEGORIES_FLAT, REQUIRES_MANUAL_REVIEW],
             description: "Best-fit GL category from the allowed list; use REQUIRES_MANUAL_REVIEW if unsure.",
           },
+          tax: {
+            type: "number",
+            description: "Sales/use tax charged on THIS line only, if itemized per line; 0 if this line is untaxed. Omit if tax is not broken out per line.",
+          },
         },
         required: ["description", "amount"],
       },
@@ -90,6 +100,7 @@ export function normalizeExtract(data: unknown): ExtractedInvoice {
         description: str(o.description),
         amount: num(o.amount),
         suggested_category: o.suggested_category ? str(o.suggested_category) : undefined,
+        tax: num(o.tax),
       };
     })
     .filter((li) => li.description || li.amount != null);
@@ -101,6 +112,7 @@ export function normalizeExtract(data: unknown): ExtractedInvoice {
       description: str(d.vendor) || "Invoice total",
       amount: total,
       suggested_category: undefined,
+      tax: null,
     });
   }
 

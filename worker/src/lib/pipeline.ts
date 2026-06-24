@@ -34,21 +34,19 @@ export async function runRulesPipeline(
   const total =
     x.total ?? x.line_items.reduce((s, l) => s + (l.amount ?? 0), 0);
   const descriptions = x.line_items.map((l) => l.description);
+  const salesTaxPresent = (x.sales_tax ?? 0) > 0;
 
-  const { approver } = routeApprover({
-    business,
-    vendor: x.vendor,
-    vendorMapping,
-    total,
-    descriptions,
-  });
-
+  // Code each line FIRST so the approver router can see the resulting GL
+  // categories (e.g. any REQUIRES_MANUAL_REVIEW line routes to Bonnie).
   const prompt3: Prompt3LineItem[] = x.line_items.map((li) => {
     const c = codeLineItem({
       description: li.description,
+      vendor: x.vendor,
       vendorMapping,
       business,
       suggestedCategory: li.suggested_category,
+      salesTaxPresent,
+      lineTax: li.tax,
     });
     return {
       BusinessEntity: business,
@@ -58,6 +56,18 @@ export async function runRulesPipeline(
       ConfidenceLevel: c.confidence,
       LogicPathUsed: c.logic,
     };
+  });
+
+  const glCategories = prompt3.map((l) => l.Category);
+
+  const { approver } = routeApprover({
+    business,
+    vendor: x.vendor,
+    vendorMapping,
+    total,
+    descriptions,
+    glCategories,
+    salesTaxPresent,
   });
 
   const prompt1 = {

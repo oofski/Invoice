@@ -7,9 +7,9 @@ import { uuid } from "../lib/util";
 import {
   AUDIT_ACTION,
   CONFIDENCE_LEVEL,
-  GL_CATEGORIES_FLAT,
   REQUIRES_MANUAL_REVIEW,
   INVOICE_STATUS,
+  isCategoryValidForEntity,
 } from "../lib/constants";
 import type { LineItemRow, InvoiceRow } from "../lib/types";
 
@@ -32,12 +32,13 @@ async function loadEditable(c: Context<AppEnv>, lineId: string) {
 lineItems.patch("/:id", async (c) => {
   const loaded = await loadEditable(c, c.req.param("id"));
   if ("error" in loaded) return c.json({ error: loaded.error }, loaded.status);
-  const { li } = loaded;
+  const { li, inv } = loaded;
 
   const body = await c.req.json().catch(() => ({}));
   const category = (body as { gl_category?: string }).gl_category;
   if (!category) return c.json({ error: "gl_category required" }, 400);
-  if (category !== REQUIRES_MANUAL_REVIEW && !GL_CATEGORIES_FLAT.includes(category))
+  const entity = li.business ?? inv.business;
+  if (!isCategoryValidForEntity(entity, category, li.gl_category))
     return c.json({ error: "Invalid GL category" }, 400);
 
   const stillReview = category === REQUIRES_MANUAL_REVIEW;
@@ -69,7 +70,8 @@ lineItems.patch("/:id", async (c) => {
 lineItems.post("/:id/split", async (c) => {
   const loaded = await loadEditable(c, c.req.param("id"));
   if ("error" in loaded) return c.json({ error: loaded.error }, loaded.status);
-  const { li } = loaded;
+  const { li, inv } = loaded;
+  const entity = li.business ?? inv.business;
 
   const parentAmount = Number(li.amount ?? 0);
   if (parentAmount <= 0) return c.json({ error: "Cannot split a zero-amount line" }, 400);
@@ -92,7 +94,7 @@ lineItems.post("/:id/split", async (c) => {
   for (const r of resolved) {
     if (!Number.isFinite(r.amount) || r.amount <= 0)
       return c.json({ error: "Each split must have a positive amount" }, 400);
-    if (!r.gl_category || !GL_CATEGORIES_FLAT.includes(r.gl_category))
+    if (!r.gl_category || !isCategoryValidForEntity(entity, r.gl_category))
       return c.json({ error: `Invalid GL category: ${r.gl_category}` }, 400);
   }
   const sum = resolved.reduce((acc, r) => acc + r.amount, 0);

@@ -1,14 +1,44 @@
+import type { ReactNode } from "react";
 import { Select } from "@/components/ui/primitives";
 import {
+  CATEGORY_GROUP_OF,
+  ENTITY_COA,
+  ENTITY_COA_ALIAS,
   GL_CATEGORY_GROUPS,
   REQUIRES_MANUAL_REVIEW,
   glAccountNumber,
 } from "@/lib/constants";
 
+/** High-level reporting groups, in the order they should appear as optgroups. */
+const GROUP_ORDER = ["Revenue", "Cost of Sales", "Operating Expenses"] as const;
+
 /**
- * Dropdown of the 47 allowed GL categories, grouped by section (Brief §05/§08).
- * When `entity` is provided, each option label is prefixed with that entity's
- * derived GL account number (when one exists for the category).
+ * Formats an option label, prefixing the entity-derived account number when
+ * one resolves. "Varies"/"None" are sentinel COA values, not real account
+ * numbers — don't prefix them onto the label (matches the worker's export
+ * formatting). When `entity` is null/undefined the number is omitted unless a
+ * caller-supplied lookup resolves one.
+ */
+function optionLabel(entity: string | null | undefined, name: string): string {
+  const raw = entity ? glAccountNumber(entity, name) : "";
+  const num = raw === "Varies" || raw === "None" ? "" : raw;
+  return num ? `${num} · ${name}` : name;
+}
+
+/**
+ * Dropdown of allowed GL categories, grouped by section (Brief §05/§08).
+ *
+ * When `entity` is provided, the offered options are restricted to that
+ * entity's own Chart of Accounts (alias-resolved), grouped into optgroups by
+ * reporting group (Revenue → Cost of Sales → Operating Expenses) and labelled
+ * with the entity's derived account number. Legacy / historical-only names
+ * (ENTITY_COA_LEGACY) are NOT offered. If the current `value` is a real
+ * selection that isn't in the entity's offered set, it is grandfathered into an
+ * "Other (historical)" optgroup so a stored legacy / out-of-COA value still
+ * displays and stays selected.
+ *
+ * When `entity` is null/undefined (e.g. VendorsPage with no business chosen),
+ * it falls back to the full `GL_CATEGORY_GROUPS` list (the prior behavior).
  */
 export function GLCategorySelect({
   value,
@@ -26,6 +56,78 @@ export function GLCategorySelect({
   entity?: string | null;
 }) {
   const isReview = value === REQUIRES_MANUAL_REVIEW;
+
+  // The manual-review sentinel option, rendered when includeReview is set or
+  // when the current value already is the sentinel (so it stays selectable).
+  const reviewOption =
+    includeReview || (isReview && !includeReview) ? (
+      <option value={REQUIRES_MANUAL_REVIEW}>⚠ Requires manual review</option>
+    ) : null;
+
+  let body: ReactNode;
+
+  if (entity) {
+    // Entity-filtered: offer only this entity's own COA categories (alias-
+    // resolved), grouped by reporting group in the canonical order.
+    const coa = ENTITY_COA[ENTITY_COA_ALIAS[entity] ?? entity] ?? {};
+    const offered = Object.keys(coa);
+    const offeredSet = new Set(offered);
+
+    const byGroup = new Map<string, string[]>();
+    for (const name of offered) {
+      const group = CATEGORY_GROUP_OF[name] ?? "Operating Expenses";
+      const list = byGroup.get(group);
+      if (list) list.push(name);
+      else byGroup.set(group, [name]);
+    }
+
+    // Grandfather the current value: a real selection that isn't offered for
+    // this entity (e.g. a stored legacy / out-of-COA name) still renders so it
+    // stays selected instead of being silently dropped.
+    const grandfathered =
+      value &&
+      value !== REQUIRES_MANUAL_REVIEW &&
+      !offeredSet.has(value)
+        ? value
+        : null;
+
+    body = (
+      <>
+        {GROUP_ORDER.map((group) => {
+          const names = byGroup.get(group);
+          if (!names || names.length === 0) return null;
+          return (
+            <optgroup key={group} label={group}>
+              {names.map((name) => (
+                <option key={name} value={name}>
+                  {optionLabel(entity, name)}
+                </option>
+              ))}
+            </optgroup>
+          );
+        })}
+        {grandfathered && (
+          <optgroup label="Other (historical)">
+            <option value={grandfathered}>
+              {optionLabel(entity, grandfathered)}
+            </option>
+          </optgroup>
+        )}
+      </>
+    );
+  } else {
+    // No entity chosen: fall back to the full grouped list (prior behavior).
+    body = GL_CATEGORY_GROUPS.map((group) => (
+      <optgroup key={group.group} label={group.group}>
+        {group.categories.map((c) => (
+          <option key={c} value={c}>
+            {optionLabel(entity, c)}
+          </option>
+        ))}
+      </optgroup>
+    ));
+  }
+
   return (
     <Select
       value={value ?? ""}
@@ -36,28 +138,8 @@ export function GLCategorySelect({
       <option value="" disabled>
         Select a GL category…
       </option>
-      {includeReview && (
-        <option value={REQUIRES_MANUAL_REVIEW}>⚠ Requires manual review</option>
-      )}
-      {isReview && !includeReview && (
-        <option value={REQUIRES_MANUAL_REVIEW}>⚠ Requires manual review</option>
-      )}
-      {GL_CATEGORY_GROUPS.map((group) => (
-        <optgroup key={group.group} label={group.group}>
-          {group.categories.map((c) => {
-            const raw = entity ? glAccountNumber(entity, c) : "";
-            // "Varies"/"None" are sentinel COA values, not real account
-            // numbers — don't prefix them onto the option label (matches the
-            // worker's export formatting).
-            const num = raw === "Varies" || raw === "None" ? "" : raw;
-            return (
-              <option key={c} value={c}>
-                {num ? `${num} · ${c}` : c}
-              </option>
-            );
-          })}
-        </optgroup>
-      ))}
+      {reviewOption}
+      {body}
     </Select>
   );
 }
