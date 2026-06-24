@@ -3,7 +3,6 @@ import {
   Check,
   X,
   ChevronLeft,
-  ChevronRight,
   Calendar,
   Building2,
   Inbox,
