@@ -234,16 +234,23 @@ export function SplitInvoiceModal({
     }
   }
 
+  // Per-line mode gets a tall, near-fullscreen modal whose table fills the
+  // available height (footer stays pinned, table is the only scroll region) so
+  // the whole sheet is visible without scrolling the dialog. Quick split keeps
+  // the classic auto-height modal.
+  const isLines = mode === "lines";
+
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="Split invoice"
-      className="max-w-5xl"
+      className={cn("max-w-6xl", isLines && "h-[90vh]")}
+      fill={isLines}
     >
-      <div className="space-y-4">
+      <div className={isLines ? "flex min-h-0 flex-1 flex-col gap-4" : "space-y-4"}>
         {/* Mode toggle */}
-        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-sm">
+        <div className="inline-flex shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-sm">
           <button
             onClick={() => setMode("even")}
             className={cn(
@@ -367,8 +374,8 @@ export function SplitInvoiceModal({
 
         {/* ------------------------------------------------- Per-line split */}
         {mode === "lines" && (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-600">
+          <div className="flex min-h-0 flex-1 flex-col gap-3">
+            <p className="shrink-0 text-sm text-slate-600">
               Assign a business, class and type to each line item. Lines left
               unset default to the invoice&apos;s business/class. Select
               multiple rows to bulk-apply settings.
@@ -376,7 +383,7 @@ export function SplitInvoiceModal({
 
             {/* Bulk-apply bar — visible when ≥1 row is checked */}
             {someSelected && (
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+              <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
                 <span className="text-xs font-semibold text-blue-700">
                   <CheckSquare className="mr-1 inline h-3.5 w-3.5" />
                   {selectedIds.size} selected — apply to all:
@@ -425,7 +432,7 @@ export function SplitInvoiceModal({
               </div>
             )}
 
-            <div className="scroll-thin max-h-[52vh] overflow-y-auto rounded-lg border border-slate-200">
+            <div className="scroll-thin min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-200">
               <table className="w-full min-w-[760px] text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50">
                   <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -527,7 +534,7 @@ export function SplitInvoiceModal({
               </table>
             </div>
 
-            <div className="flex justify-end gap-2">
+            <div className="flex shrink-0 justify-end gap-2">
               <Button variant="secondary" onClick={onClose}>
                 Cancel
               </Button>
@@ -540,7 +547,7 @@ export function SplitInvoiceModal({
 
         {/* Clear split — shown when a split already exists */}
         {invoice.split_type && (
-          <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+          <div className="flex shrink-0 items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
             <span className="text-slate-600">
               This invoice already has a split.
             </span>

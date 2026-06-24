@@ -5,6 +5,17 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.1.1] — 2026-06-24
+
+### Changed
+- **Per-line split now fills the screen.** Opening Per-line split shows a
+  near-fullscreen, wider dialog (`max-w-6xl`, ~90% of screen height) so the
+  whole line-item sheet is visible. The table fills the available height and is
+  the only thing that scrolls — the Cancel / Save footer and the bulk-apply bar
+  stay pinned at all times (no more scrolling past the buttons, and no nested
+  double scrollbars). The wider layout also keeps long descriptions on one line
+  so more rows fit at once. Quick split is unchanged.
+
 ## [1.1.0] — 2026-06-24
 
 ### Changed
@@ -213,6 +224,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.1.1]: https://github.com/oofski/Invoice/releases/tag/v1.1.1
 [1.1.0]: https://github.com/oofski/Invoice/releases/tag/v1.1.0
 [1.0.9]: https://github.com/oofski/Invoice/releases/tag/v1.0.9
 [1.0.8]: https://github.com/oofski/Invoice/releases/tag/v1.0.8
