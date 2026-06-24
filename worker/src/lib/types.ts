@@ -7,6 +7,7 @@ import type {
   BusinessEntity,
   ClassName,
   ConfidenceLevel,
+  ItemType,
 } from "./constants";
 
 export interface Env {
@@ -144,6 +145,19 @@ export interface Prompt3LineItem {
   Category: string;
   ConfidenceLevel: ConfidenceLevel;
   LogicPathUsed: string;
+  /**
+   * Auto-tagged per-line Type (v1.1.8 N). Set ONLY by the L2.5 default-tax
+   * branches (Retail / Backbar) so it persists to line_items.item_type and the
+   * v1.1.6 per-line export tax recompute follows automatically. Undefined for
+   * all other lines (discounts, tax, keyword, etc.).
+   */
+  ItemType?: ItemType;
+  /**
+   * Light confidence gating (v1.1.8 P). True when this line's Reducto citation
+   * min-confidence was clearly low — process.ts ORs this into requires_review so
+   * the line is flagged even when it coded to a concrete category.
+   */
+  RequiresReview?: boolean;
 }
 export type Prompt3Output = Prompt3LineItem[];
 

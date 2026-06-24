@@ -7,8 +7,14 @@ import {
   matchLocation,
   routeApprover,
   codeLineItem,
+  resolveGlAccount,
 } from "./rules";
-import type { BusinessEntity, ClassName } from "./constants";
+import {
+  CONFIDENCE_LEVEL,
+  REQUIRES_MANUAL_REVIEW,
+  type BusinessEntity,
+  type ClassName,
+} from "./constants";
 
 /**
  * Deterministic replacement for the 3-Claude-prompt pipeline. Takes Reducto's
@@ -47,16 +53,55 @@ export async function runRulesPipeline(
       suggestedCategory: li.suggested_category,
       salesTaxPresent,
       lineTax: li.tax,
+      amount: li.amount,
     });
+    // Light confidence gating (v1.1.8 P): a clearly-low Reducto citation
+    // confidence flags the line for review and downgrades its confidence to LOW
+    // (unless it's already the stronger MANUAL_REVIEW sentinel from coding).
+    const lowConf = li.lowConfidence === true;
     return {
       BusinessEntity: business,
       LineItemDescription: li.description,
       Amount: li.amount ?? 0,
       Category: c.category,
-      ConfidenceLevel: c.confidence,
+      ConfidenceLevel:
+        lowConf && c.confidence !== CONFIDENCE_LEVEL.MANUAL_REVIEW
+          ? CONFIDENCE_LEVEL.LOW
+          : c.confidence,
       LogicPathUsed: c.logic,
+      ...(c.itemType ? { ItemType: c.itemType } : {}),
+      ...(lowConf ? { RequiresReview: true } : {}),
     };
   });
+
+  // Post-pass — non-school discount netting (v1.1.8 G). For each negative-amount
+  // line NOT already coded to "Discounts" (i.e. the entity has no Discounts
+  // account, so L0 fell through), net the discount into the invoice's dominant
+  // positive line's GL category — the line with the largest positive amount — so
+  // the credit reduces that same account (e.g. +$100 and -$25 both on GL X => net
+  // $75). Fall back to the vendor-mapping default category, else REQUIRES_MANUAL_REVIEW.
+  // (School lines already got "Discounts" in codeLineItem L0 and are skipped here.)
+  const dominantIdx = prompt3.reduce(
+    (best, l, i) =>
+      l.Amount > 0 && (best < 0 || l.Amount > prompt3[best].Amount) ? i : best,
+    -1,
+  );
+  const fallbackCategory =
+    resolveGlAccount(vendorMapping) /* gl_override / inventory / else MANUAL_REVIEW */;
+  for (const l of prompt3) {
+    if (l.Amount < 0 && l.Category !== "Discounts") {
+      const netCategory =
+        dominantIdx >= 0 ? prompt3[dominantIdx].Category : fallbackCategory;
+      l.Category = netCategory;
+      l.LogicPathUsed = "DISCOUNT NET";
+      // Confidence follows resolution: a real GL nets cleanly; only a stray
+      // unresolved fallback should still flag for review.
+      l.ConfidenceLevel =
+        netCategory === REQUIRES_MANUAL_REVIEW
+          ? CONFIDENCE_LEVEL.MANUAL_REVIEW
+          : CONFIDENCE_LEVEL.LOW;
+    }
+  }
 
   const glCategories = prompt3.map((l) => l.Category);
 

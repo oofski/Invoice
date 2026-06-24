@@ -77,10 +77,19 @@ export function leaves(lineItems: LineItemRow[]): LineItemRow[] {
  * all-retail / all-untyped / empty bucket. This REPLACES the vendor's invoice
  * sales_tax for PER_LINE splits in the QBO export only.
  */
-function recomputedBucketTax(lines: Pick<LineItemRow, "amount" | "item_type" | "business" | "class">[]): number {
+function recomputedBucketTax(
+  lines: Pick<LineItemRow, "amount" | "item_type" | "business" | "class" | "gl_category">[],
+): number {
   let t = 0;
   for (const li of lines) {
-    const taxable = !!li.item_type && li.item_type !== "Retail";
+    // Taxable: a typed line that isn't Retail, isn't a Discounts line, and
+    // isn't a negative-amount (discount/credit) line (v1.1.8 H). Negatives and
+    // discounts are NEVER taxed; they already reduce totals via toFixed.
+    const taxable =
+      !!li.item_type &&
+      li.item_type !== "Retail" &&
+      li.gl_category !== "Discounts" &&
+      (li.amount ?? 0) >= 0;
     if (taxable) t += (li.amount ?? 0) * locationTaxRate(li.business, li.class);
   }
   return Math.round(t * 100) / 100;

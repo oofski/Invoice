@@ -1,7 +1,12 @@
 import type { Env, InvoiceRow } from "./types";
 import { uploadToReducto } from "./reducto";
-import { extractInvoice, normalizeExtract, type ExtractedInvoice } from "./extract";
-import { getPdf, putPdf, pdfKey } from "./storage";
+import {
+  extractInvoice,
+  normalizeExtract,
+  reconcile,
+  type ExtractedInvoice,
+} from "./extract";
+import { getPdf, putPdf, pdfKey, putReductoRaw } from "./storage";
 import { runRulesPipeline } from "./pipeline";
 import { audit, resolveApproverUser, getInvoice } from "./db";
 import { sendApprovalEmail } from "./email";
@@ -11,6 +16,8 @@ import {
   INVOICE_STATUS,
   REQUIRES_MANUAL_REVIEW,
   APPROVAL_STATUS,
+  CONFIDENCE_LEVEL,
+  type BusinessEntity,
 } from "./constants";
 
 /**
@@ -47,10 +54,34 @@ export async function processInvoiceAI(
     await env.DB.prepare("UPDATE invoices SET textract_raw = ? WHERE id = ?")
       .bind(JSON.stringify(ex.data), invoiceId)
       .run();
+    // Persist the RAW Reducto response as an R2 sidecar for later diagnosis
+    // (v1.1.8 A). Best-effort: never block reprocessing if the sidecar write fails.
+    try {
+      await putReductoRaw(env, meta.r2_key, ex.raw);
+    } catch (e) {
+      console.error("[process] reducto sidecar write failed:", e);
+    }
   }
 
   try {
     const result = await runRulesPipeline(env, extracted);
+
+    // Reconciliation guard (v1.1.8 B): if the coded/itemized lines + tax don't
+    // reconcile to the invoice total (beyond tolerance), append ONE synthetic
+    // REQUIRES_MANUAL_REVIEW line for the gap. amount=gap keeps Σ lines honest;
+    // its requires_review flag (set by the existing export gate below, since its
+    // category is REQUIRES_MANUAL_REVIEW) blocks export until a human verifies.
+    const recon = reconcile(extracted);
+    if (recon.flagged && recon.syntheticLine) {
+      result.prompt3.push({
+        BusinessEntity: result.prompt1.Business as BusinessEntity,
+        LineItemDescription: recon.syntheticLine.description,
+        Amount: recon.syntheticLine.amount ?? 0,
+        Category: REQUIRES_MANUAL_REVIEW,
+        ConfidenceLevel: CONFIDENCE_LEVEL.MANUAL_REVIEW,
+        LogicPathUsed: "RECONCILE",
+      });
+    }
 
     const subtotal =
       inv.subtotal == null && result.prompt1.Subtotal
@@ -92,17 +123,22 @@ export async function processInvoiceAI(
     const stmts = result.prompt3.map((li, idx) =>
       env.DB.prepare(
         `INSERT INTO line_items (id, invoice_id, description, amount, gl_category,
-           confidence_level, logic_path, requires_review, sort_order)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+           item_type, confidence_level, logic_path, requires_review, sort_order)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       ).bind(
         uuid(),
         invoiceId,
         li.LineItemDescription,
         typeof li.Amount === "number" ? li.Amount : parseAmount(String(li.Amount)),
         li.Category,
+        // Auto-tagged Retail/Backbar from L2.5 (v1.1.8 N); null otherwise. This
+        // pre-fills the exec split Type and drives the per-line export tax recompute.
+        li.ItemType ?? null,
         li.ConfidenceLevel,
         li.LogicPathUsed,
-        li.Category === REQUIRES_MANUAL_REVIEW ? 1 : 0,
+        // Flag for review when the category is the manual-review sentinel OR the
+        // line was flagged by light confidence gating (v1.1.8 P).
+        li.Category === REQUIRES_MANUAL_REVIEW || li.RequiresReview ? 1 : 0,
         idx,
       ),
     );
@@ -219,7 +255,7 @@ export async function ingestInvoicePdf(
   // processInvoiceAI, so Reducto is not billed twice. Business/Class/approver are
   // filled in by the rules pipeline in processInvoiceAI.
   const reductoId = await uploadToReducto(env, buf, fileName);
-  const { data } = await extractInvoice(env, reductoId);
+  const { raw: reductoRaw, data } = await extractInvoice(env, reductoId);
   const vendor = data.vendor || "Unknown Vendor";
   const invoiceNumber = data.invoice_number || `NO-INV-${Date.now()}`;
   const total =
@@ -281,6 +317,13 @@ export async function ingestInvoicePdf(
   )
     .bind(id, fileName, "application/pdf", key, buf.byteLength)
     .run();
+  // Persist the RAW Reducto response as an R2 sidecar next to the PDF for later
+  // diagnosis (v1.1.8 A). Best-effort — never fail ingest on the sidecar write.
+  try {
+    await putReductoRaw(env, key, reductoRaw);
+  } catch (e) {
+    console.error("[ingest] reducto sidecar write failed:", e);
+  }
 
   await audit(env, {
     invoiceId: id,

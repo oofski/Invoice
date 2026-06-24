@@ -14,12 +14,12 @@ import {
   BONNIE_KEYWORDS,
   LISA_INVENTORY_KEYWORDS,
   KARI_WONKY_KEYWORDS,
-  AVEDA_VENDOR_PATTERN,
   isCategoryValidForEntity,
   type Approver,
   type BusinessEntity,
   type ClassName,
   type ConfidenceLevel,
+  type ItemType,
 } from "./constants";
 
 /**
@@ -282,16 +282,37 @@ export function codeLineItem(opts: {
   salesTaxPresent: boolean;
   /** Per-line tax amount when itemized; null/undefined => fall back to header tax. */
   lineTax?: number | null;
-}): { category: string; confidence: ConfidenceLevel; logic: string } {
+  /** Line amount (signed). A negative amount is a discount/credit (v1.1.8 L0). */
+  amount?: number | null;
+}): { category: string; confidence: ConfidenceLevel; logic: string; itemType?: ItemType } {
   const desc = (opts.description || "").toLowerCase();
-  const { business, vendor, vendorMapping, salesTaxPresent, lineTax } = opts;
+  const { business, vendor, vendorMapping, salesTaxPresent, lineTax, amount } = opts;
 
-  type Coded = { category: string; confidence: ConfidenceLevel; logic: string };
+  type Coded = { category: string; confidence: ConfidenceLevel; logic: string; itemType?: ItemType };
   // Returns a concrete-category result ONLY if it is valid for this entity's COA
   // (canonical or legacy); otherwise null so the caller falls through to the next
   // level — never code a line to a category the entity can't export with a number.
-  const gated = (category: string, confidence: ConfidenceLevel, logic: string): Coded | null =>
-    isCategoryValidForEntity(business, category) ? { category, confidence, logic } : null;
+  // `itemType` (v1.1.8 N) is set only by the L2.5 default-tax branches so the
+  // auto-tagged Retail/Backbar Type persists (drives per-line export tax + exec split).
+  const gated = (
+    category: string,
+    confidence: ConfidenceLevel,
+    logic: string,
+    itemType?: ItemType,
+  ): Coded | null =>
+    isCategoryValidForEntity(business, category)
+      ? { category, confidence, logic, ...(itemType ? { itemType } : {}) }
+      : null;
+
+  // L0 — discount isolation (v1.1.8). A negative-amount line is a discount /
+  // credit. For school entities whose COA carries "Discounts" (IBW, Chicago)
+  // code it to that tracked account (HIGH). For entities WITHOUT a Discounts
+  // account, gated() returns null and we fall through — the pipeline post-pass
+  // nets the discount into the invoice's dominant positive line's GL.
+  if (amount != null && amount < 0) {
+    const r = gated("Discounts", CONFIDENCE_LEVEL.HIGH, "LEVEL 0 DISCOUNT");
+    if (r) return r;
+  }
 
   // L1 — tax isolation (absolute, never overridden) — but only if valid for entity.
   if (isTaxLine(desc)) {
@@ -314,23 +335,29 @@ export function codeLineItem(opts: {
       return { category: "Retail / Product Costs", confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 2" };
   }
 
-  // L2.5 — Retail vs Backbar (CONSERVATIVE). Only for product-like lines AND when
-  // the tax signal is clear; otherwise do not guess and fall through.
+  // L2.5 — DEFAULT tax-based coding for product-like lines (v1.1.8, broadened).
+  // A product-like line defaults by tax signal: untaxed => "Retail / Product
+  // Costs" (sold to guests, exempt from purchase tax); taxed => "Service Costs"
+  // (backbar consumed in services). LOW confidence so it's flagged/reviewable.
+  // The Aveda-only gate is dropped; per-line tax (lineTax) still takes priority
+  // over the header signal. Explicit per-line Type (TYPE_GL) and manual edits run
+  // later and still win. Entity-gated — falls through when invalid for the entity.
   if (isProductLike(desc, vendorMapping)) {
-    const clearTaxAbsent = lineTax != null ? lineTax === 0 : !salesTaxPresent;
-    const clearTaxPresent = lineTax != null ? lineTax > 0 : salesTaxPresent;
-    const isAvedaRetail = AVEDA_VENDOR_PATTERN.test(vendor);
-    // RETAIL: only when it's an Aveda (retail-distributed) vendor AND untaxed.
-    if (isAvedaRetail && clearTaxAbsent) {
-      const r = gated("Retail / Product Costs", CONFIDENCE_LEVEL.HIGH, "L2.5 RETAIL");
+    const taxAbsent = lineTax != null ? lineTax === 0 : !salesTaxPresent;
+    const taxPresent = lineTax != null ? lineTax > 0 : salesTaxPresent;
+    // RETAIL: product-like + untaxed. Also tag item_type "Retail" (v1.1.8 N) so
+    // the export tax recompute treats it as retail-exempt and the exec split
+    // Type is pre-filled.
+    if (taxAbsent) {
+      const r = gated("Retail / Product Costs", CONFIDENCE_LEVEL.LOW, "L2.5 RETAIL", "Retail");
       if (r) return r;
     }
-    // BACKBAR: product-like + taxed.
-    if (clearTaxPresent) {
-      const r = gated("Service Costs", CONFIDENCE_LEVEL.HIGH, "L2.5 BACKBAR");
+    // BACKBAR/SERVICE: product-like + taxed. Tag item_type "Backbar" (v1.1.8 N).
+    if (taxPresent) {
+      const r = gated("Service Costs", CONFIDENCE_LEVEL.LOW, "L2.5 BACKBAR", "Backbar");
       if (r) return r;
     }
-    // Ambiguous product line (or category invalid for entity) — do not guess; fall through.
+    // Category invalid for entity — fall through.
   }
 
   // L3 — keyword rules (≥90% confident).

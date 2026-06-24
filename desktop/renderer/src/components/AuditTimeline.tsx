@@ -27,6 +27,7 @@ const ACTION_LABELS: Record<string, string> = {
   INVOICE_UPDATED: "Invoice updated",
   INVOICE_REROUTED: "Re-routed to approver",
   MANUAL_REVIEW_REQUESTED: "Sent for manual review",
+  LINE_ITEM_ADDED: "Line item added",
 };
 
 function timestamp(iso: string) {

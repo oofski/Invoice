@@ -10,7 +10,7 @@ import {
   hydrateInvoice,
 } from "../lib/db";
 import { processInvoiceAI, ingestInvoicePdf } from "../lib/process";
-import { getPdf, deletePdf } from "../lib/storage";
+import { getPdf, deletePdf, getReductoRaw } from "../lib/storage";
 import {
   sendReminderEmail,
   sendRejectionEmail,
@@ -25,6 +25,7 @@ import {
   loadVendorMappings,
   resolveGlAccount,
   routeApprover,
+  codeLineItem,
 } from "../lib/rules";
 import {
   AUDIT_ACTION,
@@ -32,11 +33,13 @@ import {
   APPROVERS,
   BUSINESS_CLASSES,
   BUSINESS_ENTITIES,
+  CONFIDENCE_LEVEL,
   INVOICE_STATUS,
   OVERDUE_HOURS,
   REQUIRES_MANUAL_REVIEW,
   ROLES,
   TYPE_GL,
+  isCategoryValidForEntity,
   type BusinessEntity,
 } from "../lib/constants";
 import type {
@@ -485,6 +488,181 @@ invoices.post("/remind-approvers", async (c) => {
   }
 
   return c.json({ sent, failed, emailConfigured: configured, results });
+});
+
+// ----- GET /:id/extract-raw (admin only) ------------------------------
+// v1.1.8 A: streams the RAW Reducto /extract response stored as an R2 sidecar
+// next to the PDF (for diagnosing extraction issues). Admin-only. 404 when the
+// sidecar is absent (e.g. invoices ingested before v1.1.8, or no PDF). Registered
+// BEFORE GET /:id so the literal suffix isn't shadowed by the :id param route.
+invoices.get("/:id/extract-raw", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN)) return c.json({ error: "Forbidden" }, 403);
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+
+  const meta = await c.env.DB.prepare(
+    "SELECT r2_key FROM pdf_files WHERE invoice_id = ?",
+  )
+    .bind(id)
+    .first<{ r2_key: string }>();
+  if (!meta?.r2_key) return c.json({ error: "No raw extract" }, 404);
+  const obj = await getReductoRaw(c.env, meta.r2_key);
+  if (!obj) return c.json({ error: "No raw extract" }, 404);
+  return new Response(obj.body, {
+    headers: {
+      "content-type": "application/json",
+      "content-disposition": `inline; filename="${id}.reducto.json"`,
+    },
+  });
+});
+
+// ----- POST /:id/line-items (accountant/admin) ------------------------
+// v1.1.8 I: accountant/admin manually adds a line item to an invoice (e.g. a
+// line the extractor missed, flagged by the reconciliation guard). Body:
+// { description?, amount (number, may be negative), business?, class?, gl_category? }.
+// When gl_category is omitted, codeLineItem suggests one server-side. The category
+// is entity-validated. Inserts at sort_order = max+1, manually_overridden=1,
+// logic_path='MANUAL ADD'. 404 unknown; canViewInvoice; 409 if EXPORTED. Registered
+// BEFORE GET/PATCH /:id so the literal suffix isn't shadowed.
+invoices.post("/:id/line-items", async (c) => {
+  if (!hasRole(c, ROLES.ACCOUNTANT, ROLES.ADMIN))
+    return c.json({ error: "Forbidden" }, 403);
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+  if (!canViewInvoice(c, inv)) return c.json({ error: "Forbidden" }, 403);
+  if (inv.status === INVOICE_STATUS.EXPORTED)
+    return c.json({ error: "Invoice already exported" }, 409);
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    description?: string;
+    amount?: number;
+    business?: string;
+    class?: string;
+    gl_category?: string;
+  };
+  const amount = Number(body.amount);
+  if (!Number.isFinite(amount))
+    return c.json({ error: "A numeric amount is required" }, 400);
+  const description = (body.description ?? "").trim() || "(no description)";
+
+  // The line's entity defaults to the invoice's business unless overridden.
+  // Validate business/class against the canonical lists when supplied.
+  let business: string | null = inv.business;
+  if (body.business !== undefined) {
+    if (body.business && !(BUSINESS_ENTITIES as readonly string[]).includes(body.business))
+      return c.json({ error: `Invalid business "${body.business}"` }, 400);
+    business = body.business || null;
+  }
+  let klass: string | null = inv.class;
+  if (body.class !== undefined) {
+    if (body.class) {
+      const valid = BUSINESS_CLASSES[business ?? ""] ?? [];
+      if (!valid.includes(body.class))
+        return c.json(
+          { error: `Invalid class "${body.class}" for business "${business ?? ""}"` },
+          400,
+        );
+    }
+    klass = body.class || null;
+  }
+  const entity = business ?? inv.business;
+
+  // Resolve the GL category: explicit (validated) or coded server-side.
+  let category: string;
+  if (body.gl_category) {
+    if (!isCategoryValidForEntity(entity, body.gl_category))
+      return c.json({ error: `Invalid GL category "${body.gl_category}"` }, 400);
+    category = body.gl_category;
+  } else {
+    const vendorMapping = findVendorMapping(
+      inv.vendor,
+      await loadVendorMappings(c.env),
+    );
+    const coded = codeLineItem({
+      description,
+      vendor: inv.vendor,
+      vendorMapping,
+      business: (entity ?? "Admin") as BusinessEntity,
+      salesTaxPresent: (inv.sales_tax ?? 0) > 0,
+      amount,
+    });
+    category = coded.category;
+  }
+
+  const stillReview = category === REQUIRES_MANUAL_REVIEW;
+  const requiresReview = stillReview ? 1 : 0;
+  const confidence = stillReview
+    ? CONFIDENCE_LEVEL.MANUAL_REVIEW
+    : CONFIDENCE_LEVEL.HIGH;
+
+  // Persist business/class on the new line ONLY when the invoice is already a
+  // per-line split — i.e. every existing leaf line already carries business AND
+  // class. The export PER_LINE detector (export.ts) flips to per-line mode when
+  // ANY leaf carries business/class and then emits ONLY those leaves, so writing
+  // business/class onto a lone added line of an otherwise header-coded invoice
+  // would silently drop every AI-coded line from the QBO export. The invariant is
+  // "all leaves carry business/class, or none do" — honor it here so a normal
+  // (header/even-split) invoice keeps the added line at NULL business/class.
+  const existing = await c.env.DB.prepare(
+    "SELECT id, split_parent_id, business, class, sort_order FROM line_items WHERE invoice_id = ?",
+  )
+    .bind(id)
+    .all<{
+      id: string;
+      split_parent_id: string | null;
+      business: string | null;
+      class: string | null;
+      sort_order: number | null;
+    }>();
+  const existingRows = existing.results ?? [];
+  const parentIds = new Set(
+    existingRows.map((r) => r.split_parent_id).filter((x): x is string => !!x),
+  );
+  const existingLeaves = existingRows.filter((r) => !parentIds.has(r.id));
+  const isPerLineSplit =
+    existingLeaves.length > 0 && existingLeaves.every((r) => r.business && r.class);
+  const lineBusiness = isPerLineSplit ? business : null;
+  const lineClass = isPerLineSplit ? klass : null;
+
+  // Append after the current lines.
+  const sortOrder =
+    existingRows.reduce((m, r) => Math.max(m, r.sort_order ?? 0), -1) + 1;
+
+  const lineId = uuid();
+  await c.env.DB.prepare(
+    `INSERT INTO line_items (id, invoice_id, description, amount, business, class,
+       gl_category, confidence_level, logic_path, requires_review,
+       manually_overridden, overridden_by, sort_order)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  )
+    .bind(
+      lineId,
+      id,
+      description,
+      amount,
+      lineBusiness,
+      lineClass,
+      category,
+      confidence,
+      "MANUAL ADD",
+      requiresReview,
+      1,
+      user(c).id,
+      sortOrder,
+    )
+    .run();
+
+  await audit(c.env, {
+    invoiceId: id,
+    userId: user(c).id,
+    action: AUDIT_ACTION.LINE_ITEM_ADDED,
+    newValue: { description, amount, gl_category: category, business: lineBusiness, class: lineClass },
+    note: `${user(c).name} added line "${description}" (${amount.toFixed(2)}) → ${category}`,
+  });
+
+  return c.json({ ok: true, id: lineId }, 201);
 });
 
 // ----- GET /:id --------------------------------------------------------

@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Split, PencilLine } from "lucide-react";
+import { Split, PencilLine, Plus } from "lucide-react";
 import { ConfidenceBadge } from "@/components/ui/Badges";
 import { GLCategorySelect } from "@/components/GLCategorySelect";
 import { SplitModal } from "@/components/SplitModal";
-import { Button } from "@/components/ui/primitives";
+import { Button, Input } from "@/components/ui/primitives";
+import { Modal } from "@/components/ui/Modal";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { formatCurrency, cn } from "@/lib/utils";
@@ -19,15 +20,26 @@ export function LineItemsTable({
   editable,
   onChange,
   invoiceBusiness,
+  canAdd = false,
+  invoiceId,
 }: {
   lineItems: LineItemRow[];
   editable: boolean;
   onChange: () => void;
   /** Invoice's business entity; used as a fallback for a line's GL number. */
   invoiceBusiness?: string | null;
+  /**
+   * Accountant/admin only — when true (and a non-exported invoice), an
+   * "+ Add line item" affordance is shown below the table. Executives /
+   * ApprovalView never pass this (GL is never theirs to add).
+   */
+  canAdd?: boolean;
+  /** Required when `canAdd` — target invoice for the add-line POST. */
+  invoiceId?: string;
 }) {
   const [splitTarget, setSplitTarget] = useState<LineItemRow | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
 
   // Group split children beneath their parent for display.
   const { roots, childrenByParent } = useMemo(() => {
@@ -151,13 +163,159 @@ export function LineItemsTable({
         </table>
       </div>
 
+      {canAdd && invoiceId && (
+        <div className="border-t border-line px-4 py-3">
+          <Button variant="ghost" size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="h-3.5 w-3.5" />
+            Add line item
+          </Button>
+        </div>
+      )}
+
       <SplitModal
         lineItem={splitTarget}
         open={!!splitTarget}
         onClose={() => setSplitTarget(null)}
         onSplit={onChange}
       />
+
+      {canAdd && invoiceId && (
+        <AddLineItemModal
+          open={addOpen}
+          onClose={() => setAddOpen(false)}
+          invoiceId={invoiceId}
+          invoiceBusiness={invoiceBusiness}
+          onAdded={onChange}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * Modal for an accountant/admin to add a missing line item (e.g. a line the
+ * extractor missed, surfaced by the reconciliation banner). Amount may be
+ * negative (a discount/credit). Leaving the GL category blank lets the server
+ * auto-suggest one. Accountant/admin only; the server returns 409 if the
+ * invoice has already been exported.
+ */
+function AddLineItemModal({
+  open,
+  onClose,
+  invoiceId,
+  invoiceBusiness,
+  onAdded,
+}: {
+  open: boolean;
+  onClose: () => void;
+  invoiceId: string;
+  invoiceBusiness?: string | null;
+  onAdded: () => void;
+}) {
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [glCategory, setGlCategory] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const parsedAmount = Number(amount);
+  const amountValid = amount.trim() !== "" && Number.isFinite(parsedAmount);
+
+  function reset() {
+    setDescription("");
+    setAmount("");
+    setGlCategory(null);
+  }
+
+  async function submit() {
+    if (!amountValid) return;
+    setSaving(true);
+    try {
+      await api.post(`/api/invoices/${invoiceId}/line-items`, {
+        description: description.trim() || undefined,
+        amount: parsedAmount,
+        gl_category: glCategory || undefined,
+      });
+      toast.success("Line item added");
+      reset();
+      onClose();
+      onAdded();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to add line");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => {
+        reset();
+        onClose();
+      }}
+      title="Add line item"
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-ink-muted">
+            Description
+          </label>
+          <Input
+            autoFocus
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. Shipping, missed product line…"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-medium text-ink-muted">
+            Amount
+          </label>
+          <Input
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00 (negative for a discount/credit)"
+          />
+          <p className="mt-1 text-xs text-ink-subtle">
+            Use a negative amount for a discount or credit.
+          </p>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-medium text-ink-muted">
+            GL category{" "}
+            <span className="font-normal text-ink-subtle">
+              (optional — leave blank to let the system suggest one)
+            </span>
+          </label>
+          <GLCategorySelect
+            value={glCategory}
+            entity={invoiceBusiness}
+            includeReview={false}
+            onChange={(v) => setGlCategory(v)}
+          />
+        </div>
+      </div>
+
+      <div className="mt-5 flex justify-end gap-2">
+        <Button
+          variant="secondary"
+          onClick={() => {
+            reset();
+            onClose();
+          }}
+        >
+          Cancel
+        </Button>
+        <Button onClick={submit} loading={saving} disabled={!amountValid}>
+          Add line item
+        </Button>
+      </div>
+    </Modal>
   );
 }
 

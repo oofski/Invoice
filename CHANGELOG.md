@@ -5,6 +5,48 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.1.8] — 2026-06-24
+
+### Added
+- **Tax-based coding by default.** When a product-like line has no stronger
+  match, it's now coded by how it's taxed: an **untaxed** good defaults to
+  **Retail / Product Costs** and is tagged **Type: Retail**; a good that's
+  **charged sales tax** defaults to **Service Costs** and is tagged **Type:
+  Backbar**. These are flagged low-confidence for a quick review, and any
+  explicit Type or manual edit still wins. The Type tag also pre-fills the
+  executive line split and drives the per-line purchase-tax recompute.
+- **Discounts & credits are captured as their own lines.** Negative amounts
+  (parentheses, trailing CR, or a leading minus) are no longer dropped or merged.
+  For the **schools (IBW, Chicago)** a discount is tracked on its own
+  **Discounts** account. For **every other entity** the discount is **netted off
+  the relevant GL** — e.g. a $100 line with a $25 discount records **$75** to
+  that account, with no separate discount line. Discounts and credits are never
+  taxed.
+- **Completeness check (reconciliation).** After extraction, the app compares the
+  line items + tax against the invoice total. If they don't add up, it adds a
+  clear **"⚠ Extraction incomplete"** review line for the difference and holds the
+  invoice in **needs-review** (export stays blocked) until a person verifies it
+  against the PDF.
+- **Accountants/admins can add a missing line.** A new **"+ Add line item"**
+  control on the invoice detail lets an accountant or admin add a line the
+  scanner missed (amount required; GL is suggested automatically if left blank).
+  Executives never see or get this control. A reconciliation banner points it out
+  when the lines don't match the total.
+
+### Changed
+- **Higher-fidelity OCR/extraction.** The extractor now requests Reducto's
+  deeper-accuracy mode with per-field citations, and the prompt is hardened to
+  return **one line per visible row on every page** (including multi-page tables)
+  and never to merge or skip lines. If a tuning option isn't supported on the
+  account, extraction automatically falls back so it can never break. Lines the
+  scanner reports **low confidence** on are flagged for review. The raw scanner
+  output is now retained (admin-only) so extraction issues can be diagnosed.
+
+### Fixed
+- A manually-added line no longer disrupts the QuickBooks export. Added lines on a
+  normal invoice keep the invoice's header coding, so the export still includes
+  every original line.
+
 ## [1.1.7] — 2026-06-24
 
 ### Added
@@ -367,6 +409,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.1.8]: https://github.com/oofski/Invoice/releases/tag/v1.1.8
 [1.1.7]: https://github.com/oofski/Invoice/releases/tag/v1.1.7
 [1.1.6]: https://github.com/oofski/Invoice/releases/tag/v1.1.6
 [1.1.5]: https://github.com/oofski/Invoice/releases/tag/v1.1.5

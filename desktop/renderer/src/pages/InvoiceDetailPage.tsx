@@ -10,6 +10,7 @@ import { useApi } from "@/hooks/useApi";
 import { useProfile } from "@/components/ProfileProvider";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
+import { formatCurrency } from "@/lib/utils";
 import { INVOICE_STATUS, ROLES } from "@/lib/constants";
 import type { InvoiceWithRelations } from "@/lib/types";
 
@@ -54,6 +55,38 @@ export default function InvoiceDetailPage() {
     !!invoice &&
     (profile.role === ROLES.ACCOUNTANT || profile.role === ROLES.ADMIN) &&
     invoice.status !== INVOICE_STATUS.EXPORTED;
+
+  // Adding a missing line item is an accountant/admin action and is blocked
+  // once exported (the Worker returns 409). Executives never manage GL.
+  const canAdd =
+    !!invoice &&
+    (profile.role === ROLES.ACCOUNTANT || profile.role === ROLES.ADMIN) &&
+    invoice.status !== INVOICE_STATUS.EXPORTED;
+
+  // Reconciliation advisory (Feature L): Σ(non-split-parent line amounts) + tax
+  // should equal the invoice total. Split-parent lines are excluded because
+  // their split children carry the amounts (matches LineItemsTable / the exec
+  // table, which key off `split_parent_id`). A parent (a line that has at least
+  // one child pointing at it via split_parent_id) is therefore dropped; its
+  // children — which themselves have a non-null split_parent_id — are also
+  // dropped, so we sum only the canonical leaf/root lines: those that are NOT a
+  // split child AND are NOT a split parent.
+  const { lineSum, reconciled, hasLines } = useMemo(() => {
+    const parentIds = new Set(
+      lineItems.map((li) => li.split_parent_id).filter(Boolean) as string[],
+    );
+    const canonical = lineItems.filter(
+      (li) => !li.split_parent_id && !parentIds.has(li.id),
+    );
+    const sum = canonical.reduce((acc, li) => acc + Number(li.amount ?? 0), 0);
+    const total = Number(invoice?.total_amount ?? 0);
+    const tax = Number(invoice?.sales_tax ?? 0);
+    return {
+      lineSum: sum,
+      hasLines: canonical.length > 0,
+      reconciled: Math.abs(sum + tax - total) <= 0.01,
+    };
+  }, [lineItems, invoice]);
 
   async function reprocess() {
     setReprocessing(true);
@@ -170,6 +203,21 @@ export default function InvoiceDetailPage() {
             </div>
           )}
 
+          {/* Reconciliation advisory — accountant/admin only (canAdd). Advisory
+              only; it complements the server's reconciliation flag and never
+              blocks anything. */}
+          {canAdd && hasLines && !reconciled && (
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning-soft-fg/30 bg-warning-soft-bg p-3 text-sm text-warning-soft-fg">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>
+                Line items + tax (≈ {formatCurrency(lineSum + Number(invoice.sales_tax ?? 0))})
+                don&apos;t match the invoice total (
+                {formatCurrency(Number(invoice.total_amount ?? 0))}). A line may
+                be missing or mis-read — add it below.
+              </span>
+            </div>
+          )}
+
           {canSeeGl && (
             <div className="mt-6">
               <h3 className="mb-2 font-display text-sm font-semibold text-ink">
@@ -181,6 +229,8 @@ export default function InvoiceDetailPage() {
                   editable={canEdit}
                   onChange={refetch}
                   invoiceBusiness={invoice.business}
+                  canAdd={canAdd}
+                  invoiceId={invoice.id}
                 />
               </Card>
             </div>
