@@ -2,6 +2,7 @@
   "name": "invoiceiq-desktop",
   "private": true,
   "version": "1.1.0",
+  "description": "InvoiceIQ desktop AP automation app",
   "main": "electron/main.js",
   "type": "commonjs",
   "scripts": {
