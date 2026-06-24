@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { useMemo, useState, useCallback } from "react";
+import { Plus, Trash2, CheckSquare } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button, Input } from "@/components/ui/primitives";
 import { BusinessClassSelect } from "@/components/BusinessClassSelect";
@@ -57,20 +57,66 @@ export function SplitInvoiceModal({
   const [mode, setMode] = useState<Mode>("even");
   const [busy, setBusy] = useState(false);
 
-  // Flexible allocation builder rows, pre-filled from the invoice's business
-  // classes split evenly (remainder carried on the last row).
   const [rows, setRows] = useState<AllocationRow[]>(() => seedRows(invoice));
-
-  // Per-line working state, seeded from each line's existing business/class or
-  // the invoice's defaults.
   const [lineState, setLineState] = useState<Record<string, LineState>>(() =>
     seedLineState(invoice),
   );
+
+  // Per-line multi-select state for bulk apply
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBusiness, setBulkBusiness] = useState("");
+  const [bulkClass, setBulkClass] = useState("");
+  const [bulkType, setBulkType] = useState("");
+  const [bulkCustomType, setBulkCustomType] = useState("");
 
   const lineItems = useMemo(
     () => invoice.line_items.filter((li) => !li.split_parent_id),
     [invoice.line_items],
   );
+
+  const allSelected =
+    lineItems.length > 0 && lineItems.every((li) => selectedIds.has(li.id));
+  const someSelected = selectedIds.size > 0;
+
+  const toggleLine = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAll = useCallback(() => {
+    setSelectedIds((prev) =>
+      prev.size === lineItems.length
+        ? new Set()
+        : new Set(lineItems.map((li) => li.id)),
+    );
+  }, [lineItems]);
+
+  function applyBulk() {
+    if (selectedIds.size === 0) return;
+    setLineState((prev) => {
+      const next = { ...prev };
+      for (const id of selectedIds) {
+        const cur = next[id] ?? { business: "", class: "", type: "", customType: "" };
+        next[id] = {
+          business: bulkBusiness || cur.business,
+          class: bulkClass || cur.class,
+          type: bulkType || cur.type,
+          customType:
+            (bulkType === "Other" ? bulkCustomType : undefined) ?? cur.customType,
+        };
+      }
+      return next;
+    });
+    setSelectedIds(new Set());
+    setBulkBusiness("");
+    setBulkClass("");
+    setBulkType("");
+    setBulkCustomType("");
+  }
 
   // ----------------------------------------------------- allocation builder
   const total = useMemo(
@@ -193,7 +239,7 @@ export function SplitInvoiceModal({
       open={open}
       onClose={onClose}
       title="Split invoice"
-      className="max-w-2xl"
+      className="max-w-5xl"
     >
       <div className="space-y-4">
         {/* Mode toggle */}
@@ -324,13 +370,75 @@ export function SplitInvoiceModal({
           <div className="space-y-3">
             <p className="text-sm text-slate-600">
               Assign a business, class and type to each line item. Lines left
-              unset default to the invoice&apos;s business/class.
+              unset default to the invoice&apos;s business/class. Select
+              multiple rows to bulk-apply settings.
             </p>
 
-            <div className="scroll-thin overflow-x-auto rounded-lg border border-slate-200">
-              <table className="w-full min-w-[680px] text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            {/* Bulk-apply bar — visible when ≥1 row is checked */}
+            {someSelected && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+                <span className="text-xs font-semibold text-blue-700">
+                  <CheckSquare className="mr-1 inline h-3.5 w-3.5" />
+                  {selectedIds.size} selected — apply to all:
+                </span>
+                <BusinessClassSelect
+                  className="shrink-0"
+                  business={bulkBusiness || null}
+                  class={bulkClass || null}
+                  disabled={busy}
+                  onChange={(b, c) => {
+                    setBulkBusiness(b);
+                    setBulkClass(c);
+                  }}
+                />
+                <select
+                  value={bulkType}
+                  disabled={busy}
+                  onChange={(e) => setBulkType(e.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50"
+                >
+                  <option value="">Type…</option>
+                  {ITEM_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+                {bulkType === "Other" && (
+                  <Input
+                    placeholder="Custom type"
+                    value={bulkCustomType}
+                    disabled={busy}
+                    onChange={(e) => setBulkCustomType(e.target.value)}
+                    className="w-32"
+                  />
+                )}
+                <Button size="sm" onClick={applyBulk} disabled={busy}>
+                  Apply to {selectedIds.size}
+                </Button>
+                <button
+                  onClick={() => setSelectedIds(new Set())}
+                  className="ml-auto text-xs text-blue-500 hover:text-blue-700"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+
+            <div className="scroll-thin max-h-[52vh] overflow-y-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-50">
+                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                    {/* Select-all checkbox */}
+                    <th className="w-8 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={toggleAll}
+                        className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-blue-600"
+                        aria-label="Select all lines"
+                      />
+                    </th>
                     <th className="px-4 py-2 font-medium">Description</th>
                     <th className="px-4 py-2 text-right font-medium">Amount</th>
                     <th className="px-4 py-2 font-medium">Business / Class</th>
@@ -345,8 +453,25 @@ export function SplitInvoiceModal({
                       type: "",
                       customType: "",
                     };
+                    const isChecked = selectedIds.has(li.id);
                     return (
-                      <tr key={li.id} className="border-b border-slate-100">
+                      <tr
+                        key={li.id}
+                        className={cn(
+                          "border-b border-slate-100",
+                          isChecked && "bg-blue-50",
+                        )}
+                      >
+                        {/* Row checkbox */}
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleLine(li.id)}
+                            className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-blue-600"
+                            aria-label={`Select ${li.description ?? "line"}`}
+                          />
+                        </td>
                         <td className="px-4 py-2 align-top text-slate-800">
                           {li.description ?? "—"}
                         </td>

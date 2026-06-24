@@ -5,6 +5,27 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.1.0] — 2026-06-24
+
+### Changed
+- **Collapsible invoice inbox.** The "Pending Approvals" sidebar now has a
+  collapse button (`‹`) that shrinks it to a thin strip, giving the PDF and
+  detail view more room. Click the expand arrow to restore it.
+- **Collapsible decision panel.** A new toggle in the top-right of the approval
+  detail view collapses the Approve / Split / Reject panel entirely, letting
+  the PDF take the full width for easier reading. Click the panel icon to
+  bring it back.
+- **PDF zoom and scroll now work correctly.** The approval layout was switched
+  from CSS grid to flex so the PDF container gets a proper constrained height —
+  zoom in/out and scroll/pan now work as expected.
+- **Bulk-select in per-line split.** Each line in the Per-line split tab now
+  has a checkbox on the left. Check any combination (or "Select all") and a
+  blue bulk-apply bar appears letting you set the Business / Class / Type for
+  all selected lines at once — no need to go row by row.
+- **Larger split modal.** The Split invoice modal is now wider (`max-w-5xl`)
+  and the per-line table scrolls within the modal (max ~52% of screen height)
+  so the whole content is easy to see.
+
 ## [1.0.9] — 2026-06-23
 
 ### Added
@@ -192,6 +213,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.1.0]: https://github.com/oofski/Invoice/releases/tag/v1.1.0
 [1.0.9]: https://github.com/oofski/Invoice/releases/tag/v1.0.9
 [1.0.8]: https://github.com/oofski/Invoice/releases/tag/v1.0.8
 [1.0.7]: https://github.com/oofski/Invoice/releases/tag/v1.0.7

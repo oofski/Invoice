@@ -3,6 +3,7 @@ import {
   Check,
   X,
   ChevronLeft,
+  ChevronRight,
   Calendar,
   Building2,
   Inbox,
@@ -10,6 +11,10 @@ import {
   Split,
   ChevronDown,
   ChevronUp,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 import { PdfPane } from "@/components/PdfPane";
 import { LineItemsTable } from "@/components/LineItemsTable";
@@ -34,11 +39,10 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
     `/api/invoices?status=${INVOICE_STATUS.PENDING_APPROVAL}&limit=500`,
   );
   const [selectedId, setSelectedId] = useState<string | undefined>(initialId);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const invoices = data?.invoices ?? [];
 
-  // No realtime — poll every 15s so newly-routed invoices appear without
-  // reopening the page (mirrors the Dashboard's polling approach).
   useEffect(() => {
     const id = setInterval(() => refetch(), 15000);
     return () => clearInterval(id);
@@ -46,81 +50,109 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
 
   return (
     <div className="flex h-screen flex-col lg:flex-row">
-      {/* List sidebar */}
+      {/* List sidebar — collapsible on desktop */}
       <aside
         className={cn(
-          "w-full shrink-0 border-r border-slate-200 bg-white lg:w-80",
+          "shrink-0 border-r border-slate-200 bg-white transition-all duration-200",
           selectedId ? "hidden lg:block" : "block",
+          sidebarCollapsed ? "lg:w-10" : "w-full lg:w-80",
         )}
       >
-        <div className="border-b border-slate-200 px-4 py-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-bold text-slate-900">
-              Pending Approvals
-            </h1>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => refetch()}
-              disabled={loading}
+        {sidebarCollapsed ? (
+          /* Collapsed strip — just an expand button */
+          <div className="flex flex-col items-center py-3">
+            <button
+              onClick={() => setSidebarCollapsed(false)}
+              title="Expand inbox"
+              className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
             >
-              <RefreshCw
-                className={cn("h-4 w-4", loading && "animate-spin")}
-              />
-              Refresh
-            </Button>
+              <PanelLeftOpen className="h-5 w-5" />
+            </button>
           </div>
-          <p className="text-sm text-slate-500">
-            {invoices.length} awaiting your decision
-          </p>
-        </div>
-        <div className="scroll-thin h-[calc(100vh-73px)] overflow-y-auto">
-          {error ? (
-            <div className="px-4 py-4 text-sm text-red-600">
-              Couldn&apos;t load approvals: {error}. Check the server connection
-              and try Refresh.
-            </div>
-          ) : loading ? (
-            <div className="flex justify-center py-10">
-              <Spinner />
-            </div>
-          ) : invoices.length === 0 ? (
-            <EmptyState
-              title="All caught up"
-              description="No invoices awaiting approval."
-              icon={<Inbox className="h-10 w-10" />}
-            />
-          ) : (
-            invoices.map((inv) => (
-              <button
-                key={inv.id}
-                onClick={() => setSelectedId(inv.id)}
-                className={cn(
-                  "block w-full border-b border-slate-100 px-4 py-3 text-left transition-colors hover:bg-slate-50",
-                  selectedId === inv.id && "bg-blue-50",
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-slate-900">
-                    {inv.vendor}
-                  </span>
-                  <span className="text-sm font-semibold text-slate-900">
-                    {formatCurrency(Number(inv.total_amount))}
-                  </span>
+        ) : (
+          <>
+            <div className="border-b border-slate-200 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <h1 className="text-lg font-bold text-slate-900">
+                  Pending Approvals
+                </h1>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => refetch()}
+                    disabled={loading}
+                  >
+                    <RefreshCw
+                      className={cn("h-4 w-4", loading && "animate-spin")}
+                    />
+                    Refresh
+                  </Button>
+                  <button
+                    onClick={() => setSidebarCollapsed(true)}
+                    title="Collapse inbox"
+                    className="hidden rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 lg:block"
+                  >
+                    <PanelLeftClose className="h-4 w-4" />
+                  </button>
                 </div>
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>{inv.business}</span>
-                  <span>{ageLabel(inv.created_at)} old</span>
+              </div>
+              <p className="text-sm text-slate-500">
+                {invoices.length} awaiting your decision
+              </p>
+            </div>
+            <div className="scroll-thin h-[calc(100vh-81px)] overflow-y-auto">
+              {error ? (
+                <div className="px-4 py-4 text-sm text-red-600">
+                  Couldn&apos;t load approvals: {error}. Check the server
+                  connection and try Refresh.
                 </div>
-              </button>
-            ))
-          )}
-        </div>
+              ) : loading ? (
+                <div className="flex justify-center py-10">
+                  <Spinner />
+                </div>
+              ) : invoices.length === 0 ? (
+                <EmptyState
+                  title="All caught up"
+                  description="No invoices awaiting approval."
+                  icon={<Inbox className="h-10 w-10" />}
+                />
+              ) : (
+                invoices.map((inv) => (
+                  <button
+                    key={inv.id}
+                    onClick={() => setSelectedId(inv.id)}
+                    className={cn(
+                      "block w-full border-b border-slate-100 px-4 py-3 text-left transition-colors hover:bg-slate-50",
+                      selectedId === inv.id && "bg-blue-50",
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-slate-900">
+                        {inv.vendor}
+                      </span>
+                      <span className="text-sm font-semibold text-slate-900">
+                        {formatCurrency(Number(inv.total_amount))}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-slate-500">
+                      <span>{inv.business}</span>
+                      <span>{ageLabel(inv.created_at)} old</span>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </>
+        )}
       </aside>
 
       {/* Detail */}
       <div
-        className={cn("min-w-0 flex-1", selectedId ? "block" : "hidden lg:block")}
+        className={cn(
+          "min-w-0 flex-1",
+          selectedId ? "block" : "hidden lg:block",
+        )}
       >
         {selectedId ? (
           <ApprovalDetail
@@ -169,6 +201,7 @@ function ApprovalDetail({
   const [comment, setComment] = useState("");
   const [showDetail, setShowDetail] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
 
   const invoice = data?.invoice;
   const isPending = invoice?.status === INVOICE_STATUS.PENDING_APPROVAL;
@@ -224,6 +257,7 @@ function ApprovalDetail({
 
   return (
     <div className="flex h-full flex-col">
+      {/* Top bar */}
       <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-4 py-3">
         <button
           onClick={onBack}
@@ -234,16 +268,37 @@ function ApprovalDetail({
         <span className="ml-auto text-xs text-slate-400">
           #{invoice.invoice_number}
         </span>
+        {/* Desktop-only: toggle the decision panel */}
+        <button
+          onClick={() => setPanelCollapsed((v) => !v)}
+          title={panelCollapsed ? "Show decision panel" : "Collapse decision panel"}
+          className="hidden rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 lg:block"
+        >
+          {panelCollapsed ? (
+            <PanelRightOpen className="h-4 w-4" />
+          ) : (
+            <PanelRightClose className="h-4 w-4" />
+          )}
+        </button>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">
-        {/* PDF */}
-        <div className="hidden border-r border-slate-200 lg:block">
+      {/* Main body — flex row so the PDF column gets a proper constrained height
+          (grid auto-rows didn't constrain the child height for overflow-auto). */}
+      <div className="flex min-h-0 flex-1">
+        {/* PDF — flex-1 fills remaining width; lg:flex so it shows on desktop */}
+        <div className="hidden min-h-0 flex-col border-r border-slate-200 lg:flex lg:flex-1">
           <PdfPane invoiceId={invoice.id} hasPdf={invoice.has_pdf ?? true} />
         </div>
 
-        {/* Decision panel */}
-        <div className="scroll-thin min-h-0 overflow-y-auto p-6">
+        {/* Decision panel — fixed width on desktop, full-width on mobile */}
+        <div
+          className={cn(
+            "scroll-thin min-h-0 overflow-y-auto p-6",
+            panelCollapsed
+              ? "hidden lg:hidden"
+              : "w-full lg:w-[380px] lg:shrink-0",
+          )}
+        >
           <div className="text-center">
             <p className="text-sm text-slate-500">{invoice.vendor}</p>
             <p className="my-1 text-5xl font-bold text-slate-900">
@@ -327,7 +382,7 @@ function ApprovalDetail({
             </div>
           )}
 
-          {/* Line-by-line detail — collapsed by default, summary-first. */}
+          {/* Line-by-line detail */}
           <div className="mt-6">
             <button
               onClick={() => setShowDetail((v) => !v)}
