@@ -5,6 +5,18 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.2] — 2026-06-24
+
+### Fixed
+- **Campus/class is now filled in automatically when the business is known but the
+  address didn't pin a campus.** Some invoices route to the right business by
+  **vendor** (e.g. Ultraceuticals → IBW) rather than by a full address match — and
+  a vendor rule sets the business but not the campus, so the **Class** came up
+  blank ("—"). The app now recovers the campus from the city on the invoice,
+  scoped to that business (an IBW invoice that says "Milwaukee" → Milwaukee;
+  "Madison" → Madison), so it can never cross into another business's campus. To
+  apply it to existing invoices, **Reprocess** them.
+
 ## [1.2.1] — 2026-06-24
 
 ### Added
@@ -466,6 +478,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.2.2]: https://github.com/oofski/Invoice/releases/tag/v1.2.2
 [1.2.1]: https://github.com/oofski/Invoice/releases/tag/v1.2.1
 [1.2.0]: https://github.com/oofski/Invoice/releases/tag/v1.2.0
 [1.1.9]: https://github.com/oofski/Invoice/releases/tag/v1.1.9
