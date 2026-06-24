@@ -35,6 +35,14 @@ export function Modal({
 
   if (!open) return null;
 
+  // `cn` is plain clsx (no tailwind-merge), so a hardcoded base width would
+  // collide with a caller-supplied width — and CSS source order, not the class
+  // string, decides the winner (the base usually won, capping every modal at
+  // max-w-lg). Only apply the defaults the caller hasn't overridden so e.g.
+  // `w-[95vw] max-w-[1600px]` actually takes effect.
+  const hasWidth = /(^|\s)w-/.test(className ?? "");
+  const hasMaxWidth = /(^|\s)max-w-/.test(className ?? "");
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
@@ -42,7 +50,9 @@ export function Modal({
     >
       <div
         className={cn(
-          "flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-xl",
+          "flex max-h-[90vh] flex-col overflow-hidden rounded-xl bg-white shadow-xl",
+          hasWidth ? "" : "w-full",
+          hasMaxWidth ? "" : "max-w-lg",
           className,
         )}
         onClick={(e) => e.stopPropagation()}

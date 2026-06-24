@@ -245,7 +245,7 @@ export function SplitInvoiceModal({
       open={open}
       onClose={onClose}
       title="Split invoice"
-      className={cn("max-w-6xl", isLines && "h-[90vh]")}
+      className={cn(isLines ? "h-[90vh] w-[95vw] max-w-[1600px]" : "max-w-6xl")}
       fill={isLines}
     >
       <div className={isLines ? "flex min-h-0 flex-1 flex-col gap-4" : "space-y-4"}>
@@ -433,7 +433,7 @@ export function SplitInvoiceModal({
             )}
 
             <div className="scroll-thin min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-200">
-              <table className="w-full min-w-[760px] text-sm">
+              <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50">
                   <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
                     {/* Select-all checkbox */}
@@ -446,10 +446,10 @@ export function SplitInvoiceModal({
                         aria-label="Select all lines"
                       />
                     </th>
-                    <th className="px-4 py-2 font-medium">Description</th>
-                    <th className="px-4 py-2 text-right font-medium">Amount</th>
-                    <th className="px-4 py-2 font-medium">Business / Class</th>
-                    <th className="px-4 py-2 font-medium">Type</th>
+                    <th className="px-3 py-2 font-medium">Description</th>
+                    <th className="px-3 py-2 text-right font-medium">Amount</th>
+                    <th className="px-3 py-2 font-medium">Business / Class</th>
+                    <th className="px-3 py-2 font-medium">Type</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -479,13 +479,13 @@ export function SplitInvoiceModal({
                             aria-label={`Select ${li.description ?? "line"}`}
                           />
                         </td>
-                        <td className="px-4 py-2 align-top text-slate-800">
+                        <td className="px-3 py-2 align-top text-slate-800">
                           {li.description ?? "—"}
                         </td>
-                        <td className="px-4 py-2 text-right align-top font-medium text-slate-900">
+                        <td className="px-3 py-2 text-right align-top font-medium text-slate-900">
                           {formatCurrency(Number(li.amount ?? 0))}
                         </td>
-                        <td className="px-4 py-2 align-top">
+                        <td className="px-3 py-2 align-top">
                           <BusinessClassSelect
                             business={state.business || null}
                             class={state.class || null}
@@ -495,7 +495,7 @@ export function SplitInvoiceModal({
                             }
                           />
                         </td>
-                        <td className="px-4 py-2 align-top">
+                        <td className="px-3 py-2 align-top">
                           <div className="flex items-center gap-2">
                             <select
                               value={state.type}
