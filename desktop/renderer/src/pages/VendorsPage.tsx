@@ -171,6 +171,7 @@ export default function VendorsPage() {
                         <GLCategorySelect
                           value={newRow.gl_override ?? null}
                           includeReview={false}
+                          entity={newRow.business_entity}
                           onChange={(v) =>
                             setNewRow((r) => ({ ...r, gl_override: v }))
                           }
@@ -264,6 +265,7 @@ export default function VendorsPage() {
                             <GLCategorySelect
                               value={draft.gl_override ?? null}
                               includeReview={false}
+                              entity={draft.business_entity}
                               onChange={(val) =>
                                 setDraft((d) => ({ ...d, gl_override: val }))
                               }

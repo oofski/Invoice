@@ -169,6 +169,7 @@ export default function InvoiceDetailPage() {
                   lineItems={lineItems}
                   editable={canEdit}
                   onChange={refetch}
+                  invoiceBusiness={invoice.business}
                 />
               </Card>
             </div>

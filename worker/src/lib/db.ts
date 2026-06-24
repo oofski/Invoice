@@ -6,7 +6,7 @@ import type {
   UserRow,
 } from "./types";
 import { uuid, parseJson } from "./util";
-import { ROLES } from "./constants";
+import { ROLES, glAccountNumber } from "./constants";
 
 /** Writes one audit_log row (Brief §13 — audit every state change). */
 export async function audit(
@@ -50,11 +50,17 @@ export function hydrateLineItem(li: LineItemRow, role?: string) {
     ...li,
     requires_review: !!li.requires_review,
     manually_overridden: !!li.manually_overridden,
+    // Derived (read-only): the entity-specific GL account number for this
+    // line's category. Entity falls back to the line's own business (the UI
+    // falls back to the invoice business when the line carries none).
+    gl_account_number: glAccountNumber(li.business, li.gl_category) || null,
   };
   if (role === ROLES.EXECUTIVE) {
     out.gl_category = null;
     out.confidence_level = null;
     out.logic_path = null;
+    // GL data must NOT leak to executives — null the derived account too.
+    out.gl_account_number = null;
   }
   return out;
 }

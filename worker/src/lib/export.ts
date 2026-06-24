@@ -7,7 +7,28 @@ import type {
   EntitySheet,
 } from "./types";
 import { resolveGlAccount } from "./rules";
-import { BUSINESS_ENTITIES, ENTITY_LABEL, ENTITY_CODE } from "./constants";
+import {
+  BUSINESS_ENTITIES,
+  ENTITY_LABEL,
+  ENTITY_CODE,
+  glAccountNumber,
+} from "./constants";
+
+/**
+ * Formats a QBO `Category/Account` cell as "<number> <name>" when this entity's
+ * COA resolves the category to a real account number (e.g. "6239 Marketing").
+ * Falls back to the bare category name when the number is empty, "Varies", or
+ * "None" — never throws on those sentinels. `account` is the canonical GL
+ * category NAME (the value `resolveGlAccount` returns).
+ */
+export function formatCategoryAccount(
+  business: string | null | undefined,
+  account: string,
+): string {
+  const num = glAccountNumber(business, account);
+  if (num && num !== "Varies" && num !== "None") return `${num} ${account}`;
+  return account;
+}
 
 /**
  * QuickBooks Online "Bills" import CSV generator (Brief §06). One CSV row per GL
@@ -70,7 +91,7 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
           toQboDate(invoice.inv_date),
           toQboDate(invoice.due_date),
           "Net 30",
-          a.gl_account ?? "",
+          formatCategoryAccount(a.business, a.gl_account ?? ""),
           `Even split — ${a.class} (${(a.percentage ?? 0)}%)`,
           a.amount.toFixed(2),
           `${a.business}:${a.class}`,
@@ -97,7 +118,7 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
           toQboDate(invoice.inv_date),
           toQboDate(invoice.due_date),
           "Net 30",
-          account,
+          formatCategoryAccount(li.business, account),
           li.description ?? "",
           (li.amount ?? 0).toFixed(2),
           li.class && li.class !== "None"
@@ -128,7 +149,7 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
         toQboDate(invoice.inv_date),
         toQboDate(invoice.due_date),
         "Net 30",
-        li.gl_category ?? "",
+        formatCategoryAccount(invoice.business, li.gl_category ?? ""),
         li.description ?? "",
         (li.amount ?? 0).toFixed(2),
         invoice.class && invoice.class !== "None"
@@ -394,7 +415,7 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
           Location: "",
           Memo: bill.memo,
           "*Type": "Category Details",
-          "Category/Account": line.account,
+          "Category/Account": formatCategoryAccount(line.business, line.account),
           "Product/Service": "",
           Quantity: "",
           Rate: "",

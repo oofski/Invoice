@@ -77,6 +77,12 @@ export interface LineItemRow {
   split_percentage: number | null;
   sort_order: number | null;
   created_at: string;
+  /**
+   * Derived (read-only), populated by `hydrateLineItem` — NOT a DB column. The
+   * entity-specific GL account number for this line's category, or null when no
+   * entity-COA mapping exists or when withheld from executives.
+   */
+  gl_account_number?: string | null;
 }
 
 export interface InvoiceAllocationRow {

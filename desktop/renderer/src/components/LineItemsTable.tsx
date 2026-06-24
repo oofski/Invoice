@@ -18,10 +18,13 @@ export function LineItemsTable({
   lineItems,
   editable,
   onChange,
+  invoiceBusiness,
 }: {
   lineItems: LineItemRow[];
   editable: boolean;
   onChange: () => void;
+  /** Invoice's business entity; used as a fallback for a line's GL number. */
+  invoiceBusiness?: string | null;
 }) {
   const [splitTarget, setSplitTarget] = useState<LineItemRow | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -89,6 +92,7 @@ export function LineItemsTable({
             <GLCategorySelect
               value={li.gl_category}
               disabled={savingId === li.id}
+              entity={li.business ?? invoiceBusiness}
               onChange={(v) => updateCategory(li, v)}
             />
           ) : (
@@ -98,7 +102,11 @@ export function LineItemsTable({
                 review ? "font-medium text-red-600" : "text-slate-700",
               )}
             >
-              {isSplitParent ? "— split —" : (li.gl_category ?? "—")}
+              {isSplitParent
+                ? "— split —"
+                : li.gl_category
+                  ? `${li.gl_account_number ? `${li.gl_account_number} · ` : ""}${li.gl_category}`
+                  : "—"}
             </span>
           )}
         </td>

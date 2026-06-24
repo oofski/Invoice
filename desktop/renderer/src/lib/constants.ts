@@ -349,6 +349,195 @@ export const GL_CATEGORY_GROUPS = Object.entries(GL_CATEGORIES).map(
 );
 
 // ---------------------------------------------------------------------------
+// Entity-specific Chart of Accounts (COA) — Group A
+// MIRROR of worker/src/lib/constants.ts ENTITY_COA — keep in sync.
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-entity Chart of Accounts. The account number for a GL category is DERIVED
+ * from (entity, category NAME) at read/export time — category NAMES remain the
+ * canonical stored value, there is NO schema change and NO migration.
+ *
+ * Keys of each inner map are the CURRENT canonical category names already in
+ * `GL_CATEGORIES` / `GL_CATEGORIES_FLAT`. Values are that entity's 4-digit
+ * account number as a STRING (some are suffixed e.g. "6229-1", some special
+ * e.g. "Varies" / "None"). Where an entity's COA has no equivalent for a
+ * current canonical category, that key is OMITTED so the lookup returns "".
+ *
+ * Source: "Entity-Specific Chart of Accounts (COA) Mappings" (spec §6).
+ */
+export const ENTITY_COA: Record<string, Record<string, string>> = {
+  // IBW & Chicago (School Institutional Mapping). Chicago resolves here via
+  // ENTITY_COA_ALIAS.
+  IBW: {
+    "Service Costs": "5000",
+    "Retail / Product Costs": "5100", // spec "Retail Costs"
+    "Kit Costs": "5300",
+    "Sales/Use Tax": "5400",
+    "Accounting Services": "6000",
+    "Corp Management Fee": "6005",
+    // note: spec splits Bank Fees 6040 / Credit Card Processing 6100 — the
+    // split into a separate Credit Card Processing account is deferred to a
+    // later phase; use the primary 6040 for the current canonical category.
+    "Bank Fees & CC Processing": "6040",
+    "Bad Debt": "6045",
+    "Guest Relations": "6053", // spec "Guest Amenities"
+    "Computer & IT": "6060",
+    Depreciation: "6070",
+    Discounts: "6075",
+    "Dues & Subscriptions": "6090",
+    "Equipment Lease": "6105",
+    "Employee Expenses": "6110",
+    "Training & Education": "6117", // spec "Training & Education-staff"
+    "Student Expenses": "6121",
+    "Student Education Fund": "6130",
+    Freight: "6150",
+    "Insurance - Business": "6160",
+    "Insurance - Health": "6180",
+    "Licenses & Permits": "6220",
+    // note: spec splits Professional Services 6224 / Outside Services 6240 —
+    // the split into a separate Professional Services account is deferred to a
+    // later phase; use the primary 6240 for the current canonical category.
+    "Professional / Outside Services": "6240",
+    Marketing: "6235",
+    "Penalties & Fees": "6255",
+    "Occupancy - Rent": "6280",
+    "Occupancy - CAM": "6285",
+    "Occupancy - Property Tax": "6287",
+    "Occupancy - Insurance": "6288",
+    "Repairs & Maintenance": "6290",
+    Supplies: "6300",
+    "Equipment & Fixtures": "6302",
+    Telephone: "6310",
+    Utilities: "6360",
+    "Payroll - Taxes": "6560",
+    "Reconciliation Discrepancies": "6900",
+    "Interest Income": "7700",
+    "Other Income/Loss": "7720",
+    "Payroll - Wages": "Varies",
+  },
+
+  // SKNBarRX (Clinical/Spa Mapping).
+  SKNBar: {
+    "Service Costs": "5000",
+    "Retail / Product Costs": "5100",
+    "Sales/Use Tax": "5400",
+    "Accounting Services": "6000",
+    "Corp Management Fee": "6005",
+    "Bank Fees & CC Processing": "6040",
+    "Guest Relations": "6052",
+    "Computer & IT": "6060",
+    Depreciation: "6070",
+    "Dues & Subscriptions": "6090",
+    "Employee Expenses": "6115",
+    Freight: "6150",
+    "Insurance - Business": "6160",
+    "Insurance - Health": "6180",
+    Marketing: "6239",
+    "Professional / Outside Services": "6240",
+    "Penalties & Fees": "6255",
+    "Occupancy - Rent": "6280",
+    "Occupancy - CAM": "6285", // spec "Occupancy - CAM & Taxes"
+    "Repairs & Maintenance": "6290",
+    Supplies: "6300",
+    "Equipment & Fixtures": "6302",
+    Telephone: "6310",
+    Utilities: "6360",
+    "Payroll - Wages": "6401",
+    "Payroll - Taxes": "6560",
+    Miscellaneous: "6600",
+    "Equipment Lease": "6670",
+    Interest: "7705", // spec "Interest Expense"
+    "Reconciliation Discrepancies": "None",
+  },
+
+  // Neroli (Salon/Spa Mapping).
+  Neroli: {
+    "Service Costs": "5000",
+    "Retail / Product Costs": "5100",
+    "Sales/Use Tax": "5400",
+    "Accounting Services": "6000",
+    "Corp Management Fee": "6005",
+    "Bank Fees & CC Processing": "6040",
+    "Guest Relations": "6052",
+    "Computer & IT": "6060",
+    Depreciation: "6070",
+    "Dues & Subscriptions": "6090",
+    "Employee Expenses": "6115",
+    "Training & Education": "6120",
+    Freight: "6150",
+    "Insurance - Business": "6160",
+    "Insurance - Health": "6180",
+    "Licenses & Permits": "6220",
+    Marketing: "6239",
+    "Professional / Outside Services": "6240",
+    "Penalties & Fees": "6255",
+    "Occupancy - Rent": "6280",
+    "Occupancy - CAM": "6285", // spec "Occupancy - CAM & Taxes"
+    "Repairs & Maintenance": "6290",
+    Supplies: "6300",
+    "Equipment & Fixtures": "6302",
+    Telephone: "6310",
+    Utilities: "6360",
+    "Payroll - Wages": "6401",
+    "Payroll - Taxes": "6560",
+    "Interest Income": "7700",
+    Interest: "7705", // spec "Interest Expense"
+    "Other Income/Loss": "7950",
+    "Reconciliation Discrepancies": "None",
+  },
+
+  // Nala (Corporate/Administrative Mapping). Admin resolves here via
+  // ENTITY_COA_ALIAS. Only the current canonical names with a clear admin-COA
+  // equivalent are mapped; the spec's brand-new admin accounts (Lodging,
+  // Transportation, Meals & Entertainment, Office Supplies, etc.) are NEW
+  // categories deferred to a later phase and are intentionally NOT added here.
+  Nala: {
+    "Bank Fees & CC Processing": "6040", // spec "Bank Service Charges"
+    "Dues & Subscriptions": "6090",
+    Freight: "6150",
+    "Computer & IT": "6170", // spec "Computer and Internet Expenses"
+    "Insurance - Health": "6180", // spec "Insurance Expense - Health"
+    Marketing: "6235", // spec "Marketing Web/Internet"
+    "Penalties & Fees": "6255", // spec "Fees & Penalties"
+    Supplies: "6300",
+    Telephone: "6310", // spec "Telephone Expense"
+    "Payroll - Wages": "6600", // spec "Payroll-Wages/Salary/Commission"
+    "Payroll - Taxes": "6605", // spec "Payroll-Employer Taxes"
+    "Corp Management Fee": "7000",
+    Depreciation: "6240", // spec "Depreciation Expense"
+    "Reconciliation Discrepancies": "None",
+  },
+};
+
+/**
+ * Entities that share another entity's COA. Chicago uses IBW's school COA;
+ * Admin uses Nala's admin COA. Resolved by `glAccountNumber` before lookup.
+ */
+export const ENTITY_COA_ALIAS: Record<string, string> = {
+  Chicago: "IBW",
+  Admin: "Nala",
+};
+
+/**
+ * Derives the 4-digit GL account number (as a string) for a given business
+ * entity + canonical GL category NAME. Resolves the entity through
+ * `ENTITY_COA_ALIAS` first. Returns "" when the entity or category is unknown
+ * (null-safe) or when that entity's COA has no equivalent for the category.
+ * Note: some values are non-numeric sentinels ("Varies" / "None").
+ */
+export function glAccountNumber(
+  entity: string | null | undefined,
+  category: string | null | undefined,
+): string {
+  if (!entity || !category) return "";
+  const resolved = ENTITY_COA_ALIAS[entity] ?? entity;
+  const coa = ENTITY_COA[resolved];
+  if (!coa) return "";
+  return coa[category] ?? "";
+}
+
+// ---------------------------------------------------------------------------
 // Audit log action types (Brief §13: write to audit_log on EVERY state change)
 // ---------------------------------------------------------------------------
 

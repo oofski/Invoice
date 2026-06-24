@@ -404,6 +404,7 @@ function ApprovalDetail({
                     lineItems={invoice.line_items}
                     editable={canDecide && isAssigned && isPending}
                     onChange={refetch}
+                    invoiceBusiness={invoice.business}
                   />
                 )}
               </div>

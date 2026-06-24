@@ -109,6 +109,7 @@ export function SplitModal({
                   <GLCategorySelect
                     value={row.gl_category || null}
                     includeReview={false}
+                    entity={lineItem.business}
                     onChange={(v) =>
                       setRows((prev) =>
                         prev.map((r, idx) =>

@@ -5,6 +5,30 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.1.3] — 2026-06-24
+
+### Added
+- **Entity-specific GL account numbers.** Each GL category now shows its
+  **4-digit Chart-of-Accounts number next to the name**, and the number is
+  **specific to the business entity** — the same category can map to a different
+  account per entity (e.g. *Marketing* is **6235** for IBW/Chicago but **6239**
+  for Neroli/SKNBarRx; *Corp Management Fee* is **6005** for the salons but
+  **7000** for Nala). The number appears next to the category in the line-item
+  GL view and the GL dropdown (accountants/admins only — executives still never
+  see GL), and flows into the **QuickBooks bill-import export** as
+  `"6239 Marketing"` in the Category/Account column, rendered per entity. Chicago
+  uses IBW's school chart; Admin uses Nala's. Categories with no account on a
+  given entity (or special values like *Payroll – Wages = "Varies"*) fall back to
+  the plain category name.
+- Implemented from the new **Accounting Categorization & Routing Engine** spec.
+  This release covers the entity-specific Chart of Accounts; the spec's approver-
+  routing and auto-categorization rules are tracked separately.
+
+### Notes
+- No database migration or schema change — account numbers are derived from the
+  (entity, category) pair at display/export time, so existing invoices show the
+  correct numbers immediately.
+
 ## [1.1.2] — 2026-06-24
 
 ### Fixed
@@ -236,6 +260,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.1.3]: https://github.com/oofski/Invoice/releases/tag/v1.1.3
 [1.1.2]: https://github.com/oofski/Invoice/releases/tag/v1.1.2
 [1.1.1]: https://github.com/oofski/Invoice/releases/tag/v1.1.1
 [1.1.0]: https://github.com/oofski/Invoice/releases/tag/v1.1.0

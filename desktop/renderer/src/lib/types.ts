@@ -60,6 +60,11 @@ export interface LineItemRow {
   description: string | null;
   amount: number | null;
   gl_category: string | null;
+  /**
+   * Server-derived 4-digit GL account number for (entity, gl_category). Already
+   * role-gated server-side (executives receive null alongside gl_category).
+   */
+  gl_account_number?: string | null;
   confidence_level: ConfidenceLevel | null;
   logic_path: string | null;
   requires_review: boolean;
