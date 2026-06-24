@@ -150,6 +150,27 @@ export const BUSINESS_CLASSES: Record<string, string[]> = {
 export const APPROVERS = ["Lori", "Lisa", "Kari", "Bonnie", "Susan"] as const;
 export type Approver = (typeof APPROVERS)[number];
 
+/**
+ * Per-(business, class) purchase sales/use-tax rate (v1.1.6 Feature 2). Used by
+ * the QBO export to RECOMPUTE purchase tax for PER_LINE-split invoices: taxable
+ * lines (everything except Retail) are taxed at their own location's rate;
+ * Retail is exempt. Chicago carries its own literal 0.1025 rate (NOT aliased to
+ * IBW for tax — only COA account numbers alias). Class strings here must match
+ * BUSINESS_CLASSES exactly ("Eastside", "North Shore", etc.).
+ */
+export const LOCATION_TAX_RATE: Record<string, Record<string, number>> = {
+  Neroli: { Downtown: 0.079, Eastside: 0.079, Brookfield: 0.05, Mequon: 0.055, "North Shore": 0.055 },
+  SKNBar: { Pewaukee: 0.05, Shorewood: 0.055 },
+  IBW: { Milwaukee: 0.079, Madison: 0.055 },
+  Chicago: { Chicago: 0.1025 },
+};
+
+/** Returns the purchase tax rate for a (business, class) pair, or 0 if unmapped/null. */
+export function locationTaxRate(business?: string | null, klass?: string | null): number {
+  if (!business || !klass) return 0;
+  return LOCATION_TAX_RATE[business]?.[klass] ?? 0;
+}
+
 // ---------------------------------------------------------------------------
 // Location dictionary (Brief §02) — seeds the `location_mappings` table.
 // ---------------------------------------------------------------------------

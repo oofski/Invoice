@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "./helpers";
-import { user, hasRole, isStaffOrAdmin, canViewInvoice } from "./helpers";
+import { user, hasRole, isStaffOrAdmin, isExecOrAdmin, canViewInvoice } from "./helpers";
 import {
   audit,
   getInvoice,
@@ -11,7 +11,7 @@ import {
 } from "../lib/db";
 import { processInvoiceAI, ingestInvoicePdf } from "../lib/process";
 import { getPdf, deletePdf } from "../lib/storage";
-import { sendReminderEmail, sendRejectionEmail } from "../lib/email";
+import { sendReminderEmail, sendRejectionEmail, sendApproverDigestEmail } from "../lib/email";
 import { nowIso, hoursSince, sameName, uuid } from "../lib/util";
 import {
   findVendorMapping,
@@ -194,6 +194,114 @@ invoices.get("/:id/pdf", async (c) => {
       "content-disposition": `inline; filename="${meta.file_name ?? "invoice.pdf"}"`,
     },
   });
+});
+
+// ----- GET /approvers/pending-counts ----------------------------------
+// Exec/admin digest support: how many PENDING_APPROVAL invoices each distinct
+// approver name carries, plus whether that name maps to an active, emailable
+// user. Counts are computed case-/whitespace-insensitively on approved_by.
+invoices.get("/approvers/pending-counts", async (c) => {
+  if (!isExecOrAdmin(c)) return c.json({ error: "Forbidden" }, 403);
+
+  // Group pending invoices by normalized approver, but keep one representative
+  // raw name per group so we can resolve it to a user.
+  const rows = await c.env.DB.prepare(
+    `SELECT trim(approved_by) AS name,
+            lower(trim(approved_by)) AS norm,
+            COUNT(*) AS c
+       FROM invoices
+      WHERE status = ? AND approved_by IS NOT NULL AND trim(approved_by) <> ''
+      GROUP BY lower(trim(approved_by))`,
+  )
+    .bind(INVOICE_STATUS.PENDING_APPROVAL)
+    .all<{ name: string; norm: string; c: number }>();
+
+  const approvers = [];
+  for (const r of rows.results ?? []) {
+    const u = await resolveApproverUser(c.env, r.name);
+    const reachable = !!u?.email;
+    approvers.push({
+      name: r.name,
+      userId: u?.id ?? null,
+      email: u?.email ?? null,
+      pendingCount: r.c,
+      reachable,
+    });
+  }
+  approvers.sort((a, b) => b.pendingCount - a.pendingCount);
+  return c.json({ approvers });
+});
+
+// ----- POST /remind-approvers -----------------------------------------
+// Exec/admin sends a digest email to chosen approvers. Pending counts are
+// RE-COUNTED server-side per recipient (never trusts client counts); recipients
+// with no resolvable email or zero pending are skipped (counted as failed).
+invoices.post("/remind-approvers", async (c) => {
+  if (!isExecOrAdmin(c)) return c.json({ error: "Forbidden" }, 403);
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    recipients?: { userId?: string; name?: string }[];
+    note?: string;
+  };
+  const recipients = Array.isArray(body.recipients) ? body.recipients : [];
+  if (recipients.length === 0)
+    return c.json({ error: "At least one recipient is required" }, 400);
+  const note = body.note?.trim() || undefined;
+
+  let sent = 0;
+  let failed = 0;
+  const results: { name: string; ok: boolean; reason?: string }[] = [];
+
+  for (const r of recipients) {
+    // Resolve to an active user: by id first, else by name.
+    let target: UserRow | null = null;
+    if (r.userId) {
+      target = await c.env.DB.prepare(
+        "SELECT * FROM users WHERE id = ? AND is_active = 1",
+      )
+        .bind(r.userId)
+        .first<UserRow>();
+    }
+    if (!target && r.name) target = await resolveApproverUser(c.env, r.name);
+
+    const label = target?.name ?? r.name ?? r.userId ?? "Unknown";
+    if (!target?.email) {
+      failed++;
+      results.push({ name: label, ok: false, reason: "No active user with an email" });
+      continue;
+    }
+
+    // RE-COUNT this approver's pending invoices server-side.
+    const countRow = await c.env.DB.prepare(
+      "SELECT COUNT(*) AS c FROM invoices WHERE status = ? AND lower(trim(approved_by)) = lower(trim(?))",
+    )
+      .bind(INVOICE_STATUS.PENDING_APPROVAL, target.name)
+      .first<{ c: number }>();
+    const pendingCount = countRow?.c ?? 0;
+    if (pendingCount === 0) {
+      failed++;
+      results.push({ name: target.name, ok: false, reason: "No pending invoices" });
+      continue;
+    }
+
+    try {
+      await sendApproverDigestEmail(c.env, target.email, target.name, pendingCount, note);
+      sent++;
+      results.push({ name: target.name, ok: true });
+      await audit(c.env, {
+        invoiceId: null,
+        userId: user(c).id,
+        action: AUDIT_ACTION.REMINDER_SENT,
+        note: `Approver digest sent to ${target.name} (${target.email}) — ${pendingCount} pending${note ? `: ${note}` : ""}`,
+      });
+    } catch (e) {
+      console.error("[remind-approvers] email failed:", e);
+      failed++;
+      results.push({ name: target.name, ok: false, reason: "Email send failed" });
+    }
+  }
+
+  return c.json({ sent, failed, results });
 });
 
 // ----- GET /:id --------------------------------------------------------

@@ -18,6 +18,15 @@ export function isStaffOrAdmin(c: Context<AppEnv>): boolean {
   return hasRole(c, ROLES.ACCOUNTANT, ROLES.ADMIN);
 }
 
+/**
+ * True if the current user is an executive or admin. Note: distinct from
+ * `isStaffOrAdmin` (which is accountant/admin) — executives are NOT included
+ * there, so the approver-digest routes need this separate gate.
+ */
+export function isExecOrAdmin(c: Context<AppEnv>): boolean {
+  return hasRole(c, ROLES.EXECUTIVE, ROLES.ADMIN);
+}
+
 /** Whether the current user may view a given invoice (Brief §03). */
 export function canViewInvoice(
   c: Context<AppEnv>,

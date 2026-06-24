@@ -12,11 +12,18 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
 import { Card, Button, Spinner, Input } from "@/components/ui/primitives";
 import { InvoiceTable, type QueueInvoice } from "@/components/InvoiceTable";
+import { RemindApproversModal } from "@/components/RemindApproversModal";
 import { useApi } from "@/hooks/useApi";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
+import { useProfile } from "@/components/ProfileProvider";
 import { formatCurrency } from "@/lib/utils";
-import { BUSINESS_ENTITIES, APPROVERS, INVOICE_STATUS } from "@/lib/constants";
+import {
+  BUSINESS_ENTITIES,
+  APPROVERS,
+  INVOICE_STATUS,
+  ROLES,
+} from "@/lib/constants";
 import type { DashboardStats } from "@/lib/types";
 
 const STATUS_TABS = [
@@ -30,6 +37,9 @@ const STATUS_TABS = [
 ];
 
 export default function DashboardPage() {
+  const profile = useProfile();
+  const canRemind =
+    profile.role === ROLES.EXECUTIVE || profile.role === ROLES.ADMIN;
   const { data: stats, refetch: refetchStats } =
     useApi<DashboardStats>("/api/dashboard/stats");
   const {
@@ -46,6 +56,7 @@ export default function DashboardPage() {
   const [approver, setApprover] = useState("");
   const [search, setSearch] = useState("");
   const [reminding, setReminding] = useState(false);
+  const [remindOpen, setRemindOpen] = useState(false);
 
   // No realtime — poll every 15s (Brief §08 adapted for the desktop app).
   useEffect(() => {
@@ -96,7 +107,29 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <PageHeader title="Dashboard" subtitle="Accounts payable overview" />
+      <PageHeader
+        title="Dashboard"
+        subtitle="Accounts payable overview"
+        actions={
+          canRemind ? (
+            <Button
+              variant="secondary"
+              onClick={() => setRemindOpen(true)}
+              title="Remind approvers with pending invoices"
+            >
+              <BellRing className="h-4 w-4" />
+              Remind approvers
+            </Button>
+          ) : undefined
+        }
+      />
+
+      {canRemind && (
+        <RemindApproversModal
+          open={remindOpen}
+          onClose={() => setRemindOpen(false)}
+        />
+      )}
 
       <div className="space-y-6 p-6">
         {/* Stat cards */}

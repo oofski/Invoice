@@ -215,6 +215,19 @@ export interface SplitAllocationsResponse {
 }
 
 /**
+ * One approver's pending-approval workload, from
+ * `GET /api/invoices/approvers/pending-counts`. `reachable` is false when the
+ * approver has no app user / email and therefore cannot be sent a reminder.
+ */
+export interface ApproverPendingCount {
+  name: string;
+  userId: string | null;
+  email: string | null;
+  pendingCount: number;
+  reachable: boolean;
+}
+
+/**
  * One line in a per-line split request body for
  * `POST /api/invoices/:id/split-lines`. `type` ∈ ITEM_TYPES; for "Other" the
  * typed text is sent as `customType`. Both are omitted when not chosen.

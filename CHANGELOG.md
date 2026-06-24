@@ -5,6 +5,32 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.1.6] — 2026-06-24
+
+### Added
+- **Remind approvers (executives & admins).** A new **Remind** button on the
+  Pending Approvals screen and the Dashboard opens a recipient picker listing
+  each approver with their count of pending invoices — the ones who currently
+  have invoices waiting are pre-selected. Add an optional note and send; each
+  selected approver gets an email reminding them how many invoices await their
+  approval. (Anyone without an app account/email is shown but can't be emailed.)
+- **Backbar-vs-retail sales tax on per-line splits.** When an invoice is split
+  line-by-line and items are tagged by Type, the QuickBooks export now
+  **recalculates the purchase sales tax to cover only the taxable (non-retail)
+  items**, at each line's **location-specific rate**. Backbar, Equipment, and
+  Other are taxed at purchase; **Retail is excluded** (it's taxed when sold).
+  Example — a Neroli · Downtown bill of $50 backbar + $50 retail now exports a
+  Sales/Use Tax line of **$3.95** (50 × 7.90%) with the retail half untaxed.
+  Rates are built in per location (e.g. Brookfield 5.0%, Madison 5.5%, Chicago
+  10.25%).
+
+### Changed
+- For **per-line-split** invoices, the recomputed tax **replaces** the vendor's
+  originally-charged tax, so the exported bill total may differ from the vendor
+  invoice (this is intended). Quick/percentage splits and unsplit invoices are
+  unchanged. Note: on a per-line split, lines left **untyped** are treated as
+  non-taxable for this calculation.
+
 ## [1.1.5] — 2026-06-24
 
 ### Changed
@@ -317,6 +343,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.1.6]: https://github.com/oofski/Invoice/releases/tag/v1.1.6
 [1.1.5]: https://github.com/oofski/Invoice/releases/tag/v1.1.5
 [1.1.4]: https://github.com/oofski/Invoice/releases/tag/v1.1.4
 [1.1.3]: https://github.com/oofski/Invoice/releases/tag/v1.1.3

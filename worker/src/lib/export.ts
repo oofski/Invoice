@@ -12,6 +12,7 @@ import {
   ENTITY_LABEL,
   ENTITY_CODE,
   glAccountNumber,
+  locationTaxRate,
 } from "./constants";
 
 /**
@@ -68,6 +69,23 @@ export function leaves(lineItems: LineItemRow[]): LineItemRow[] {
     .filter((li) => !parentIds.has(li.id));
 }
 
+/**
+ * Recomputes purchase sales/use tax for one PER_LINE entity bucket (v1.1.6
+ * Feature 2). Each taxable line — everything except Retail; untyped lines
+ * contribute 0 — is taxed at its OWN location's rate (locationTaxRate(business,
+ * class)) and summed, then rounded to cents. Retail is exempt. Returns 0 for an
+ * all-retail / all-untyped / empty bucket. This REPLACES the vendor's invoice
+ * sales_tax for PER_LINE splits in the QBO export only.
+ */
+function recomputedBucketTax(lines: Pick<LineItemRow, "amount" | "item_type" | "business" | "class">[]): number {
+  let t = 0;
+  for (const li of lines) {
+    const taxable = !!li.item_type && li.item_type !== "Retail";
+    if (taxable) t += (li.amount ?? 0) * locationTaxRate(li.business, li.class);
+  }
+  return Math.round(t * 100) / 100;
+}
+
 export function generateQboBillsCsv(invoices: ExportInvoice[]): {
   csv: string;
   rowCount: number;
@@ -102,30 +120,66 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
     }
 
     // ---- PER_LINE: any line item carries a business/class --------------
-    const coded = lineItems.filter((li) => li.business && li.class);
+    const coded = leaves(lineItems).filter((li) => li.business && li.class);
     if (coded.length > 0) {
-      for (const li of leaves(coded)) {
-        // When the exec set a per-line Type (item_type), the line's own GL
-        // category is authoritative — use it directly so a vendor gl_override
-        // can't win. Otherwise vendor mapping (gl_override / inventory) takes
-        // precedence with the line's GL category as the fallback.
-        const account = li.item_type
-          ? (li.gl_category ?? "")
-          : resolveGlAccount(vendorMapping, li.gl_category);
-        pushRow([
-          invoice.invoice_number,
-          invoice.vendor,
-          toQboDate(invoice.inv_date),
-          toQboDate(invoice.due_date),
-          "Net 30",
-          formatCategoryAccount(li.business, account),
-          li.description ?? "",
-          (li.amount ?? 0).toFixed(2),
-          li.class && li.class !== "None"
-            ? `${li.business}:${li.class}`
-            : (li.business ?? ""),
-          memo(invoice),
-        ]);
+      // Group coded leaves into per-entity buckets so each bucket carries its
+      // OWN recomputed purchase tax (v1.1.6 Feature 2). Preserve line order
+      // within a bucket.
+      const byBusiness = new Map<string, LineItemRow[]>();
+      for (const li of coded) {
+        const business = li.business as string;
+        const arr = byBusiness.get(business) ?? [];
+        arr.push(li);
+        byBusiness.set(business, arr);
+      }
+      for (const [business, bucket] of byBusiness) {
+        for (const li of bucket) {
+          // When the exec set a per-line Type (item_type), the line's own GL
+          // category is authoritative — use it directly so a vendor gl_override
+          // can't win. Otherwise vendor mapping (gl_override / inventory) takes
+          // precedence with the line's GL category as the fallback.
+          const account = li.item_type
+            ? (li.gl_category ?? "")
+            : resolveGlAccount(vendorMapping, li.gl_category);
+          pushRow([
+            invoice.invoice_number,
+            invoice.vendor,
+            toQboDate(invoice.inv_date),
+            toQboDate(invoice.due_date),
+            "Net 30",
+            formatCategoryAccount(li.business, account),
+            li.description ?? "",
+            (li.amount ?? 0).toFixed(2),
+            li.class && li.class !== "None"
+              ? `${li.business}:${li.class}`
+              : (li.business ?? ""),
+            memo(invoice),
+          ]);
+        }
+        // Recomputed purchase tax for this bucket. Suppress when the bucket
+        // already has an explicitly-coded Sales/Use Tax line (no double tax),
+        // and omit entirely when the recomputed tax is 0 (all-retail / untyped).
+        const hasTaxLine = bucket.some((li) => li.gl_category === "Sales/Use Tax");
+        const tax = recomputedBucketTax(bucket);
+        if (tax > 0 && !hasTaxLine) {
+          const taxClassLine =
+            bucket.find((li) => !!li.item_type && li.item_type !== "Retail") ??
+            bucket[0];
+          pushRow([
+            invoice.invoice_number,
+            invoice.vendor,
+            toQboDate(invoice.inv_date),
+            toQboDate(invoice.due_date),
+            "Net 30",
+            formatCategoryAccount(business, "Sales/Use Tax"),
+            "Sales/Use Tax (recomputed)",
+            tax.toFixed(2),
+            taxClassLine.class && taxClassLine.class !== "None"
+              ? `${business}:${taxClassLine.class}`
+              : business,
+            memo(invoice),
+          ]);
+        }
       }
       continue;
     }
@@ -304,7 +358,10 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
     // ---- PER_LINE: one bill per distinct business -----------------------
     const coded = leaves(lineItems).filter((li) => li.business && li.class);
     if (coded.length > 0) {
+      // Keep the source coded leaves per bucket so each bucket can recompute
+      // its OWN purchase tax (v1.1.6 Feature 2), alongside the FactorLine list.
       const byBusiness = new Map<string, FactorLine[]>();
+      const codedByBusiness = new Map<string, LineItemRow[]>();
       for (const li of coded) {
         const business = li.business as string;
         const arr = byBusiness.get(business) ?? [];
@@ -321,22 +378,28 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
           cls: li.class,
         });
         byBusiness.set(business, arr);
+        const src = codedByBusiness.get(business) ?? [];
+        src.push(li);
+        codedByBusiness.set(business, src);
       }
-      // Primary entity (first coded line's business) carries any tax line.
-      const primary = coded[0].business as string;
-      const hasTaxLine = coded.some((li) => li.gl_category === "Sales/Use Tax");
       for (const [business, lines] of byBusiness) {
-        if (
-          business === primary &&
-          (invoice.sales_tax ?? 0) > 0 &&
-          !hasTaxLine
-        ) {
+        // Recomputed purchase tax for THIS bucket from its own coded lines
+        // (per-line location rate, summed). Replaces invoice.sales_tax for
+        // PER_LINE. Suppress when the bucket already carries an explicitly-
+        // coded Sales/Use Tax line; omit when recomputed tax is 0.
+        const bucket = codedByBusiness.get(business) ?? [];
+        const hasTaxLine = bucket.some((li) => li.gl_category === "Sales/Use Tax");
+        const tax = recomputedBucketTax(bucket);
+        if (tax > 0 && !hasTaxLine) {
+          const taxClassLine =
+            bucket.find((li) => !!li.item_type && li.item_type !== "Retail") ??
+            bucket[0];
           lines.push({
             account: "Sales/Use Tax",
-            amount: invoice.sales_tax ?? 0,
-            description: "Sales/Use Tax",
+            amount: tax,
+            description: "Sales/Use Tax (recomputed)",
             business,
-            cls: invoice.class,
+            cls: taxClassLine.class,
           });
         }
         bills.push({

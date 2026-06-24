@@ -14,10 +14,12 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  BellRing,
 } from "lucide-react";
 import { PdfPane } from "@/components/PdfPane";
 import { LineItemsTable } from "@/components/LineItemsTable";
 import { SplitInvoiceModal } from "@/components/SplitInvoiceModal";
+import { RemindApproversModal } from "@/components/RemindApproversModal";
 import { Button, Spinner, EmptyState } from "@/components/ui/primitives";
 import { Modal } from "@/components/ui/Modal";
 import { useApi } from "@/hooks/useApi";
@@ -39,8 +41,11 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
   );
   const [selectedId, setSelectedId] = useState<string | undefined>(initialId);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [remindOpen, setRemindOpen] = useState(false);
 
   const invoices = data?.invoices ?? [];
+  const canRemind =
+    profile.role === ROLES.EXECUTIVE || profile.role === ROLES.ADMIN;
 
   useEffect(() => {
     const id = setInterval(() => refetch(), 15000);
@@ -76,6 +81,17 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
                   Pending Approvals
                 </h1>
                 <div className="flex items-center gap-1">
+                  {canRemind && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setRemindOpen(true)}
+                      title="Remind approvers with pending invoices"
+                    >
+                      <BellRing className="h-4 w-4" />
+                      Remind
+                    </Button>
+                  )}
                   <Button
                     variant="secondary"
                     size="sm"
@@ -175,6 +191,13 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
           </div>
         )}
       </div>
+
+      {canRemind && (
+        <RemindApproversModal
+          open={remindOpen}
+          onClose={() => setRemindOpen(false)}
+        />
+      )}
     </div>
   );
 }

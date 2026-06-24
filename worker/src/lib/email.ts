@@ -64,6 +64,29 @@ export function sendReminderEmail(env: Env, to: string, d: InvoiceEmailData, hou
   return send(env, to, `Reminder: ${d.vendor} invoice awaiting approval`, html);
 }
 
+export function sendApproverDigestEmail(
+  env: Env,
+  to: string,
+  approverName: string,
+  pendingCount: number,
+  note?: string,
+) {
+  const noteBlock = note
+    ? `<blockquote style="margin:8px 0 16px;padding:12px 16px;background:#fef2f2;border-left:3px solid #dc2626;border-radius:4px;font-size:14px">${note}</blockquote>`
+    : "";
+  const html = shell(
+    env,
+    "Invoices awaiting your approval",
+    `<p style="font-size:14px">Hi ${approverName}, you have <strong>${pendingCount}</strong> invoice(s) awaiting approval.</p>${noteBlock}<p style="font-size:14px">Open InvoiceIQ to review and approve.</p>`,
+  );
+  return send(
+    env,
+    to,
+    `Reminder: ${pendingCount} invoice(s) awaiting your approval`,
+    html,
+  );
+}
+
 export function sendRejectionEmail(
   env: Env,
   to: string,
