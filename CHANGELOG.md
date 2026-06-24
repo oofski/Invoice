@@ -5,6 +5,22 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.1] — 2026-06-24
+
+### Added
+- **"Re-scan" button on each invoice** (accountant/admin). **Reprocess** re-runs
+  the coding over the existing scan; **Re-scan** re-reads the PDF at the latest
+  high-fidelity extraction *and* re-codes — without deleting and re-uploading, so
+  the invoice keeps its history and audit trail. Manually-added lines are kept.
+
+### Changed
+- **Mapping updates now apply automatically on deploy.** Location keywords (like
+  the "Institute of Beauty & Wellness" → IBW routing) and the managed product-
+  vendor mappings (Wella, AbbVie, OPI, Olive Garden) are applied automatically the
+  first time the backend handles a request after an update — no manual database
+  command needed. Only those system-managed mapping rows are touched; invoices,
+  line items, users, and vendor mappings you add yourself are never affected.
+
 ## [1.2.0] — 2026-06-24
 
 ### Fixed
@@ -450,6 +466,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.2.1]: https://github.com/oofski/Invoice/releases/tag/v1.2.1
 [1.2.0]: https://github.com/oofski/Invoice/releases/tag/v1.2.0
 [1.1.9]: https://github.com/oofski/Invoice/releases/tag/v1.1.9
 [1.1.8]: https://github.com/oofski/Invoice/releases/tag/v1.1.8

@@ -11,6 +11,7 @@ import { vendors } from "./routes/vendors";
 import { audit } from "./routes/audit";
 import { dashboard } from "./routes/dashboard";
 import { users } from "./routes/users";
+import { ensureSeedData } from "./lib/migrations";
 
 /**
  * InvoiceIQ Cloudflare Worker — the backend + D1 database for the desktop app.
@@ -20,6 +21,14 @@ import { users } from "./routes/users";
 const app = new Hono<AppEnv>();
 
 app.use("*", cors({ origin: "*", allowHeaders: ["Content-Type", "Authorization"], allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
+
+// Apply system-managed mapping seeds (location keywords, inventory vendors) on
+// the first request per isolate — so mapping changes go live automatically on
+// deploy with no manual `db:init`. Guarded + never throws (see migrations.ts).
+app.use("*", async (c, next) => {
+  await ensureSeedData(c.env);
+  return next();
+});
 
 app.get("/", (c) => c.json({ name: "InvoiceIQ API", status: "ok" }));
 

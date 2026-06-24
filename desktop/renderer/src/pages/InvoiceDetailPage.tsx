@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, RefreshCw, AlertTriangle, Trash2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, ScanLine, AlertTriangle, Trash2 } from "lucide-react";
 import { PdfPane } from "@/components/PdfPane";
 import { InvoiceDataPanel } from "@/components/InvoiceDataPanel";
 import { LineItemsTable } from "@/components/LineItemsTable";
@@ -25,6 +25,7 @@ export default function InvoiceDetailPage() {
     `/api/invoices/${id}`,
   );
   const [reprocessing, setReprocessing] = useState(false);
+  const [rescanning, setRescanning] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const invoice = data?.invoice;
@@ -72,6 +73,28 @@ export default function InvoiceDetailPage() {
       toast.error(err instanceof ApiError ? err.message : "Reprocess failed");
     } finally {
       setReprocessing(false);
+    }
+  }
+
+  // Re-scan (v1.2.1): re-reads the PDF with the latest OCR settings (not just the
+  // cached text), then re-codes. Use when the original scan misread or missed
+  // lines; manually-added lines are preserved. Re-reads the document, so confirm.
+  async function rescan() {
+    if (
+      !window.confirm(
+        "Re-scan re-reads the PDF with the latest extraction and re-codes the invoice. Line items may change; manually-added lines are kept. Continue?",
+      )
+    )
+      return;
+    setRescanning(true);
+    try {
+      await api.post("/api/invoices/process", { invoiceId: id, rescan: true });
+      toast.success("Re-scanned with the latest extraction");
+      refetch();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Re-scan failed");
+    } finally {
+      setRescanning(false);
     }
   }
 
@@ -128,15 +151,29 @@ export default function InvoiceDetailPage() {
         <div className="flex items-center gap-2">
           {(profile.role === ROLES.ACCOUNTANT ||
             profile.role === ROLES.ADMIN) && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={reprocess}
-              loading={reprocessing}
-            >
-              <RefreshCw className="h-4 w-4" />
-              Reprocess
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={reprocess}
+                loading={reprocessing}
+                disabled={rescanning}
+              >
+                <RefreshCw className="h-4 w-4" />
+                Reprocess
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={rescan}
+                loading={rescanning}
+                disabled={reprocessing}
+                title="Re-read the PDF with the latest extraction (use if the original scan missed or misread lines)"
+              >
+                <ScanLine className="h-4 w-4" />
+                Re-scan
+              </Button>
+            </>
           )}
           {profile.role === ROLES.ADMIN && (
             <Button

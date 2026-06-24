@@ -113,7 +113,10 @@ invoices.post("/process", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const invoiceId = (body as { invoiceId?: string }).invoiceId;
   if (!invoiceId) return c.json({ error: "invoiceId required" }, 400);
-  const result = await processInvoiceAI(c.env, invoiceId, user(c).id);
+  // `rescan` (v1.2.1) forces a fresh OCR read of the PDF (re-bills the parser)
+  // instead of re-running the rules over the cached extraction.
+  const rescan = (body as { rescan?: boolean }).rescan === true;
+  const result = await processInvoiceAI(c.env, invoiceId, user(c).id, { rescan });
   return c.json({ invoiceId, ...result });
 });
 
