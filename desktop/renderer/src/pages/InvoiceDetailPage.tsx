@@ -91,11 +91,11 @@ export default function InvoiceDetailPage() {
       <div className="p-6">
         <Link
           to="/invoices"
-          className="mb-4 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+          className="mb-4 inline-flex items-center gap-1 text-sm text-ink-muted hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" /> Back
         </Link>
-        <Card className="p-8 text-center text-slate-500">
+        <Card className="p-8 text-center text-ink-muted">
           {error ?? "Invoice not found"}
         </Card>
       </div>
@@ -104,10 +104,10 @@ export default function InvoiceDetailPage() {
 
   return (
     <div className="flex h-screen flex-col">
-      <div className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
+      <div className="flex items-center justify-between border-b border-line bg-surface px-6 py-3">
         <Link
           to="/invoices"
-          className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+          className="inline-flex items-center gap-1 text-sm text-ink-muted hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" /> Invoices
         </Link>
@@ -140,7 +140,7 @@ export default function InvoiceDetailPage() {
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">
         {/* Left: PDF */}
-        <div className="min-h-[40vh] border-b border-slate-200 lg:border-b-0 lg:border-r">
+        <div className="min-h-[40vh] border-b border-line lg:border-b-0 lg:border-r">
           <PdfPane invoiceId={invoice.id} hasPdf={invoice.has_pdf ?? true} />
         </div>
 
@@ -149,7 +149,7 @@ export default function InvoiceDetailPage() {
           <InvoiceDataPanel invoice={invoice} />
 
           {reviewCount > 0 && (
-            <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="mt-4 flex items-center gap-2 rounded-lg border border-danger-soft-fg/30 bg-danger-soft-bg p-3 text-sm text-danger-soft-fg">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>
                 <strong>{reviewCount}</strong> line item
@@ -161,7 +161,7 @@ export default function InvoiceDetailPage() {
 
           {canSeeGl && (
             <div className="mt-6">
-              <h3 className="mb-2 text-sm font-semibold text-slate-700">
+              <h3 className="mb-2 font-display text-sm font-semibold text-ink">
                 Line Items {canEdit && "· GL Coding"}
               </h3>
               <Card>
@@ -177,7 +177,7 @@ export default function InvoiceDetailPage() {
 
           {canSeeAudit && invoice.audit_log && (
             <div className="mt-6">
-              <h3 className="mb-2 text-sm font-semibold text-slate-700">
+              <h3 className="mb-2 font-display text-sm font-semibold text-ink">
                 Audit Trail
               </h3>
               <Card>

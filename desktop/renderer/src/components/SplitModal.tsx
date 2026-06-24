@@ -81,9 +81,9 @@ export function SplitModal({
     >
       {lineItem && (
         <div className="space-y-4">
-          <div className="rounded-lg bg-slate-50 p-3 text-sm">
-            <p className="font-medium text-slate-900">{lineItem.description}</p>
-            <p className="text-slate-500">
+          <div className="rounded-lg bg-surface-2 p-3 text-sm">
+            <p className="font-medium text-ink">{lineItem.description}</p>
+            <p className="text-ink-muted tabular-nums">
               Total to allocate: {formatCurrency(parentAmount)}
             </p>
           </div>
@@ -128,7 +128,7 @@ export function SplitModal({
                     )
                   }
                   disabled={rows.length <= 2}
-                  className="text-slate-400 hover:text-red-500 disabled:opacity-30"
+                  className="text-ink-subtle hover:text-danger disabled:opacity-30"
                   aria-label="Remove split"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -151,12 +151,12 @@ export function SplitModal({
           <div
             className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm ${
               balanced
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-amber-50 text-amber-700"
+                ? "bg-success-soft-bg text-success-soft-fg"
+                : "bg-warning-soft-bg text-warning-soft-fg"
             }`}
           >
-            <span>Allocated: {formatCurrency(sum)}</span>
-            <span>
+            <span className="tabular-nums">Allocated: {formatCurrency(sum)}</span>
+            <span className="tabular-nums">
               {balanced
                 ? "Balanced ✓"
                 : `Remaining: ${formatCurrency(remaining)}`}

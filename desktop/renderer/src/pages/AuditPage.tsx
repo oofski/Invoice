@@ -89,7 +89,7 @@ export default function AuditPage() {
 
       <div className="p-6">
         <Card>
-          <div className="flex flex-wrap gap-2 border-b border-slate-200 p-4">
+          <div className="flex flex-wrap gap-2 border-b border-line p-4">
             <Select
               value={action}
               onChange={(e) => setAction(e.target.value)}
@@ -118,13 +118,13 @@ export default function AuditPage() {
               type="date"
               value={from}
               onChange={(e) => setFrom(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-subtle focus:border-accent focus:ring-ring"
             />
             <input
               type="date"
               value={to}
               onChange={(e) => setTo(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-subtle focus:border-accent focus:ring-ring"
             />
           </div>
 
@@ -138,7 +138,7 @@ export default function AuditPage() {
             <div className="scroll-thin overflow-x-auto">
               <table className="w-full min-w-[760px] text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr className="border-b border-line bg-surface-2 text-left text-xs uppercase tracking-[0.12em] text-ink-muted">
                     <th className="px-4 py-2.5 font-medium">When</th>
                     <th className="px-4 py-2.5 font-medium">User</th>
                     <th className="px-4 py-2.5 font-medium">Action</th>
@@ -148,19 +148,19 @@ export default function AuditPage() {
                 </thead>
                 <tbody>
                   {entries.map((e) => (
-                    <tr key={e.id} className="border-b border-slate-100">
-                      <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">
+                    <tr key={e.id} className="border-b border-line">
+                      <td className="whitespace-nowrap px-4 py-2.5 text-ink-muted">
                         {formatDate(e.created_at)}{" "}
                         {new Date(e.created_at).toLocaleTimeString("en-US", {
                           hour: "numeric",
                           minute: "2-digit",
                         })}
                       </td>
-                      <td className="px-4 py-2.5 text-slate-700">
+                      <td className="px-4 py-2.5 text-ink-muted">
                         {e.user_name}
                       </td>
                       <td className="px-4 py-2.5">
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                        <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-muted">
                           {e.action.replace(/_/g, " ")}
                         </span>
                       </td>
@@ -168,7 +168,7 @@ export default function AuditPage() {
                         {e.invoice_id ? (
                           <Link
                             to={`/invoices/${e.invoice_id}`}
-                            className="text-blue-600 hover:underline"
+                            className="text-accent hover:underline"
                           >
                             {e.vendor ?? "View"}
                           </Link>
@@ -176,7 +176,7 @@ export default function AuditPage() {
                           "—"
                         )}
                       </td>
-                      <td className="px-4 py-2.5 text-slate-500">
+                      <td className="px-4 py-2.5 text-ink-muted">
                         {e.note ?? "—"}
                       </td>
                     </tr>

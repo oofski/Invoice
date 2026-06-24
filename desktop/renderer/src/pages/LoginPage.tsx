@@ -115,14 +115,14 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+    <div className="flex min-h-screen items-center justify-center bg-bg p-4">
       <Card className="w-full max-w-md p-8">
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-lg font-bold text-white">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-accent text-lg font-bold text-accent-fg">
             IQ
           </div>
-          <h1 className="text-xl font-bold text-slate-900">InvoiceIQ</h1>
-          <p className="text-sm text-slate-500">
+          <h1 className="font-wordmark text-xl font-bold uppercase tracking-[0.18em] text-ink">InvoiceIQ</h1>
+          <p className="text-sm text-ink-muted">
             {mode === "login"
               ? "AP automation — sign in to continue"
               : "Create the first admin account"}
@@ -133,7 +133,7 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             <ServerField value={serverUrl} onChange={setServerUrl} />
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Email address
               </label>
               <Input
@@ -146,7 +146,7 @@ export default function LoginPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Password
               </label>
               <Input
@@ -157,16 +157,16 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
-            <label className="flex items-center gap-2 text-sm text-slate-600">
+            <label className="flex items-center gap-2 text-sm text-ink-muted">
               <input
                 type="checkbox"
                 checked={remember}
                 onChange={(e) => setRemember(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                className="h-4 w-4 rounded border-line accent-accent"
               />
               Remember me on this device
             </label>
-            {error && <p className="text-sm text-red-600">{error}</p>}
+            {error && <p className="text-sm text-danger">{error}</p>}
             <Button type="submit" loading={loading} className="w-full">
               <LogIn className="h-4 w-4" />
               Sign in
@@ -177,7 +177,7 @@ export default function LoginPage() {
                 setError(null);
                 setMode("bootstrap");
               }}
-              className="block w-full text-center text-xs text-slate-500 hover:text-slate-700"
+              className="block w-full text-center text-xs text-ink-muted hover:text-ink"
             >
               First time? Create the admin account
             </button>
@@ -186,7 +186,7 @@ export default function LoginPage() {
           <form onSubmit={handleBootstrap} className="space-y-4">
             <ServerField value={serverUrl} onChange={setServerUrl} />
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Full name
               </label>
               <Input
@@ -198,7 +198,7 @@ export default function LoginPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Email address
               </label>
               <Input
@@ -210,7 +210,7 @@ export default function LoginPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Password
               </label>
               <Input
@@ -221,7 +221,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
-            {error && <p className="text-sm text-red-600">{error}</p>}
+            {error && <p className="text-sm text-danger">{error}</p>}
             <Button type="submit" loading={loading} className="w-full">
               <UserPlus className="h-4 w-4" />
               Create admin & sign in
@@ -232,7 +232,7 @@ export default function LoginPage() {
                 setError(null);
                 setMode("login");
               }}
-              className="inline-flex w-full items-center justify-center gap-1 text-center text-xs text-slate-500 hover:text-slate-700"
+              className="inline-flex w-full items-center justify-center gap-1 text-center text-xs text-ink-muted hover:text-ink"
             >
               <ArrowLeft className="h-3 w-3" /> Back to sign in
             </button>
@@ -252,8 +252,8 @@ function ServerField({
 }) {
   return (
     <div>
-      <label className="mb-1 flex items-center gap-1 text-sm font-medium text-slate-700">
-        <Server className="h-3.5 w-3.5 text-slate-400" /> Server URL
+      <label className="mb-1 flex items-center gap-1 text-sm font-medium text-ink-muted">
+        <Server className="h-3.5 w-3.5 text-ink-subtle" /> Server URL
       </label>
       <Input
         type="url"
@@ -261,7 +261,7 @@ function ServerField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-      <p className="mt-1 text-xs text-slate-400">
+      <p className="mt-1 text-xs text-ink-subtle">
         Your InvoiceIQ Worker address. Saved on this device.
       </p>
     </div>

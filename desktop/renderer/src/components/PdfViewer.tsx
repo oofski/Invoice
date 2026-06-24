@@ -72,7 +72,7 @@ export default function PdfViewer({ url }: { url: string | null }) {
 
   if (!url) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-slate-400">
+      <div className="flex h-full items-center justify-center text-sm text-ink-subtle">
         No PDF available
       </div>
     );
@@ -80,36 +80,36 @@ export default function PdfViewer({ url }: { url: string | null }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
-        <span className="text-xs font-medium text-slate-500">
+      <div className="flex items-center justify-between border-b border-line bg-surface-2 px-3 py-2">
+        <span className="text-xs font-medium text-ink-muted">
           {numPages > 0 ? `${numPages} page${numPages > 1 ? "s" : ""}` : "PDF"}
         </span>
         <div className="flex items-center gap-1">
           <button
             onClick={zoomOut}
             disabled={!fitWidth && zoom <= MIN_ZOOM}
-            className="rounded p-1 text-slate-500 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded p-1 text-ink-muted hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Zoom out"
             title="Zoom out"
           >
             <ZoomOut className="h-4 w-4" />
           </button>
-          <span className="w-12 text-center text-xs tabular-nums text-slate-500">
+          <span className="w-12 text-center text-xs tabular-nums text-ink-muted">
             {fitWidth ? "Fit" : `${Math.round(zoom * 100)}%`}
           </span>
           <button
             onClick={zoomIn}
             disabled={!fitWidth && zoom >= MAX_ZOOM}
-            className="rounded p-1 text-slate-500 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded p-1 text-ink-muted hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Zoom in"
             title="Zoom in"
           >
             <ZoomIn className="h-4 w-4" />
           </button>
-          <div className="mx-1 h-4 w-px bg-slate-300" aria-hidden />
+          <div className="mx-1 h-4 w-px bg-line" aria-hidden />
           <button
             onClick={rotate}
-            className="rounded p-1 text-slate-500 hover:bg-slate-200"
+            className="rounded p-1 text-ink-muted hover:bg-surface-2"
             aria-label="Rotate 90 degrees"
             title="Rotate 90°"
           >
@@ -117,7 +117,7 @@ export default function PdfViewer({ url }: { url: string | null }) {
           </button>
           <button
             onClick={fitToWidth}
-            className="rounded p-1 text-slate-500 hover:bg-slate-200"
+            className="rounded p-1 text-ink-muted hover:bg-surface-2"
             aria-label="Fit to width and reset"
             title="Fit to width / reset"
           >
@@ -128,10 +128,10 @@ export default function PdfViewer({ url }: { url: string | null }) {
 
       <div
         ref={containerRef}
-        className="scroll-thin flex-1 overflow-auto bg-slate-100 p-4"
+        className="scroll-thin flex-1 overflow-auto bg-surface-2 p-4"
       >
         {error ? (
-          <div className="flex h-full items-center justify-center text-sm text-red-500">
+          <div className="flex h-full items-center justify-center text-sm text-danger">
             Unable to load PDF.
           </div>
         ) : (
@@ -141,7 +141,7 @@ export default function PdfViewer({ url }: { url: string | null }) {
             onLoadError={() => setError(true)}
             loading={
               <div className="flex h-64 items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                <Loader2 className="h-6 w-6 animate-spin text-ink-subtle" />
               </div>
             }
           >

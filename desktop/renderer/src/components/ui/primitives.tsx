@@ -7,13 +7,14 @@ type Variant = "primary" | "secondary" | "danger" | "success" | "ghost";
 type Size = "sm" | "md" | "lg";
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300",
+  primary:
+    "bg-primary text-primary-fg hover:bg-primary-hover disabled:bg-primary/40 tracking-wide",
   secondary:
-    "bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 disabled:opacity-50",
-  danger: "bg-red-600 text-white hover:bg-red-700 disabled:bg-red-300",
+    "bg-surface text-ink border border-line hover:bg-surface-2 disabled:opacity-50",
+  danger: "bg-danger text-danger-fg hover:bg-danger-hover disabled:bg-danger/40",
   success:
-    "bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-emerald-300",
-  ghost: "text-slate-600 hover:bg-slate-100 disabled:opacity-50",
+    "bg-success text-success-fg hover:bg-success-hover disabled:bg-success/40",
+  ghost: "text-ink-muted hover:bg-surface-2 hover:text-ink disabled:opacity-50",
 };
 const SIZES: Record<Size, string> = {
   sm: "px-2.5 py-1.5 text-xs gap-1.5",
@@ -44,7 +45,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       ref={ref}
       disabled={disabled || loading}
       className={cn(
-        "inline-flex items-center justify-center rounded-lg font-medium transition-colors disabled:cursor-not-allowed",
+        "inline-flex items-center justify-center rounded-lg font-medium transition-colors disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
         VARIANTS[variant],
         SIZES[size],
         className,
@@ -69,7 +70,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-xl border border-slate-200 bg-white shadow-sm",
+        "rounded-xl border border-line bg-surface shadow-[0_1px_2px_rgba(46,47,48,0.04),0_4px_16px_-8px_rgba(46,47,48,0.10)]",
         className,
       )}
     >
@@ -81,7 +82,7 @@ export function Card({
 // ---------------------------------------------------------------- Spinner
 export function Spinner({ className }: { className?: string }) {
   return (
-    <Loader2 className={cn("h-5 w-5 animate-spin text-slate-400", className)} />
+    <Loader2 className={cn("h-5 w-5 animate-spin text-ink-subtle", className)} />
   );
 }
 
@@ -93,7 +94,7 @@ export const Input = forwardRef<
   <input
     ref={ref}
     className={cn(
-      "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50",
+      "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-subtle outline-none focus:border-accent focus:ring-1 focus:ring-ring disabled:bg-surface-2",
       className,
     )}
     {...props}
@@ -109,7 +110,7 @@ export const Select = forwardRef<
   <select
     ref={ref}
     className={cn(
-      "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50",
+      "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-subtle outline-none focus:border-accent focus:ring-1 focus:ring-ring disabled:bg-surface-2",
       className,
     )}
     {...props}
@@ -131,10 +132,10 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
-      {icon && <div className="text-slate-300">{icon}</div>}
-      <p className="font-medium text-slate-700">{title}</p>
+      {icon && <div className="text-ink-subtle">{icon}</div>}
+      <p className="font-medium text-ink">{title}</p>
       {description && (
-        <p className="max-w-sm text-sm text-slate-500">{description}</p>
+        <p className="max-w-sm text-sm text-ink-muted">{description}</p>
       )}
     </div>
   );

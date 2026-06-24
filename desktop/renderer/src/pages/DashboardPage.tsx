@@ -142,16 +142,16 @@ export default function DashboardPage() {
 
         {/* Overdue section */}
         {overdue.length > 0 && (
-          <Card className="border-amber-200 bg-amber-50/40 p-4">
+          <Card className="border-warning-soft-fg/30 bg-warning-soft-bg/40 p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <BellRing className="h-5 w-5 text-amber-500" />
+                <BellRing className="h-5 w-5 text-warning" />
                 <div>
-                  <p className="font-semibold text-amber-800">
+                  <p className="font-semibold text-warning-soft-fg">
                     {overdue.length} invoice{overdue.length === 1 ? "" : "s"}{" "}
                     overdue (72h+)
                   </p>
-                  <p className="text-sm text-amber-700">
+                  <p className="text-sm text-warning-soft-fg">
                     Awaiting exec approval past the 72-hour threshold.
                   </p>
                 </div>
@@ -166,10 +166,10 @@ export default function DashboardPage() {
 
         {/* Manual review queue */}
         {reviewInvoices.length > 0 && (
-          <Card className="border-red-200">
-            <div className="flex items-center gap-2 border-b border-red-100 bg-red-50 px-4 py-3">
-              <AlertTriangle className="h-4 w-4 text-red-500" />
-              <h2 className="text-sm font-semibold text-red-700">
+          <Card className="border-danger-soft-fg/30">
+            <div className="flex items-center gap-2 border-b border-line bg-danger-soft-bg px-4 py-3">
+              <AlertTriangle className="h-4 w-4 text-danger" />
+              <h2 className="font-display text-sm font-semibold text-danger-soft-fg">
                 Manual Review Queue ({reviewInvoices.length})
               </h2>
             </div>
@@ -179,7 +179,7 @@ export default function DashboardPage() {
 
         {/* Invoice queue */}
         <Card>
-          <div className="flex flex-col gap-3 border-b border-slate-200 p-4">
+          <div className="flex flex-col gap-3 border-b border-line p-4">
             <div className="flex flex-wrap gap-1">
               {STATUS_TABS.map((t) => (
                 <button
@@ -187,8 +187,8 @@ export default function DashboardPage() {
                   onClick={() => setTab(t.key)}
                   className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                     tab === t.key
-                      ? "bg-slate-900 text-white"
-                      : "text-slate-600 hover:bg-slate-100"
+                      ? "bg-primary text-primary-fg"
+                      : "text-ink-muted hover:bg-surface-2"
                   }`}
                 >
                   {t.label}
@@ -205,7 +205,7 @@ export default function DashboardPage() {
               <select
                 value={entity}
                 onChange={(e) => setEntity(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"
               >
                 <option value="">All entities</option>
                 {BUSINESS_ENTITIES.map((b) => (
@@ -217,7 +217,7 @@ export default function DashboardPage() {
               <select
                 value={approver}
                 onChange={(e) => setApprover(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"
               >
                 <option value="">All approvers</option>
                 {APPROVERS.map((a) => (
@@ -244,17 +244,17 @@ export default function DashboardPage() {
         {/* Entity totals */}
         {stats?.byEntity && stats.byEntity.length > 0 && (
           <Card className="p-4">
-            <h2 className="mb-3 text-sm font-semibold text-slate-700">
+            <h2 className="mb-3 font-display text-sm font-semibold text-ink">
               Spend by Entity
             </h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {stats.byEntity.map((e) => (
-                <div key={e.entity} className="rounded-lg bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{e.entity}</p>
-                  <p className="text-lg font-bold text-slate-900">
+                <div key={e.entity} className="rounded-lg bg-surface-2 p-3">
+                  <p className="text-xs text-ink-muted">{e.entity}</p>
+                  <p className="text-lg font-bold text-ink tabular-nums">
                     {formatCurrency(e.total)}
                   </p>
-                  <p className="text-xs text-slate-400">{e.count} invoices</p>
+                  <p className="text-xs text-ink-subtle">{e.count} invoices</p>
                 </div>
               ))}
             </div>

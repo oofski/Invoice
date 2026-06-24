@@ -45,12 +45,12 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
       onClick={onClose}
     >
       <div
         className={cn(
-          "flex max-h-[90vh] flex-col overflow-hidden rounded-xl bg-white shadow-xl",
+          "flex max-h-[90vh] flex-col overflow-hidden rounded-xl bg-elevated shadow-[0_12px_48px_-12px_rgba(46,47,48,0.30)]",
           hasWidth ? "" : "w-full",
           hasMaxWidth ? "" : "max-w-lg",
           className,
@@ -58,11 +58,11 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
       >
         {title && (
-          <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-3.5">
-            <h3 className="font-semibold text-slate-900">{title}</h3>
+          <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3.5">
+            <h3 className="font-display font-semibold text-ink">{title}</h3>
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-600"
+              className="text-ink-subtle hover:text-ink"
               aria-label="Close"
             >
               <X className="h-5 w-5" />

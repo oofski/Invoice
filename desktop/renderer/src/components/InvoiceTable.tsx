@@ -26,7 +26,7 @@ export function InvoiceTable({
     <div className="scroll-thin overflow-x-auto">
       <table className="w-full min-w-[820px] text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+          <tr className="border-b border-line bg-surface-2 text-left text-xs uppercase tracking-[0.12em] text-ink-muted">
             <th className="px-4 py-2.5 font-medium">Vendor</th>
             <th className="px-4 py-2.5 font-medium">Entity</th>
             <th className="px-4 py-2.5 font-medium">Class</th>
@@ -43,43 +43,43 @@ export function InvoiceTable({
               <tr
                 key={inv.id}
                 className={cn(
-                  "border-b border-slate-100 transition-colors hover:bg-slate-50",
-                  needsReview && "bg-red-50/60 hover:bg-red-50",
+                  "border-b border-line transition-colors hover:bg-surface-2",
+                  needsReview && "bg-danger-soft-bg/70 hover:bg-danger-soft-bg",
                 )}
               >
                 <td className="px-4 py-3">
                   <Link
                     to={`${basePath}/${inv.id}`}
-                    className="font-medium text-slate-900 hover:text-blue-600"
+                    className="font-medium text-ink hover:text-accent"
                   >
                     {inv.vendor}
                   </Link>
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <div className="flex items-center gap-1.5 text-xs text-ink-subtle">
                     #{inv.invoice_number}
                     {needsReview && (
-                      <span className="inline-flex items-center gap-0.5 font-medium text-red-600">
+                      <span className="inline-flex items-center gap-0.5 font-medium text-danger">
                         <AlertTriangle className="h-3 w-3" />
                         {inv.review_count} review
                       </span>
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-slate-700">
+                <td className="px-4 py-3 text-ink-muted">
                   {inv.business ?? "—"}
                 </td>
-                <td className="px-4 py-3 text-slate-500">
+                <td className="px-4 py-3 text-ink-muted">
                   {inv.class && inv.class !== "None" ? inv.class : "—"}
                 </td>
-                <td className="px-4 py-3 text-right font-medium text-slate-900">
+                <td className="px-4 py-3 text-right font-medium text-ink tabular-nums">
                   {formatCurrency(Number(inv.total_amount))}
                 </td>
-                <td className="px-4 py-3 text-slate-700">
+                <td className="px-4 py-3 text-ink-muted">
                   {inv.approved_by ?? "—"}
                 </td>
                 <td className="px-4 py-3">
                   <StatusBadge status={inv.status} />
                 </td>
-                <td className="px-4 py-3 text-slate-500">
+                <td className="px-4 py-3 text-ink-muted">
                   {ageLabel(inv.created_at)}
                 </td>
               </tr>

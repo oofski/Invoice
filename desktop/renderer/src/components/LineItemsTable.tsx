@@ -65,26 +65,26 @@ export function LineItemsTable({
       <tr
         key={li.id}
         className={cn(
-          "border-b border-slate-100 align-top",
-          review && "bg-red-50",
-          isChild && "bg-slate-50/70",
+          "border-b border-line align-top",
+          review && "bg-danger-soft-bg",
+          isChild && "bg-surface-2/70",
         )}
       >
         <td className={cn("px-4 py-3", isChild && "pl-8")}>
-          <div className="text-sm text-slate-800">
-            {isChild && <span className="mr-1 text-slate-300">↳</span>}
+          <div className="text-sm text-ink">
+            {isChild && <span className="mr-1 text-ink-subtle">↳</span>}
             {li.description}
           </div>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-400">
+          <div className="mt-0.5 flex items-center gap-2 text-xs text-ink-subtle">
             {li.logic_path && <span>{li.logic_path}</span>}
             {li.manually_overridden && (
-              <span className="inline-flex items-center gap-0.5 text-blue-500">
+              <span className="inline-flex items-center gap-0.5 text-accent">
                 <PencilLine className="h-3 w-3" /> overridden
               </span>
             )}
           </div>
         </td>
-        <td className="px-4 py-3 text-right text-sm font-medium text-slate-900">
+        <td className="px-4 py-3 text-right text-sm font-medium text-ink tabular-nums">
           {formatCurrency(Number(li.amount ?? 0))}
         </td>
         <td className="min-w-[220px] px-4 py-3">
@@ -99,7 +99,7 @@ export function LineItemsTable({
             <span
               className={cn(
                 "text-sm",
-                review ? "font-medium text-red-600" : "text-slate-700",
+                review ? "font-medium text-danger" : "text-ink-muted",
               )}
             >
               {isSplitParent
@@ -130,7 +130,7 @@ export function LineItemsTable({
       <div className="scroll-thin overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr className="border-b border-line bg-surface-2 text-left text-xs uppercase tracking-[0.12em] text-ink-muted">
               <th className="px-4 py-2.5 font-medium">Description</th>
               <th className="px-4 py-2.5 text-right font-medium">Amount</th>
               <th className="px-4 py-2.5 font-medium">GL Category</th>

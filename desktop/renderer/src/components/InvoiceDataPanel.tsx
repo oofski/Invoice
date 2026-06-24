@@ -6,10 +6,10 @@ import type { InvoiceWithRelations } from "@/lib/types";
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-slate-400">
+      <dt className="text-xs uppercase tracking-wide text-ink-muted">
         {label}
       </dt>
-      <dd className="text-sm font-medium text-slate-800">{value ?? "—"}</dd>
+      <dd className="text-sm font-medium text-ink">{value ?? "—"}</dd>
     </div>
   );
 }
@@ -24,17 +24,17 @@ export function InvoiceDataPanel({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">{invoice.vendor}</h2>
-          <p className="text-sm text-slate-500">#{invoice.invoice_number}</p>
+          <h2 className="font-display text-lg font-bold text-ink">{invoice.vendor}</h2>
+          <p className="text-sm text-ink-muted">#{invoice.invoice_number}</p>
         </div>
         <StatusBadge status={invoice.status} />
       </div>
 
-      <div className="rounded-lg bg-slate-50 p-3 text-center">
-        <p className="text-xs uppercase tracking-wide text-slate-400">
+      <div className="rounded-lg bg-surface-2 p-3 text-center">
+        <p className="text-xs uppercase tracking-wide text-ink-muted">
           Total Amount
         </p>
-        <p className="text-3xl font-bold text-slate-900">
+        <p className="text-3xl font-bold text-ink tabular-nums">
           {formatCurrency(Number(invoice.total_amount))}
         </p>
       </div>
@@ -70,8 +70,8 @@ export function InvoiceDataPanel({
         <div
           className={`rounded-lg border p-3 text-sm ${
             approval.status === APPROVAL_STATUS.APPROVED
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : "border-red-200 bg-red-50 text-red-800"
+              ? "border-success bg-success-soft-bg text-success-soft-fg"
+              : "border-danger bg-danger-soft-bg text-danger-soft-fg"
           }`}
         >
           <p className="font-medium">

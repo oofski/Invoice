@@ -46,21 +46,21 @@ export default function SettingsPage() {
       <div className="max-w-2xl space-y-6 p-6">
         {/* Account */}
         <Card className="p-5">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.12em] text-ink-muted">
             Account
           </h2>
           <dl className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <dt className="text-slate-500">Name</dt>
-              <dd className="font-medium text-slate-900">{profile.name}</dd>
+              <dt className="text-ink-muted">Name</dt>
+              <dd className="font-medium text-ink">{profile.name}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-slate-500">Email</dt>
-              <dd className="font-medium text-slate-900">{profile.email}</dd>
+              <dt className="text-ink-muted">Email</dt>
+              <dd className="font-medium text-ink">{profile.email}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-slate-500">Role</dt>
-              <dd className="font-medium capitalize text-slate-900">{profile.role}</dd>
+              <dt className="text-ink-muted">Role</dt>
+              <dd className="font-medium capitalize text-ink">{profile.role}</dd>
             </div>
           </dl>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -75,15 +75,15 @@ export default function SettingsPage() {
 
         {/* Connection */}
         <Card className="p-5">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.12em] text-ink-muted">
             Connection
           </h2>
           <div className="text-sm">
-            <span className="text-slate-500">Server URL</span>
-            <code className="mt-1 block break-all rounded-md bg-slate-50 p-2 font-mono text-xs text-slate-800">
+            <span className="text-ink-muted">Server URL</span>
+            <code className="mt-1 block break-all rounded-md bg-surface-2 p-2 font-mono text-xs text-ink">
               {serverUrl}
             </code>
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-ink-subtle">
               The InvoiceIQ backend this app talks to. To change it, sign out and
               update the Server URL on the login screen.
             </p>
@@ -92,23 +92,23 @@ export default function SettingsPage() {
 
         {/* App & updates */}
         <Card className="p-5">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.12em] text-ink-muted">
             App &amp; updates
           </h2>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-slate-500">Version</span>
-            <span className="font-medium text-slate-900">{version || "—"}</span>
+            <span className="text-ink-muted">Version</span>
+            <span className="font-medium text-ink tabular-nums">{version || "—"}</span>
           </div>
 
-          <div className="mt-4 border-t border-slate-100 pt-4">
+          <div className="mt-4 border-t border-line pt-4">
             {!supported ? (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-ink-muted">
                 Updates are delivered automatically by the desktop app. When a new
                 version is published, you'll be prompted to restart and install.
               </p>
             ) : status.state === "downloaded" ? (
               <div className="space-y-2">
-                <p className="flex items-center gap-2 text-sm text-emerald-700">
+                <p className="flex items-center gap-2 text-sm text-success">
                   <CheckCircle2 className="h-4 w-4" />
                   Update {status.version ?? ""} is ready to install.
                 </p>
@@ -118,7 +118,7 @@ export default function SettingsPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="text-sm text-slate-600">{statusLabel(status)}</p>
+                <p className="text-sm text-ink-muted">{statusLabel(status)}</p>
                 <Button size="sm" variant="secondary" onClick={check} loading={busy}>
                   <RefreshCw className="h-4 w-4" /> Check for updates
                 </Button>

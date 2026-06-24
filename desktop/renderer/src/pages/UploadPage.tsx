@@ -150,17 +150,17 @@ export default function UploadPage() {
           }}
           onClick={() => inputRef.current?.click()}
           className={cn(
-            "flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed bg-white px-6 py-14 text-center transition-colors",
+            "flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed bg-surface px-6 py-14 text-center transition-colors",
             dragOver
-              ? "border-blue-500 bg-blue-50"
-              : "border-slate-300 hover:border-slate-400",
+              ? "border-accent bg-selected-bg"
+              : "border-line hover:border-line-strong",
           )}
         >
-          <UploadCloud className="mb-3 h-10 w-10 text-slate-400" />
-          <p className="font-medium text-slate-700">
+          <UploadCloud className="mb-3 h-10 w-10 text-ink-subtle" />
+          <p className="font-medium text-ink-muted">
             Drop PDF invoices here or click to browse
           </p>
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-ink-subtle">
             PDF only · single or batch upload
           </p>
           <input
@@ -175,7 +175,7 @@ export default function UploadPage() {
 
         {items.length > 0 && (
           <div className="flex items-center justify-between">
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-ink-muted">
               {items.length} file{items.length === 1 ? "" : "s"}
             </p>
             <div className="flex gap-2">
@@ -202,13 +202,13 @@ export default function UploadPage() {
           {items.map((item) => (
             <Card key={item.id} className="p-4">
               <div className="flex items-start gap-3">
-                <FileText className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />
+                <FileText className="mt-0.5 h-5 w-5 shrink-0 text-ink-subtle" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-medium text-slate-800">
+                    <p className="truncate text-sm font-medium text-ink">
                       {item.file.name}
                     </p>
-                    <span className="shrink-0 text-xs text-slate-400">
+                    <span className="shrink-0 text-xs text-ink-subtle">
                       {(item.file.size / 1024).toFixed(0)} KB
                     </span>
                   </div>
@@ -224,7 +224,7 @@ export default function UploadPage() {
                     onClick={() =>
                       setItems((prev) => prev.filter((p) => p.id !== item.id))
                     }
-                    className="text-slate-400 hover:text-red-500"
+                    className="text-ink-subtle hover:text-danger"
                     aria-label="Remove"
                   >
                     <X className="h-4 w-4" />
@@ -249,7 +249,7 @@ function FileStatusView({
   onRetry: () => void;
 }) {
   if (status.state === "pending") {
-    return <p className="mt-1 text-xs text-slate-400">Ready to process</p>;
+    return <p className="mt-1 text-xs text-ink-subtle">Ready to process</p>;
   }
   if (status.state === "processing") {
     return (
@@ -263,10 +263,10 @@ function FileStatusView({
                 className={cn(
                   "flex items-center gap-1 text-xs",
                   done
-                    ? "text-emerald-600"
+                    ? "text-success"
                     : active
-                      ? "font-medium text-blue-600"
-                      : "text-slate-400",
+                      ? "font-medium text-accent"
+                      : "text-ink-subtle",
                 )}
               >
                 {done ? (
@@ -278,7 +278,7 @@ function FileStatusView({
                 )}
                 {label}
               </span>
-              {i < STEPS.length - 2 && <span className="text-slate-300">→</span>}
+              {i < STEPS.length - 2 && <span className="text-ink-subtle">→</span>}
             </div>
           );
         })}
@@ -287,14 +287,14 @@ function FileStatusView({
   }
   if (status.state === "done") {
     return (
-      <div className="mt-1 flex items-center gap-2 text-xs text-emerald-600">
+      <div className="mt-1 flex items-center gap-2 text-xs text-success">
         <CheckCircle2 className="h-4 w-4" />
         <span>
           Routed to {status.approver} · {status.lineItemCount} line items
         </span>
         <Link
           to={`/invoices/${status.invoiceId}`}
-          className="font-medium text-blue-600 hover:underline"
+          className="font-medium text-accent hover:underline"
         >
           View
         </Link>
@@ -303,7 +303,7 @@ function FileStatusView({
   }
   if (status.state === "duplicate") {
     return (
-      <div className="mt-2 rounded-lg bg-amber-50 p-2.5 text-xs text-amber-800">
+      <div className="mt-2 rounded-lg bg-warning-soft-bg p-2.5 text-xs text-warning-soft-fg">
         <div className="flex items-center gap-1.5 font-medium">
           <AlertTriangle className="h-4 w-4" />
           Possible duplicate detected
@@ -319,7 +319,7 @@ function FileStatusView({
           {status.existingId && (
             <Link
               to={`/invoices/${status.existingId}`}
-              className="inline-flex items-center rounded-lg border border-amber-300 px-2.5 py-1.5 font-medium text-amber-800 hover:bg-amber-100"
+              className="inline-flex items-center rounded-lg border border-warning-soft-fg/30 px-2.5 py-1.5 font-medium text-warning-soft-fg hover:bg-warning-soft-bg"
             >
               View existing
             </Link>
@@ -329,7 +329,7 @@ function FileStatusView({
     );
   }
   return (
-    <div className="mt-1 flex items-center gap-2 text-xs text-red-600">
+    <div className="mt-1 flex items-center gap-2 text-xs text-danger">
       <AlertTriangle className="h-4 w-4" />
       <span>{status.message}</span>
       <button onClick={onRetry} className="font-medium underline">

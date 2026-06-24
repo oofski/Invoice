@@ -28,9 +28,9 @@ const ICONS = {
 } as const;
 
 const STYLES = {
-  success: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  error: "border-red-200 bg-red-50 text-red-800",
-  info: "border-slate-200 bg-white text-slate-800",
+  success: "border-success-soft-bg bg-success-soft-bg text-success-soft-fg",
+  error: "border-danger-soft-bg bg-danger-soft-bg text-danger-soft-fg",
+  info: "border-line bg-surface text-ink",
 } as const;
 
 export function Toaster() {

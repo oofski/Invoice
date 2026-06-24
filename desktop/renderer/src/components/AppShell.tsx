@@ -92,12 +92,14 @@ export function AppShell() {
   const items = NAV.filter((n) => n.roles.includes(profile.role));
 
   const sidebar = (
-    <div className="flex h-full flex-col bg-slate-900 text-slate-300">
+    <div className="flex h-full flex-col bg-sidebar text-[#CFD2D2]">
       <div className="flex items-center gap-2 px-5 py-4">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-sm font-bold text-white">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">
           IQ
         </div>
-        <span className="text-lg font-bold text-white">InvoiceIQ</span>
+        <span className="font-wordmark text-lg tracking-[0.18em] text-white">
+          InvoiceIQ
+        </span>
       </div>
       <nav className="flex-1 space-y-1 px-3 py-2">
         {items.map((item) => {
@@ -112,8 +114,8 @@ export function AppShell() {
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 active
-                  ? "bg-blue-600 text-white"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-white",
+                  ? "bg-white/10 text-white border-l-2 border-accent"
+                  : "text-[#CFD2D2] hover:bg-sidebar-2 hover:text-white",
               )}
             >
               <Icon className="h-4 w-4" />
@@ -122,11 +124,11 @@ export function AppShell() {
           );
         })}
       </nav>
-      <div className="border-t border-slate-800 p-3">
+      <div className="border-t border-white/10 p-3">
         <button
           onClick={() => window.location.reload()}
           title="Re-scan the server for new invoices and updates"
-          className="mb-1 flex w-full items-center gap-2 rounded-lg bg-blue-600/90 px-3 py-2 text-sm font-medium text-white hover:bg-blue-600"
+          className="mb-1 flex w-full items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover"
         >
           <RefreshCw className="h-4 w-4" />
           Check for invoices
@@ -135,13 +137,13 @@ export function AppShell() {
           <p className="truncate text-sm font-medium text-white">
             {profile.name}
           </p>
-          <p className="truncate text-xs capitalize text-slate-400">
+          <p className="truncate text-xs capitalize text-[#9FA6A6]">
             {profile.role}
           </p>
         </div>
         <button
           onClick={signOut}
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white"
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-[#CFD2D2] hover:bg-sidebar-2 hover:text-white"
         >
           <LogOut className="h-4 w-4" />
           Sign out
@@ -151,7 +153,7 @@ export function AppShell() {
   );
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex min-h-screen bg-bg">
       {/* Desktop sidebar */}
       <aside className="hidden w-60 shrink-0 md:block">{sidebar}</aside>
 
@@ -159,7 +161,7 @@ export function AppShell() {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div
-            className="absolute inset-0 bg-slate-900/50"
+            className="absolute inset-0 bg-ink/50"
             onClick={() => setMobileOpen(false)}
           />
           <div className="absolute left-0 top-0 h-full w-60">{sidebar}</div>
@@ -168,7 +170,7 @@ export function AppShell() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Mobile topbar */}
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
+        <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3 md:hidden">
           <button onClick={() => setMobileOpen(true)} aria-label="Open menu">
             {mobileOpen ? (
               <X className="h-5 w-5" />
@@ -176,8 +178,10 @@ export function AppShell() {
               <Menu className="h-5 w-5" />
             )}
           </button>
-          <span className="font-bold text-slate-900">InvoiceIQ</span>
-          <span className="text-xs text-slate-500">{profile.name}</span>
+          <span className="font-wordmark tracking-[0.18em] text-ink">
+            InvoiceIQ
+          </span>
+          <span className="text-xs text-ink-muted">{profile.name}</span>
         </header>
 
         <main className="min-w-0 flex-1 overflow-x-hidden">

@@ -161,11 +161,11 @@ export default function ExportPage() {
 
       <div className="space-y-6 p-6">
         {selected.size > 0 && (
-          <div className="flex items-center justify-between rounded-lg bg-blue-50 px-4 py-2.5 text-sm text-blue-800">
+          <div className="flex items-center justify-between rounded-lg bg-selected-bg px-4 py-2.5 text-sm text-accent">
             <span>
               {selected.size} invoice{selected.size === 1 ? "" : "s"} selected
             </span>
-            <span className="font-semibold">
+            <span className="font-semibold tabular-nums">
               {formatCurrency(selectedTotal)}
             </span>
           </div>
@@ -173,9 +173,9 @@ export default function ExportPage() {
 
         {/* Export-ready table */}
         <Card>
-          <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
-            <FileDown className="h-4 w-4 text-slate-400" />
-            <h2 className="text-sm font-semibold text-slate-700">
+          <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+            <FileDown className="h-4 w-4 text-ink-subtle" />
+            <h2 className="font-display text-sm font-semibold text-ink">
               Export Ready ({ready.length})
             </h2>
           </div>
@@ -192,7 +192,7 @@ export default function ExportPage() {
             <div className="scroll-thin overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr className="border-b border-line bg-surface-2 text-left text-xs uppercase tracking-[0.12em] text-ink-muted">
                     <th className="px-4 py-2.5">
                       <input
                         type="checkbox"
@@ -215,8 +215,8 @@ export default function ExportPage() {
                     <tr
                       key={inv.id}
                       className={cn(
-                        "border-b border-slate-100 hover:bg-slate-50",
-                        selected.has(inv.id) && "bg-blue-50/50",
+                        "border-b border-line hover:bg-surface-2",
+                        selected.has(inv.id) && "bg-selected-bg",
                       )}
                     >
                       <td className="px-4 py-3">
@@ -227,22 +227,22 @@ export default function ExportPage() {
                           aria-label={`Select ${inv.vendor}`}
                         />
                       </td>
-                      <td className="px-4 py-3 font-medium text-slate-900">
+                      <td className="px-4 py-3 font-medium text-ink">
                         {inv.vendor}
-                        <span className="ml-1 text-xs text-slate-400">
+                        <span className="ml-1 text-xs text-ink-subtle">
                           #{inv.invoice_number}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-slate-700">
+                      <td className="px-4 py-3 text-ink-muted">
                         {inv.business}
                       </td>
-                      <td className="px-4 py-3 text-slate-500">
+                      <td className="px-4 py-3 text-ink-muted">
                         {inv.class && inv.class !== "None" ? inv.class : "—"}
                       </td>
-                      <td className="px-4 py-3 text-right font-medium">
+                      <td className="px-4 py-3 text-right font-medium tabular-nums">
                         {formatCurrency(Number(inv.total_amount))}
                       </td>
-                      <td className="px-4 py-3 text-slate-700">
+                      <td className="px-4 py-3 text-ink-muted">
                         {inv.approved_by}
                       </td>
                     </tr>
@@ -255,29 +255,29 @@ export default function ExportPage() {
 
         {/* Blocked */}
         {blocked.length > 0 && (
-          <Card className="border-red-200">
-            <div className="flex items-center gap-2 border-b border-red-100 bg-red-50 px-4 py-3">
-              <AlertTriangle className="h-4 w-4 text-red-500" />
-              <h2 className="text-sm font-semibold text-red-700">
+          <Card className="border-danger-soft-fg/30">
+            <div className="flex items-center gap-2 border-b border-line bg-danger-soft-bg px-4 py-3">
+              <AlertTriangle className="h-4 w-4 text-danger" />
+              <h2 className="font-display text-sm font-semibold text-danger-soft-fg">
                 Blocked — Manual review required ({blocked.length})
               </h2>
             </div>
-            <ul className="divide-y divide-slate-100">
+            <ul className="divide-y divide-line">
               {blocked.map((inv) => (
                 <li
                   key={inv.id}
                   className="flex items-center justify-between px-4 py-2.5 text-sm"
                 >
-                  <span className="text-slate-700">
+                  <span className="text-ink-muted">
                     {inv.vendor}{" "}
-                    <span className="text-xs text-red-500">
+                    <span className="text-xs text-danger">
                       ({inv.review_count} item
                       {inv.review_count === 1 ? "" : "s"} need review)
                     </span>
                   </span>
                   <Link
                     to={`/invoices/${inv.id}`}
-                    className="font-medium text-blue-600 hover:underline"
+                    className="font-medium text-accent hover:underline"
                   >
                     Resolve
                   </Link>
@@ -289,9 +289,9 @@ export default function ExportPage() {
 
         {/* Export history */}
         <Card>
-          <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
-            <History className="h-4 w-4 text-slate-400" />
-            <h2 className="text-sm font-semibold text-slate-700">
+          <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+            <History className="h-4 w-4 text-ink-subtle" />
+            <h2 className="font-display text-sm font-semibold text-ink">
               Export History
             </h2>
           </div>
@@ -301,7 +301,7 @@ export default function ExportPage() {
             <div className="scroll-thin overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr className="border-b border-line bg-surface-2 text-left text-xs uppercase tracking-[0.12em] text-ink-muted">
                     <th className="px-4 py-2.5 font-medium">Date</th>
                     <th className="px-4 py-2.5 font-medium">File</th>
                     <th className="px-4 py-2.5 font-medium">Invoices</th>
@@ -312,25 +312,25 @@ export default function ExportPage() {
                 </thead>
                 <tbody>
                   {historyData.exports.map((e) => (
-                    <tr key={e.id} className="border-b border-slate-100">
-                      <td className="px-4 py-3 text-slate-600">
+                    <tr key={e.id} className="border-b border-line">
+                      <td className="px-4 py-3 text-ink-muted">
                         {formatDate(e.exported_at)}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-700">
+                      <td className="px-4 py-3 font-mono text-xs text-ink-muted">
                         {e.file_name}
                       </td>
-                      <td className="px-4 py-3 text-slate-600">
+                      <td className="px-4 py-3 text-ink-muted">
                         {e.invoice_ids?.length ?? 0}
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{e.row_count}</td>
-                      <td className="px-4 py-3 text-slate-600">
+                      <td className="px-4 py-3 text-ink-muted">{e.row_count}</td>
+                      <td className="px-4 py-3 text-ink-muted">
                         {e.exported_by_name}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button
                           onClick={() => reDownload(e)}
                           disabled={downloadingId === e.id}
-                          className="font-medium text-blue-600 hover:underline disabled:opacity-50"
+                          className="font-medium text-accent hover:underline disabled:opacity-50"
                         >
                           {downloadingId === e.id ? "Downloading…" : "Download"}
                         </button>

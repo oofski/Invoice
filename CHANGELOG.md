@@ -5,6 +5,23 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.1.5] — 2026-06-24
+
+### Changed
+- **New Neroli-branded look.** The whole app has been restyled to the Neroli
+  Salon & Spa brand standards — a warm, refined, spa-luxury aesthetic in place
+  of the previous generic blue/grey theme. Highlights:
+  - **Colors:** warm porcelain canvas with white tone-on-tone cards and soft
+    hairline borders; **Slate Grey** primary buttons and a restrained **Copper
+    Rose** accent for links, focus, and selected rows (the old blue is gone).
+  - **Typography:** elegant **Cormorant Garamond** headings and a **Marcellus**
+    wordmark paired with a clean **Hanken Grotesk** body; all amounts use
+    aligned tabular figures for easier scanning.
+  - Status colors (approved / rejected / pending / exported / needs-review) stay
+    clearly distinct, and the manual-review pulse is preserved.
+- This is a **visual refresh only** — every screen, workflow, and feature behaves
+  exactly as before. Fonts are bundled with the app (no internet required).
+
 ## [1.1.4] — 2026-06-24
 
 ### Added
@@ -300,6 +317,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.1.5]: https://github.com/oofski/Invoice/releases/tag/v1.1.5
 [1.1.4]: https://github.com/oofski/Invoice/releases/tag/v1.1.4
 [1.1.3]: https://github.com/oofski/Invoice/releases/tag/v1.1.3
 [1.1.2]: https://github.com/oofski/Invoice/releases/tag/v1.1.2

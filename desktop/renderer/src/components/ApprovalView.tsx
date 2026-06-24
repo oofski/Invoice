@@ -52,7 +52,7 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
       {/* List sidebar — collapsible on desktop */}
       <aside
         className={cn(
-          "shrink-0 border-r border-slate-200 bg-white transition-all duration-200",
+          "shrink-0 border-r border-line bg-surface transition-all duration-200",
           selectedId ? "hidden lg:block" : "block",
           sidebarCollapsed ? "lg:w-10" : "w-full lg:w-80",
         )}
@@ -63,16 +63,16 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
             <button
               onClick={() => setSidebarCollapsed(false)}
               title="Expand inbox"
-              className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              className="rounded p-1.5 text-ink-subtle hover:bg-surface-2 hover:text-ink"
             >
               <PanelLeftOpen className="h-5 w-5" />
             </button>
           </div>
         ) : (
           <>
-            <div className="border-b border-slate-200 px-4 py-4">
+            <div className="border-b border-line px-4 py-4">
               <div className="flex items-center justify-between">
-                <h1 className="text-lg font-bold text-slate-900">
+                <h1 className="font-display text-lg font-semibold text-ink">
                   Pending Approvals
                 </h1>
                 <div className="flex items-center gap-1">
@@ -90,19 +90,19 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
                   <button
                     onClick={() => setSidebarCollapsed(true)}
                     title="Collapse inbox"
-                    className="hidden rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 lg:block"
+                    className="hidden rounded p-1.5 text-ink-subtle hover:bg-surface-2 hover:text-ink lg:block"
                   >
                     <PanelLeftClose className="h-4 w-4" />
                   </button>
                 </div>
               </div>
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-ink-muted">
                 {invoices.length} awaiting your decision
               </p>
             </div>
             <div className="scroll-thin h-[calc(100vh-81px)] overflow-y-auto">
               {error ? (
-                <div className="px-4 py-4 text-sm text-red-600">
+                <div className="px-4 py-4 text-sm text-danger">
                   Couldn&apos;t load approvals: {error}. Check the server
                   connection and try Refresh.
                 </div>
@@ -122,19 +122,19 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
                     key={inv.id}
                     onClick={() => setSelectedId(inv.id)}
                     className={cn(
-                      "block w-full border-b border-slate-100 px-4 py-3 text-left transition-colors hover:bg-slate-50",
-                      selectedId === inv.id && "bg-blue-50",
+                      "block w-full border-b border-line px-4 py-3 text-left transition-colors hover:bg-surface-2",
+                      selectedId === inv.id && "bg-selected-bg",
                     )}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-medium text-slate-900">
+                      <span className="font-medium text-ink">
                         {inv.vendor}
                       </span>
-                      <span className="text-sm font-semibold text-slate-900">
+                      <span className="text-sm font-semibold text-ink tabular-nums">
                         {formatCurrency(Number(inv.total_amount))}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-xs text-slate-500">
+                    <div className="flex items-center justify-between text-xs text-ink-muted">
                       <span>{inv.business}</span>
                       <span>{ageLabel(inv.created_at)} old</span>
                     </div>
@@ -257,21 +257,21 @@ function ApprovalDetail({
   return (
     <div className="flex h-full flex-col">
       {/* Top bar */}
-      <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-4 py-3">
+      <div className="flex items-center gap-2 border-b border-line bg-surface px-4 py-3">
         <button
           onClick={onBack}
-          className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 lg:hidden"
+          className="inline-flex items-center gap-1 text-sm text-ink-muted hover:text-ink lg:hidden"
         >
           <ChevronLeft className="h-4 w-4" /> Back
         </button>
-        <span className="ml-auto text-xs text-slate-400">
+        <span className="ml-auto text-xs text-ink-subtle">
           #{invoice.invoice_number}
         </span>
         {/* Desktop-only: toggle the decision panel */}
         <button
           onClick={() => setPanelCollapsed((v) => !v)}
           title={panelCollapsed ? "Show decision panel" : "Collapse decision panel"}
-          className="hidden rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 lg:block"
+          className="hidden rounded p-1.5 text-ink-subtle hover:bg-surface-2 hover:text-ink lg:block"
         >
           {panelCollapsed ? (
             <PanelRightOpen className="h-4 w-4" />
@@ -285,7 +285,7 @@ function ApprovalDetail({
           (grid auto-rows didn't constrain the child height for overflow-auto). */}
       <div className="flex min-h-0 flex-1">
         {/* PDF — flex-1 fills remaining width; lg:flex so it shows on desktop */}
-        <div className="hidden min-h-0 flex-col border-r border-slate-200 lg:flex lg:flex-1">
+        <div className="hidden min-h-0 flex-col border-r border-line lg:flex lg:flex-1">
           <PdfPane invoiceId={invoice.id} hasPdf={invoice.has_pdf ?? true} />
         </div>
 
@@ -299,11 +299,11 @@ function ApprovalDetail({
           )}
         >
           <div className="text-center">
-            <p className="text-sm text-slate-500">{invoice.vendor}</p>
-            <p className="my-1 text-5xl font-bold text-slate-900">
+            <p className="text-sm text-ink-muted">{invoice.vendor}</p>
+            <p className="my-1 text-5xl font-bold text-ink tabular-nums">
               {formatCurrency(Number(invoice.total_amount))}
             </p>
-            <div className="mt-2 flex items-center justify-center gap-4 text-sm text-slate-500">
+            <div className="mt-2 flex items-center justify-center gap-4 text-sm text-ink-muted">
               <span className="inline-flex items-center gap-1">
                 <Building2 className="h-4 w-4" /> {invoice.business}
                 {invoice.class && invoice.class !== "None"
@@ -317,7 +317,7 @@ function ApprovalDetail({
             </div>
             {invoice.split_type && (
               <div className="mt-3 flex justify-center">
-                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
+                <span className="inline-flex items-center gap-1 rounded-full bg-selected-bg px-2.5 py-0.5 text-xs font-medium text-accent">
                   <Split className="h-3 w-3" />
                   {invoice.split_type === "QUICK_EVEN"
                     ? "Split: even"
@@ -370,11 +370,11 @@ function ApprovalDetail({
                 onChange={(e) => setComment(e.target.value)}
                 rows={2}
                 placeholder="Optional comment (added to the approval)…"
-                className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-line bg-surface p-3 text-sm text-ink placeholder:text-ink-subtle outline-none focus:border-accent focus:ring-1 focus:ring-ring"
               />
             </div>
           ) : (
-            <div className="mt-6 rounded-lg bg-slate-50 p-3 text-center text-sm text-slate-500">
+            <div className="mt-6 rounded-lg bg-surface-2 p-3 text-center text-sm text-ink-muted">
               {!isPending
                 ? `This invoice is ${invoice.status.replace(/_/g, " ").toLowerCase()}.`
                 : "View only."}
@@ -385,7 +385,7 @@ function ApprovalDetail({
           <div className="mt-6">
             <button
               onClick={() => setShowDetail((v) => !v)}
-              className="inline-flex items-center gap-1 text-sm font-semibold text-slate-700 hover:text-slate-900"
+              className="inline-flex items-center gap-1 text-sm font-semibold text-ink-muted hover:text-ink"
             >
               {showDetail ? (
                 <ChevronUp className="h-4 w-4" />
@@ -396,7 +396,7 @@ function ApprovalDetail({
             </button>
 
             {showDetail && (
-              <div className="mt-2 rounded-xl border border-slate-200 bg-white">
+              <div className="mt-2 rounded-xl border border-line bg-surface">
                 {isExec ? (
                   <ExecLineItemsTable lineItems={invoice.line_items} />
                 ) : (
@@ -427,7 +427,7 @@ function ApprovalDetail({
         onClose={() => setRejectOpen(false)}
         title="Reject invoice"
       >
-        <p className="mb-2 text-sm text-slate-600">
+        <p className="mb-2 text-sm text-ink-muted">
           A note is required when rejecting. The accountant will be notified.
         </p>
         <textarea
@@ -436,7 +436,7 @@ function ApprovalDetail({
           onChange={(e) => setNote(e.target.value)}
           rows={4}
           placeholder="Reason for rejection…"
-          className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"
+          className="w-full rounded-lg border border-line bg-surface p-3 text-sm text-ink placeholder:text-ink-subtle outline-none focus:border-danger focus:ring-1 focus:ring-danger"
         />
         <div className="mt-3 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setRejectOpen(false)}>
@@ -471,7 +471,7 @@ function ExecLineItemsTable({
     <div className="scroll-thin overflow-x-auto">
       <table className="w-full min-w-[480px] text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+          <tr className="border-b border-line bg-surface-2 text-left text-xs uppercase tracking-[0.12em] text-ink-muted">
             <th className="px-4 py-2.5 font-medium">Description</th>
             <th className="px-4 py-2.5 text-right font-medium">Amount</th>
             <th className="px-4 py-2.5 font-medium">Business / Class</th>
@@ -479,14 +479,14 @@ function ExecLineItemsTable({
         </thead>
         <tbody>
           {rows.map((li) => (
-            <tr key={li.id} className="border-b border-slate-100 align-top">
-              <td className="px-4 py-3 text-slate-800">
+            <tr key={li.id} className="border-b border-line align-top">
+              <td className="px-4 py-3 text-ink">
                 {li.description ?? "—"}
               </td>
-              <td className="px-4 py-3 text-right font-medium text-slate-900">
+              <td className="px-4 py-3 text-right font-medium text-ink tabular-nums">
                 {formatCurrency(Number(li.amount ?? 0))}
               </td>
-              <td className="px-4 py-3 text-slate-700">
+              <td className="px-4 py-3 text-ink-muted">
                 {li.business
                   ? li.class && li.class !== "None"
                     ? `${li.business} · ${li.class}`

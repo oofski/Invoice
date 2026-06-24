@@ -3,19 +3,19 @@ import { cn } from "@/lib/utils";
 import { type ReactNode } from "react";
 
 const TONES = {
-  slate: "border-slate-200",
-  amber: "border-amber-300",
-  red: "border-red-300",
-  emerald: "border-emerald-300",
-  blue: "border-blue-300",
+  slate: "border-line-strong",
+  amber: "border-warning",
+  red: "border-danger",
+  emerald: "border-success",
+  blue: "border-accent",
 } as const;
 
 const VALUE_TONES = {
-  slate: "text-slate-900",
-  amber: "text-amber-600",
-  red: "text-red-600",
-  emerald: "text-emerald-600",
-  blue: "text-blue-600",
+  slate: "text-ink",
+  amber: "text-warning",
+  red: "text-danger",
+  emerald: "text-success",
+  blue: "text-accent",
 } as const;
 
 export function StatCard({
@@ -34,18 +34,25 @@ export function StatCard({
   const inner = (
     <div
       className={cn(
-        "rounded-xl border-l-4 bg-white p-4 shadow-sm transition-shadow",
+        "rounded-xl border-l-4 bg-surface p-4 shadow-sm transition-shadow",
         TONES[tone],
         href && "hover:shadow-md",
       )}
     >
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+        <p className="text-xs font-medium uppercase tracking-[0.12em] text-ink-muted">
           {label}
         </p>
-        {icon && <span className="text-slate-300">{icon}</span>}
+        {icon && <span className="text-ink-subtle">{icon}</span>}
       </div>
-      <p className={cn("mt-1 text-2xl font-bold", VALUE_TONES[tone])}>{value}</p>
+      <p
+        className={cn(
+          "mt-1 text-2xl font-bold tabular-nums",
+          VALUE_TONES[tone],
+        )}
+      >
+        {value}
+      </p>
     </div>
   );
   return href ? <Link to={href}>{inner}</Link> : inner;

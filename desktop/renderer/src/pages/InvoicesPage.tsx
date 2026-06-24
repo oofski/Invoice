@@ -40,7 +40,7 @@ export default function InvoicesPage() {
       <PageHeader title="Invoices" subtitle="All invoices you can access" />
       <div className="p-6">
         <Card>
-          <div className="flex flex-wrap gap-2 border-b border-slate-200 p-4">
+          <div className="flex flex-wrap gap-2 border-b border-line p-4">
             <Input
               placeholder="Search vendor…"
               value={search}
@@ -50,7 +50,7 @@ export default function InvoicesPage() {
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"
             >
               {STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -61,7 +61,7 @@ export default function InvoicesPage() {
             <select
               value={entity}
               onChange={(e) => setEntity(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"
             >
               <option value="">All entities</option>
               {BUSINESS_ENTITIES.map((b) => (

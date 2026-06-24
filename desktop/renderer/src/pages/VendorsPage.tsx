@@ -91,7 +91,7 @@ export default function VendorsPage() {
 
       <div className="p-6">
         <Card>
-          <div className="border-b border-slate-200 p-4">
+          <div className="border-b border-line p-4">
             <Input
               placeholder="Search vendors…"
               value={search}
@@ -108,7 +108,7 @@ export default function VendorsPage() {
             <div className="scroll-thin overflow-x-auto">
               <table className="w-full min-w-[900px] text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr className="border-b border-line bg-surface-2 text-left text-xs uppercase tracking-[0.12em] text-ink-muted">
                     <th className="px-4 py-2.5 font-medium">Vendor</th>
                     <th className="px-4 py-2.5 font-medium">Entity</th>
                     <th className="px-4 py-2.5 font-medium">Class</th>
@@ -120,7 +120,7 @@ export default function VendorsPage() {
                 </thead>
                 <tbody>
                   {adding && (
-                    <tr className="border-b border-slate-100 bg-blue-50/40">
+                    <tr className="border-b border-line bg-selected-bg">
                       <td className="px-4 py-2">
                         <Input
                           placeholder="Vendor name"
@@ -199,9 +199,9 @@ export default function VendorsPage() {
                     return (
                       <tr
                         key={v.id}
-                        className="border-b border-slate-100 hover:bg-slate-50"
+                        className="border-b border-line hover:bg-surface-2"
                       >
-                        <td className="px-4 py-2.5 font-medium text-slate-900">
+                        <td className="px-4 py-2.5 font-medium text-ink">
                           {v.vendor_name}
                         </td>
                         <td className="px-4 py-2.5">

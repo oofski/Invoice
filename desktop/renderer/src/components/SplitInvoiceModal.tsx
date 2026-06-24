@@ -250,14 +250,14 @@ export function SplitInvoiceModal({
     >
       <div className={isLines ? "flex min-h-0 flex-1 flex-col gap-4" : "space-y-4"}>
         {/* Mode toggle */}
-        <div className="inline-flex shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-sm">
+        <div className="inline-flex shrink-0 rounded-lg border border-line bg-surface-2 p-0.5 text-sm">
           <button
             onClick={() => setMode("even")}
             className={cn(
               "rounded-md px-3 py-1.5 font-medium transition-colors",
               mode === "even"
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-500 hover:text-slate-700",
+                ? "bg-surface text-ink shadow-sm"
+                : "text-ink-muted hover:text-ink",
             )}
           >
             Quick split
@@ -267,8 +267,8 @@ export function SplitInvoiceModal({
             className={cn(
               "rounded-md px-3 py-1.5 font-medium transition-colors",
               mode === "lines"
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-500 hover:text-slate-700",
+                ? "bg-surface text-ink shadow-sm"
+                : "text-ink-muted hover:text-ink",
             )}
           >
             Per-line split
@@ -278,7 +278,7 @@ export function SplitInvoiceModal({
         {/* ----------------------------------------- Flexible % allocation */}
         {mode === "even" && (
           <div className="space-y-3">
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-ink-muted">
               Split this invoice by percentage across any entities and classes.
               Add a target for each slice — totals must add up to 100%.
             </p>
@@ -303,10 +303,10 @@ export function SplitInvoiceModal({
                       value={row.percent}
                       disabled={busy}
                       onChange={(e) => setRow(idx, { percent: e.target.value })}
-                      className="pr-6 text-right"
+                      className="pr-6 text-right tabular-nums"
                       aria-label="Percentage"
                     />
-                    <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm text-slate-400">
+                    <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm text-ink-subtle">
                       %
                     </span>
                   </div>
@@ -315,7 +315,7 @@ export function SplitInvoiceModal({
                     onClick={() => removeRow(idx)}
                     disabled={busy}
                     aria-label="Remove target"
-                    className="shrink-0 rounded-md p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                    className="shrink-0 rounded-md p-2 text-ink-subtle transition-colors hover:bg-danger-soft-bg hover:text-danger disabled:opacity-50"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -336,21 +336,21 @@ export function SplitInvoiceModal({
 
               <div
                 className={cn(
-                  "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium",
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium tabular-nums",
                   totalOk
-                    ? "bg-emerald-50 text-emerald-700"
-                    : "bg-amber-50 text-amber-700",
+                    ? "bg-success-soft-bg text-success-soft-fg"
+                    : "bg-warning-soft-bg text-warning-soft-fg",
                 )}
               >
                 <span
                   className={cn(
                     "h-1.5 w-1.5 rounded-full",
-                    totalOk ? "bg-emerald-500" : "bg-amber-500",
+                    totalOk ? "bg-success" : "bg-warning",
                   )}
                 />
                 Total {total.toFixed(2)}%
                 {!totalOk && (
-                  <span className="font-normal text-amber-600">
+                  <span className="font-normal text-warning">
                     (must be 100%)
                   </span>
                 )}
@@ -375,7 +375,7 @@ export function SplitInvoiceModal({
         {/* ------------------------------------------------- Per-line split */}
         {mode === "lines" && (
           <div className="flex min-h-0 flex-1 flex-col gap-3">
-            <p className="shrink-0 text-sm text-slate-600">
+            <p className="shrink-0 text-sm text-ink-muted">
               Assign a business, class and type to each line item. Lines left
               unset default to the invoice&apos;s business/class. Select
               multiple rows to bulk-apply settings.
@@ -383,8 +383,8 @@ export function SplitInvoiceModal({
 
             {/* Bulk-apply bar — visible when ≥1 row is checked */}
             {someSelected && (
-              <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-                <span className="text-xs font-semibold text-blue-700">
+              <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-selected-border bg-selected-bg px-3 py-2">
+                <span className="text-xs font-semibold text-accent">
                   <CheckSquare className="mr-1 inline h-3.5 w-3.5" />
                   {selectedIds.size} selected — apply to all:
                 </span>
@@ -402,7 +402,7 @@ export function SplitInvoiceModal({
                   value={bulkType}
                   disabled={busy}
                   onChange={(e) => setBulkType(e.target.value)}
-                  className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50"
+                  className="rounded-lg border border-line bg-surface text-ink placeholder:text-ink-subtle px-2 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-ring disabled:bg-surface-2"
                 >
                   <option value="">Type…</option>
                   {ITEM_TYPES.map((t) => (
@@ -425,24 +425,24 @@ export function SplitInvoiceModal({
                 </Button>
                 <button
                   onClick={() => setSelectedIds(new Set())}
-                  className="ml-auto text-xs text-blue-500 hover:text-blue-700"
+                  className="ml-auto text-xs text-accent hover:text-accent-hover"
                 >
                   Clear selection
                 </button>
               </div>
             )}
 
-            <div className="scroll-thin min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-200">
+            <div className="scroll-thin min-h-0 flex-1 overflow-y-auto rounded-lg border border-line">
               <table className="w-full text-sm">
-                <thead className="sticky top-0 z-10 bg-slate-50">
-                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                <thead className="sticky top-0 z-10 bg-surface-2">
+                  <tr className="border-b border-line text-left text-xs uppercase tracking-[0.12em] text-ink-muted">
                     {/* Select-all checkbox */}
                     <th className="w-8 px-3 py-2">
                       <input
                         type="checkbox"
                         checked={allSelected}
                         onChange={toggleAll}
-                        className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-blue-600"
+                        className="h-4 w-4 cursor-pointer rounded border-line accent-accent"
                         aria-label="Select all lines"
                       />
                     </th>
@@ -465,8 +465,8 @@ export function SplitInvoiceModal({
                       <tr
                         key={li.id}
                         className={cn(
-                          "border-b border-slate-100",
-                          isChecked && "bg-blue-50",
+                          "border-b border-line",
+                          isChecked && "bg-selected-bg",
                         )}
                       >
                         {/* Row checkbox */}
@@ -475,14 +475,14 @@ export function SplitInvoiceModal({
                             type="checkbox"
                             checked={isChecked}
                             onChange={() => toggleLine(li.id)}
-                            className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-blue-600"
+                            className="h-4 w-4 cursor-pointer rounded border-line accent-accent"
                             aria-label={`Select ${li.description ?? "line"}`}
                           />
                         </td>
-                        <td className="px-3 py-2 align-top text-slate-800">
+                        <td className="px-3 py-2 align-top text-ink-muted">
                           {li.description ?? "—"}
                         </td>
-                        <td className="px-3 py-2 text-right align-top font-medium text-slate-900">
+                        <td className="px-3 py-2 text-right align-top font-medium text-ink tabular-nums">
                           {formatCurrency(Number(li.amount ?? 0))}
                         </td>
                         <td className="px-3 py-2 align-top">
@@ -503,7 +503,7 @@ export function SplitInvoiceModal({
                               onChange={(e) =>
                                 setLine(li.id, { type: e.target.value })
                               }
-                              className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-50"
+                              className="rounded-lg border border-line bg-surface text-ink placeholder:text-ink-subtle px-2 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-ring disabled:bg-surface-2"
                             >
                               <option value="">Type…</option>
                               {ITEM_TYPES.map((t) => (
@@ -547,8 +547,8 @@ export function SplitInvoiceModal({
 
         {/* Clear split — shown when a split already exists */}
         {invoice.split_type && (
-          <div className="flex shrink-0 items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-            <span className="text-slate-600">
+          <div className="flex shrink-0 items-center justify-between rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm">
+            <span className="text-ink-muted">
               This invoice already has a split.
             </span>
             <Button

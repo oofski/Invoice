@@ -38,7 +38,7 @@ function timestamp(iso: string) {
 export function AuditTimeline({ entries }: { entries: AuditEntry[] }) {
   if (entries.length === 0) {
     return (
-      <p className="px-4 py-6 text-sm text-slate-400">No audit entries.</p>
+      <p className="px-4 py-6 text-sm text-ink-subtle">No audit entries.</p>
     );
   }
   return (
@@ -54,44 +54,44 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
   const [open, setOpen] = useState(false);
   const hasDetail = !!entry.prev_value || !!entry.new_value;
   return (
-    <li className="border-l-2 border-slate-200 pl-4">
+    <li className="border-l-2 border-line pl-4">
       <div
         className={`flex items-start gap-2 py-1.5 ${hasDetail ? "cursor-pointer" : ""}`}
         onClick={() => hasDetail && setOpen((o) => !o)}
       >
         {hasDetail ? (
           open ? (
-            <ChevronDown className="mt-0.5 h-4 w-4 text-slate-400" />
+            <ChevronDown className="mt-0.5 h-4 w-4 text-ink-subtle" />
           ) : (
-            <ChevronRight className="mt-0.5 h-4 w-4 text-slate-400" />
+            <ChevronRight className="mt-0.5 h-4 w-4 text-ink-subtle" />
           )
         ) : (
-          <span className="mt-1 h-2 w-2 rounded-full bg-slate-300" />
+          <span className="mt-1 h-2 w-2 rounded-full bg-ink-subtle" />
         )}
         <div className="flex-1">
-          <p className="text-sm text-slate-800">
+          <p className="text-sm text-ink">
             <span className="font-medium">
               {ACTION_LABELS[entry.action] ?? entry.action}
             </span>{" "}
-            <span className="text-slate-400">
+            <span className="text-ink-subtle">
               by {entry.user_name ?? "System"}
             </span>
           </p>
-          {entry.note && <p className="text-xs text-slate-500">{entry.note}</p>}
-          <p className="text-xs text-slate-400">{timestamp(entry.created_at)}</p>
+          {entry.note && <p className="text-xs text-ink-muted">{entry.note}</p>}
+          <p className="text-xs text-ink-subtle">{timestamp(entry.created_at)}</p>
         </div>
       </div>
       {open && hasDetail && (
         <div className="mb-2 ml-6 grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded bg-slate-50 p-2">
-            <p className="mb-1 font-medium text-slate-500">Before</p>
-            <pre className="whitespace-pre-wrap break-all text-slate-600">
+          <div className="rounded bg-surface-2 p-2">
+            <p className="mb-1 font-medium text-ink-muted">Before</p>
+            <pre className="whitespace-pre-wrap break-all text-ink-muted">
               {JSON.stringify(entry.prev_value ?? null, null, 2)}
             </pre>
           </div>
-          <div className="rounded bg-slate-50 p-2">
-            <p className="mb-1 font-medium text-slate-500">After</p>
-            <pre className="whitespace-pre-wrap break-all text-slate-600">
+          <div className="rounded bg-surface-2 p-2">
+            <p className="mb-1 font-medium text-ink-muted">After</p>
+            <pre className="whitespace-pre-wrap break-all text-ink-muted">
               {JSON.stringify(entry.new_value ?? null, null, 2)}
             </pre>
           </div>

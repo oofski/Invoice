@@ -49,7 +49,7 @@ export function PdfPane({
 
   if (!invoiceId || !hasPdf) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-slate-400">
+      <div className="flex h-full items-center justify-center text-sm text-ink-subtle">
         No PDF available
       </div>
     );
@@ -57,7 +57,7 @@ export function PdfPane({
 
   if (error) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-red-500">
+      <div className="flex h-full items-center justify-center text-sm text-danger">
         Unable to load PDF.
       </div>
     );
@@ -66,7 +66,7 @@ export function PdfPane({
   if (loading || !objectUrl) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-ink-subtle" />
       </div>
     );
   }
@@ -75,7 +75,7 @@ export function PdfPane({
     <Suspense
       fallback={
         <div className="flex h-full items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+          <Loader2 className="h-6 w-6 animate-spin text-ink-subtle" />
         </div>
       }
     >

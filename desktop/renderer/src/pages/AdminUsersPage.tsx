@@ -192,7 +192,7 @@ export default function AdminUsersPage() {
             <div className="scroll-thin overflow-x-auto">
               <table className="w-full min-w-[900px] text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr className="border-b border-line bg-surface-2 text-left text-xs uppercase tracking-[0.12em] text-ink-muted">
                     <th className="px-4 py-2.5 font-medium">Name</th>
                     <th className="px-4 py-2.5 font-medium">Email</th>
                     <th className="px-4 py-2.5 font-medium">Role</th>
@@ -205,12 +205,12 @@ export default function AdminUsersPage() {
                   {users.map((u) => (
                     <tr
                       key={u.id}
-                      className="border-b border-slate-100 align-top"
+                      className="border-b border-line align-top"
                     >
-                      <td className="px-4 py-3 font-medium text-slate-900">
+                      <td className="px-4 py-3 font-medium text-ink">
                         {u.name}
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{u.email}</td>
+                      <td className="px-4 py-3 text-ink-muted">{u.email}</td>
                       <td className="px-4 py-3">
                         <Select
                           value={u.role}
@@ -238,8 +238,8 @@ export default function AdminUsersPage() {
                                 disabled={busyId === u.id}
                                 className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                                   on
-                                    ? "bg-blue-100 text-blue-700"
-                                    : "bg-slate-100 text-slate-400"
+                                    ? "bg-selected-bg text-accent"
+                                    : "bg-surface-2 text-ink-subtle"
                                 }`}
                               >
                                 {b}
@@ -247,7 +247,7 @@ export default function AdminUsersPage() {
                             );
                           })}
                         </div>
-                        <p className="mt-1 text-xs text-slate-400">
+                        <p className="mt-1 text-xs text-ink-subtle">
                           {(u.entity_access ?? []).length === 0
                             ? "All entities"
                             : ""}
@@ -261,8 +261,8 @@ export default function AdminUsersPage() {
                           disabled={busyId === u.id}
                           className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
                             u.is_active
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-slate-200 text-slate-500"
+                              ? "bg-success-soft-bg text-success-soft-fg"
+                              : "bg-surface-2 text-ink-muted"
                           }`}
                         >
                           {u.is_active ? "Active" : "Inactive"}
@@ -274,7 +274,7 @@ export default function AdminUsersPage() {
                             onClick={() => openEdit(u)}
                             disabled={busyId === u.id}
                             title="Edit user"
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-ink-muted hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Pencil className="h-3.5 w-3.5" /> Edit
                           </button>
@@ -282,7 +282,7 @@ export default function AdminUsersPage() {
                             onClick={() => resetPassword(u)}
                             disabled={busyId === u.id}
                             title="Reset password"
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-ink-muted hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <KeyRound className="h-3.5 w-3.5" /> Reset
                           </button>
@@ -294,7 +294,7 @@ export default function AdminUsersPage() {
                                 ? "You can't delete your own account"
                                 : "Delete user"
                             }
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-danger hover:bg-danger-soft-bg disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Trash2 className="h-3.5 w-3.5" /> Delete
                           </button>
@@ -313,7 +313,7 @@ export default function AdminUsersPage() {
         {editUser && (
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Name
               </label>
               {editForm.role === "executive" ? (
@@ -331,7 +331,7 @@ export default function AdminUsersPage() {
                       </option>
                     ))}
                   </Select>
-                  <p className="mt-1 text-xs text-slate-400">
+                  <p className="mt-1 text-xs text-ink-subtle">
                     An executive's name must match the approver they handle.
                   </p>
                 </>
@@ -345,7 +345,7 @@ export default function AdminUsersPage() {
               )}
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Email
               </label>
               <Input
@@ -357,7 +357,7 @@ export default function AdminUsersPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Role
               </label>
               <Select
@@ -395,12 +395,12 @@ export default function AdminUsersPage() {
       >
         {resetInfo && (
           <div className="space-y-4">
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-ink-muted">
               New temporary password for <strong>{resetInfo.name}</strong>. Share
               it securely — they'll be asked to change it on next sign-in.
             </p>
-            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <code className="flex-1 break-all font-mono text-sm text-slate-800">
+            <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 p-3">
+              <code className="flex-1 break-all font-mono text-sm text-ink">
                 {resetInfo.password}
               </code>
               <Button size="sm" variant="secondary" onClick={copyResetTemp}>
@@ -429,12 +429,12 @@ export default function AdminUsersPage() {
       <Modal open={addOpen} onClose={closeAdd} title="Create user">
         {tempPassword ? (
           <div className="space-y-4">
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-ink-muted">
               User created. Share this temporary password — they will be asked to
               change it on first sign-in.
             </p>
-            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <code className="flex-1 break-all font-mono text-sm text-slate-800">
+            <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 p-3">
+              <code className="flex-1 break-all font-mono text-sm text-ink">
                 {tempPassword}
               </code>
               <Button size="sm" variant="secondary" onClick={copyTemp}>
@@ -453,7 +453,7 @@ export default function AdminUsersPage() {
         ) : (
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Name
               </label>
               {form.role === "executive" ? (
@@ -471,7 +471,7 @@ export default function AdminUsersPage() {
                       </option>
                     ))}
                   </Select>
-                  <p className="mt-1 text-xs text-slate-400">
+                  <p className="mt-1 text-xs text-ink-subtle">
                     An executive's name must match the approver they handle, so
                     invoices route to them.
                   </p>
@@ -485,7 +485,7 @@ export default function AdminUsersPage() {
               )}
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Email
               </label>
               <Input
@@ -498,7 +498,7 @@ export default function AdminUsersPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-ink-muted">
                 Role
               </label>
               <Select
