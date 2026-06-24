@@ -66,12 +66,67 @@ export async function processInvoiceAI(
   try {
     const result = await runRulesPipeline(env, extracted);
 
+    // Preserve manually-added lines across reprocess (v1.1.9). An accountant/admin
+    // may have added a line the extractor missed; reprocess re-runs extraction and
+    // would otherwise drop it. Capture those lines now (before the DELETE below) and
+    // keep only the ones the fresh extraction did NOT already reproduce — matched by
+    // normalized description AND amount (to the cent) — so a now-extracted line isn't
+    // duplicated. They're re-inserted after the AI lines further down.
+    const manualLines =
+      (
+        await env.DB.prepare(
+          `SELECT description, amount, gl_category, item_type, confidence_level,
+                  requires_review, overridden_by
+             FROM line_items
+            WHERE invoice_id = ? AND logic_path = 'MANUAL ADD'`,
+        )
+          .bind(invoiceId)
+          .all<{
+            description: string | null;
+            amount: number | null;
+            gl_category: string | null;
+            item_type: string | null;
+            confidence_level: string | null;
+            requires_review: number | null;
+            overridden_by: string | null;
+          }>()
+      ).results ?? [];
+    const normDesc = (s: string | null | undefined) =>
+      (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+    const cents = (n: number | null | undefined) => Math.round((n ?? 0) * 100);
+    const aiKeys = new Set(
+      result.prompt3.map((li) => {
+        const amt =
+          typeof li.Amount === "number" ? li.Amount : parseAmount(String(li.Amount));
+        return `${normDesc(li.LineItemDescription)}|${cents(amt)}`;
+      }),
+    );
+    const preserved = manualLines.filter(
+      (m) => !aiKeys.has(`${normDesc(m.description)}|${cents(m.amount)}`),
+    );
+
     // Reconciliation guard (v1.1.8 B): if the coded/itemized lines + tax don't
     // reconcile to the invoice total (beyond tolerance), append ONE synthetic
     // REQUIRES_MANUAL_REVIEW line for the gap. amount=gap keeps Σ lines honest;
     // its requires_review flag (set by the existing export gate below, since its
     // category is REQUIRES_MANUAL_REVIEW) blocks export until a human verifies.
-    const recon = reconcile(extracted);
+    // Count the preserved manual lines toward the reconciliation so a manual line
+    // that fills the gap isn't ALSO represented by a synthetic RECONCILE line
+    // (the most common reason a line was added in the first place).
+    const reconInput = preserved.length
+      ? {
+          ...extracted,
+          line_items: [
+            ...extracted.line_items,
+            ...preserved.map((m) => ({
+              description: m.description ?? "",
+              amount: m.amount ?? 0,
+              tax: null,
+            })),
+          ],
+        }
+      : extracted;
+    const recon = reconcile(reconInput);
     if (recon.flagged && recon.syntheticLine) {
       result.prompt3.push({
         BusinessEntity: result.prompt1.Business as BusinessEntity,
@@ -144,6 +199,37 @@ export async function processInvoiceAI(
     );
     if (stmts.length) await env.DB.batch(stmts);
 
+    // Re-insert the preserved manual lines (computed above) after the AI lines.
+    // business/class are forced NULL so the header-coded reprocess output keeps the
+    // export invariant ("all leaves carry business/class, or none do").
+    if (preserved.length) {
+      const base = result.prompt3.length;
+      const manualStmts = preserved.map((m, i) =>
+        env.DB.prepare(
+          `INSERT INTO line_items (id, invoice_id, description, amount, business, class,
+             gl_category, item_type, confidence_level, logic_path, requires_review,
+             manually_overridden, overridden_by, sort_order)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ).bind(
+          uuid(),
+          invoiceId,
+          m.description,
+          m.amount,
+          null,
+          null,
+          m.gl_category,
+          m.item_type,
+          m.confidence_level,
+          "MANUAL ADD",
+          m.requires_review ?? 0,
+          1,
+          m.overridden_by,
+          base + i,
+        ),
+      );
+      await env.DB.batch(manualStmts);
+    }
+
     // Create/refresh the approval routed to the final approver.
     const approver = await resolveApproverUser(env, result.finalApprover);
     await env.DB.prepare("DELETE FROM approvals WHERE invoice_id = ?")
@@ -173,7 +259,8 @@ export async function processInvoiceAI(
         class: result.prompt1.Class,
         approved_by: result.finalApprover,
         prompt1Approver: result.prompt1.ApprovedBy,
-        lineItemCount: result.prompt3.length,
+        lineItemCount: result.prompt3.length + preserved.length,
+        preservedManualLines: preserved.length || undefined,
       },
       note: `AI processing complete. Routed to ${result.finalApprover} (Prompt 2 override of ${result.prompt1.ApprovedBy}).`,
     });
@@ -196,7 +283,7 @@ export async function processInvoiceAI(
     return {
       status: INVOICE_STATUS.PENDING_APPROVAL,
       approver: result.finalApprover,
-      lineItemCount: result.prompt3.length,
+      lineItemCount: result.prompt3.length + preserved.length,
     };
   } catch (err) {
     await audit(env, {

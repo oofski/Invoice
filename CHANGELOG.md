@@ -5,6 +5,17 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.1.9] — 2026-06-24
+
+### Changed
+- **Manually-added lines now survive reprocessing.** When an accountant or admin
+  has added a line the scanner missed and the invoice is later **reprocessed**,
+  the added line is **kept** instead of being wiped — unless the fresh scan now
+  picks it up on its own (matched by description and amount), in which case the
+  duplicate is dropped. The completeness check also counts the kept line, so a
+  manual line that already fills the gap no longer triggers a redundant
+  "Extraction incomplete" review line.
+
 ## [1.1.8] — 2026-06-24
 
 ### Added
@@ -409,6 +420,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.1.9]: https://github.com/oofski/Invoice/releases/tag/v1.1.9
 [1.1.8]: https://github.com/oofski/Invoice/releases/tag/v1.1.8
 [1.1.7]: https://github.com/oofski/Invoice/releases/tag/v1.1.7
 [1.1.6]: https://github.com/oofski/Invoice/releases/tag/v1.1.6
