@@ -5,6 +5,30 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.1.7] — 2026-06-24
+
+### Added
+- **Edit & re-route invoices (accountant/admin).** On an invoice's detail, an
+  **Edit routing** control lets accountants/admins fix the **business, class
+  (location), and approver** when the OCR routed something wrong. Changing the
+  business/class **auto-suggests the correct approver** from the routing rules
+  (you can override it), and saving **re-queues the invoice to that approver and
+  emails them** — so a mis-read invoice can be corrected and re-sent in seconds.
+- **"Send for manual review" (executives).** When an approver is unsure about an
+  invoice, a new button returns it to the **accountant** with a required note.
+  It leaves the exec's queue and shows up under a new **"Routing Review"** status
+  for the accountant, who can read the note, fix the routing, and re-send it for
+  approval.
+- **Olive Garden** is now mapped to **Retail / Product Costs** (beauty brushes,
+  treated as retail/inventory) so it stops getting miscategorized.
+
+### Fixed
+- **Reminder emails are now honest.** The "Remind approvers" tool no longer
+  reports a false "sent" when email isn't set up — it clearly says **"Email
+  isn't configured"** (or shows real sent/failed counts and surfaces send
+  errors). To actually send mail, an admin must set `RESEND_API_KEY` and a
+  verified `RESEND_FROM_EMAIL` domain in the backend.
+
 ## [1.1.6] — 2026-06-24
 
 ### Added
@@ -343,6 +367,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.1.7]: https://github.com/oofski/Invoice/releases/tag/v1.1.7
 [1.1.6]: https://github.com/oofski/Invoice/releases/tag/v1.1.6
 [1.1.5]: https://github.com/oofski/Invoice/releases/tag/v1.1.5
 [1.1.4]: https://github.com/oofski/Invoice/releases/tag/v1.1.4

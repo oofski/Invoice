@@ -10,6 +10,7 @@ import type { ApproverPendingCount } from "@/lib/types";
 interface RemindResult {
   sent: number;
   failed: number;
+  emailConfigured: boolean;
   results: { name: string; ok: boolean; reason?: string }[];
 }
 
@@ -108,11 +109,19 @@ export function RemindApproversModal({
         "/api/invoices/remind-approvers",
         { recipients, note: trimmed || undefined },
       );
+      if (res.emailConfigured === false) {
+        // Email isn't set up — nothing was sent. Keep the modal open so the
+        // exec/admin isn't misled into thinking reminders went out.
+        toast.error(
+          "Email isn't configured — no reminders were sent. Ask your admin to set up email (Resend).",
+        );
+        return;
+      }
       toast.success(
-        `Reminders sent: ${res.sent}` +
-          (res.failed ? `, ${res.failed} skipped` : ""),
+        `${res.sent} sent` + (res.failed ? `, ${res.failed} failed` : ""),
       );
-      onClose();
+      // Only dismiss when at least one reminder actually went out.
+      if (res.sent > 0) onClose();
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : "Failed to send reminders",

@@ -11,6 +11,20 @@ interface InvoiceEmailData {
   invoiceNumber: string;
 }
 
+/**
+ * Outcome of an email send attempt. `send()` (and the senders that wrap it)
+ * NEVER throw — they always resolve to one of these so callers can report an
+ * honest per-recipient result (configured/unconfigured, sent/failed).
+ */
+export type EmailResult =
+  | { ok: true }
+  | { ok: false; reason: "not_configured" | "send_failed"; detail?: string };
+
+/** True when transactional email is configured (a Resend API key is present). */
+export function emailConfigured(env: Env): boolean {
+  return !!env.RESEND_API_KEY;
+}
+
 function money(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
@@ -25,25 +39,47 @@ function details(d: InvoiceEmailData) {
   return `<table style="width:100%;border-collapse:collapse;margin:8px 0 16px">${row("Vendor", d.vendor)}${row("Invoice #", d.invoiceNumber)}${row("Amount", money(d.totalAmount))}${row("Entity", d.business || "—")}${row("Due Date", d.dueDate || "—")}</table>`;
 }
 
-async function send(env: Env, to: string, subject: string, html: string) {
+/**
+ * Sends one transactional email via Resend. NEVER throws: returns an
+ * `EmailResult` describing the outcome so callers can report honestly.
+ *   - no API key  -> { ok:false, reason:"not_configured" } (still warn-logs)
+ *   - non-2xx     -> { ok:false, reason:"send_failed", detail:<status> }
+ *   - fetch throws-> { ok:false, reason:"send_failed", detail:<message> }
+ *   - else        -> { ok:true }
+ */
+async function send(
+  env: Env,
+  to: string,
+  subject: string,
+  html: string,
+): Promise<EmailResult> {
   if (!env.RESEND_API_KEY) {
     console.warn("[email] RESEND_API_KEY not set; skipping email to", to);
-    return;
+    return { ok: false, reason: "not_configured" };
   }
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${env.RESEND_API_KEY}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      from: env.RESEND_FROM_EMAIL || "invoices@example.com",
-      to,
-      subject,
-      html,
-    }),
-  });
-  if (!res.ok) console.error("[email] resend error:", res.status, await res.text());
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${env.RESEND_API_KEY}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        from: env.RESEND_FROM_EMAIL || "invoices@example.com",
+        to,
+        subject,
+        html,
+      }),
+    });
+    if (!res.ok) {
+      console.error("[email] resend error:", res.status, await res.text());
+      return { ok: false, reason: "send_failed", detail: String(res.status) };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("[email] resend fetch threw:", err);
+    return { ok: false, reason: "send_failed", detail: String(err) };
+  }
 }
 
 export function sendApprovalEmail(env: Env, to: string, d: InvoiceEmailData) {
@@ -100,4 +136,19 @@ export function sendRejectionEmail(
     `<p style="font-size:14px"><strong>${rejectedBy}</strong> rejected this invoice:</p><blockquote style="margin:8px 0 16px;padding:12px 16px;background:#fef2f2;border-left:3px solid #dc2626;border-radius:4px;font-size:14px">${note}</blockquote>${details(d)}`,
   );
   return send(env, to, `Rejected: ${d.vendor} — ${money(d.totalAmount)}`, html);
+}
+
+export function sendManualReviewEmail(
+  env: Env,
+  to: string,
+  d: InvoiceEmailData,
+  execName: string,
+  note: string,
+): Promise<EmailResult> {
+  const html = shell(
+    env,
+    "An invoice needs routing review",
+    `<p style="font-size:14px"><strong>${execName}</strong> sent this invoice back for manual routing review:</p><blockquote style="margin:8px 0 16px;padding:12px 16px;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;font-size:14px">${note}</blockquote>${details(d)}<p style="font-size:14px">Open InvoiceIQ to re-route it to the correct approver.</p>`,
+  );
+  return send(env, to, `Needs routing review: ${d.vendor}`, html);
 }

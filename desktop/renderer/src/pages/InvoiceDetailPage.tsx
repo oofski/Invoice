@@ -48,6 +48,13 @@ export default function InvoiceDetailPage() {
   const canSeeAudit =
     profile.role === ROLES.ACCOUNTANT || profile.role === ROLES.ADMIN;
 
+  // Re-routing (Feature A) is an accountant/admin action and is blocked once an
+  // invoice has been exported (the Worker returns 409 in that case).
+  const canEditRouting =
+    !!invoice &&
+    (profile.role === ROLES.ACCOUNTANT || profile.role === ROLES.ADMIN) &&
+    invoice.status !== INVOICE_STATUS.EXPORTED;
+
   async function reprocess() {
     setReprocessing(true);
     try {
@@ -146,7 +153,11 @@ export default function InvoiceDetailPage() {
 
         {/* Right: data + line items + audit */}
         <div className="scroll-thin min-h-0 overflow-y-auto p-5">
-          <InvoiceDataPanel invoice={invoice} />
+          <InvoiceDataPanel
+            invoice={invoice}
+            canEditRouting={canEditRouting}
+            onRerouted={refetch}
+          />
 
           {reviewCount > 0 && (
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-danger-soft-fg/30 bg-danger-soft-bg p-3 text-sm text-danger-soft-fg">

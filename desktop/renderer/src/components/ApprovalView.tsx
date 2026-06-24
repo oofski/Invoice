@@ -15,6 +15,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   BellRing,
+  AlertTriangle,
 } from "lucide-react";
 import { PdfPane } from "@/components/PdfPane";
 import { LineItemsTable } from "@/components/LineItemsTable";
@@ -218,6 +219,8 @@ function ApprovalDetail({
     `/api/invoices/${invoiceId}`,
   );
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewNote, setReviewNote] = useState("");
   const [splitOpen, setSplitOpen] = useState(false);
   const [note, setNote] = useState("");
   const [comment, setComment] = useState("");
@@ -264,6 +267,29 @@ function ApprovalDetail({
       onDecided();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Reject failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendForReview() {
+    if (!reviewNote.trim()) {
+      toast.error("A note is required");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.post(`/api/invoices/${invoiceId}/manual-review`, {
+        note: reviewNote.trim(),
+      });
+      toast.success("Sent for manual review");
+      setReviewOpen(false);
+      setReviewNote("");
+      onDecided();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Manual review failed",
+      );
     } finally {
       setBusy(false);
     }
@@ -395,6 +421,14 @@ function ApprovalDetail({
                 placeholder="Optional comment (added to the approval)…"
                 className="w-full rounded-lg border border-line bg-surface p-3 text-sm text-ink placeholder:text-ink-subtle outline-none focus:border-accent focus:ring-1 focus:ring-ring"
               />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setReviewOpen(true)}
+                className="w-full justify-center text-warning-soft-fg"
+              >
+                <AlertTriangle className="h-4 w-4" /> Send for manual review
+              </Button>
             </div>
           ) : (
             <div className="mt-6 rounded-lg bg-surface-2 p-3 text-center text-sm text-ink-muted">
@@ -472,6 +506,36 @@ function ApprovalDetail({
             disabled={!note.trim()}
           >
             Confirm rejection
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        title="Send for manual review"
+      >
+        <p className="mb-2 text-sm text-ink-muted">
+          Send back to the accountant to fix routing. A short note is required.
+        </p>
+        <textarea
+          autoFocus
+          value={reviewNote}
+          onChange={(e) => setReviewNote(e.target.value)}
+          rows={4}
+          placeholder="What needs to be fixed…"
+          className="w-full rounded-lg border border-line bg-surface p-3 text-sm text-ink placeholder:text-ink-subtle outline-none focus:border-accent focus:ring-1 focus:ring-ring"
+        />
+        <div className="mt-3 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setReviewOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={sendForReview}
+            loading={busy}
+            disabled={!reviewNote.trim()}
+          >
+            Send for review
           </Button>
         </div>
       </Modal>

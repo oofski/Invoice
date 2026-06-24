@@ -9,6 +9,7 @@ import {
 const STATUS_STYLES: Record<string, string> = {
   [INVOICE_STATUS.PROCESSING]: "bg-surface-2 text-ink-muted",
   [INVOICE_STATUS.PENDING_APPROVAL]: "bg-warning-soft-bg text-warning-soft-fg",
+  [INVOICE_STATUS.NEEDS_REVIEW]: "bg-warning-soft-bg text-warning-soft-fg",
   [INVOICE_STATUS.APPROVED]: "bg-success-soft-bg text-success-soft-fg",
   [INVOICE_STATUS.REJECTED]: "bg-danger-soft-bg text-danger-soft-fg",
   [INVOICE_STATUS.EXPORTED]: "bg-info-soft-bg text-info-soft-fg",
@@ -17,6 +18,7 @@ const STATUS_STYLES: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
   [INVOICE_STATUS.PROCESSING]: "Processing",
   [INVOICE_STATUS.PENDING_APPROVAL]: "Awaiting Approval",
+  [INVOICE_STATUS.NEEDS_REVIEW]: "Needs Routing Review",
   [INVOICE_STATUS.APPROVED]: "Approved",
   [INVOICE_STATUS.REJECTED]: "Rejected",
   [INVOICE_STATUS.EXPORTED]: "Exported",

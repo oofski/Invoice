@@ -11,16 +11,25 @@ import {
 } from "../lib/db";
 import { processInvoiceAI, ingestInvoicePdf } from "../lib/process";
 import { getPdf, deletePdf } from "../lib/storage";
-import { sendReminderEmail, sendRejectionEmail, sendApproverDigestEmail } from "../lib/email";
+import {
+  sendReminderEmail,
+  sendRejectionEmail,
+  sendApproverDigestEmail,
+  sendApprovalEmail,
+  sendManualReviewEmail,
+  emailConfigured,
+} from "../lib/email";
 import { nowIso, hoursSince, sameName, uuid } from "../lib/util";
 import {
   findVendorMapping,
   loadVendorMappings,
   resolveGlAccount,
+  routeApprover,
 } from "../lib/rules";
 import {
   AUDIT_ACTION,
   APPROVAL_STATUS,
+  APPROVERS,
   BUSINESS_CLASSES,
   BUSINESS_ENTITIES,
   INVOICE_STATUS,
@@ -28,6 +37,7 @@ import {
   REQUIRES_MANUAL_REVIEW,
   ROLES,
   TYPE_GL,
+  type BusinessEntity,
 } from "../lib/constants";
 import type {
   InvoiceRow,
@@ -196,6 +206,164 @@ invoices.get("/:id/pdf", async (c) => {
   });
 });
 
+// ----- GET /:id/suggest-approver --------------------------------------
+// Feature A (v1.1.7): when an accountant/admin edits an invoice's
+// business/class, suggest the approver the routing rules would pick so the
+// edit form can pre-fill it (still editable). Registered BEFORE GET /:id so
+// it isn't shadowed (mirrors the /:id/pdf-before-/:id pattern).
+invoices.get("/:id/suggest-approver", async (c) => {
+  if (!hasRole(c, ROLES.ACCOUNTANT, ROLES.ADMIN))
+    return c.json({ error: "Forbidden" }, 403);
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+  if (!canViewInvoice(c, inv)) return c.json({ error: "Forbidden" }, 403);
+
+  const business = c.req.query("business");
+  if (!business || !(BUSINESS_ENTITIES as readonly string[]).includes(business))
+    return c.json({ error: `Invalid business "${business ?? ""}"` }, 400);
+  // class is accepted for validation / forward-compat only — routeApprover keys
+  // on business, not class. Validate it (when present) against the business.
+  const klass = c.req.query("class");
+  if (klass) {
+    const valid = BUSINESS_CLASSES[business] ?? [];
+    if (!valid.includes(klass))
+      return c.json(
+        { error: `Invalid class "${klass}" for business "${business}"` },
+        400,
+      );
+  }
+
+  const vendorMapping = findVendorMapping(
+    inv.vendor,
+    await loadVendorMappings(c.env),
+  );
+  const liRows = await c.env.DB.prepare(
+    "SELECT description, gl_category, amount FROM line_items WHERE invoice_id = ?",
+  )
+    .bind(id)
+    .all<{ description: string | null; gl_category: string | null; amount: number | null }>();
+  const lines = liRows.results ?? [];
+  const descriptions = lines.map((l) => l.description ?? "").filter(Boolean);
+  const glCategories = lines
+    .map((l) => l.gl_category ?? "")
+    .filter(Boolean);
+
+  const { approver, logic } = routeApprover({
+    business: business as BusinessEntity,
+    vendor: inv.vendor,
+    vendorMapping,
+    total: inv.total_amount,
+    descriptions,
+    glCategories,
+    salesTaxPresent: (inv.sales_tax ?? 0) > 0,
+  });
+  return c.json({ approver, logic });
+});
+
+// ----- POST /:id/reroute ----------------------------------------------
+// Feature A (v1.1.7): accountant/admin saves edited routing → reassign the
+// invoice's business/class/approver, reset it to PENDING_APPROVAL, rebuild the
+// approvals row (clearing any prior decision so no stale banner), email the new
+// approver (best-effort), and audit. Executives are excluded. Registered BEFORE
+// GET /:id / PATCH /:id so it isn't shadowed.
+invoices.post("/:id/reroute", async (c) => {
+  if (!hasRole(c, ROLES.ACCOUNTANT, ROLES.ADMIN))
+    return c.json({ error: "Forbidden" }, 403);
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+  if (!canViewInvoice(c, inv)) return c.json({ error: "Forbidden" }, 403);
+  if (inv.status === INVOICE_STATUS.EXPORTED)
+    return c.json({ error: "Invoice already exported" }, 409);
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    business?: string;
+    class?: string;
+    approved_by?: string;
+  };
+  const business = body.business;
+  if (!business || !(BUSINESS_ENTITIES as readonly string[]).includes(business))
+    return c.json({ error: `Invalid business "${business ?? ""}"` }, 400);
+  // class is optional; when given it must belong to the (new) business.
+  let klass: string | null = inv.class;
+  if (body.class !== undefined) {
+    if (body.class) {
+      const valid = BUSINESS_CLASSES[business] ?? [];
+      if (!valid.includes(body.class))
+        return c.json(
+          { error: `Invalid class "${body.class}" for business "${business}"` },
+          400,
+        );
+    }
+    klass = body.class || null;
+  }
+  const approvedBy = body.approved_by?.trim();
+  if (!approvedBy || !(APPROVERS as readonly string[]).includes(approvedBy))
+    return c.json({ error: `Invalid approver "${approvedBy ?? ""}"` }, 400);
+
+  const approverUser = await resolveApproverUser(c.env, approvedBy);
+
+  await c.env.DB.prepare(
+    "UPDATE invoices SET business = ?, class = ?, approved_by = ?, status = ? WHERE id = ?",
+  )
+    .bind(business, klass, approvedBy, INVOICE_STATUS.PENDING_APPROVAL, id)
+    .run();
+
+  // Rebuild the approvals row from scratch so any prior decision_note /
+  // decided_at / reminder_* is cleared (no stale rejection/manual-review banner).
+  await c.env.DB.prepare("DELETE FROM approvals WHERE invoice_id = ?")
+    .bind(id)
+    .run();
+  await c.env.DB.prepare(
+    "INSERT INTO approvals (id, invoice_id, assigned_to, assigned_to_name, status) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(uuid(), id, approverUser?.id ?? null, approvedBy, APPROVAL_STATUS.PENDING)
+    .run();
+
+  // Best-effort: notify the new approver. send() never throws.
+  let emailed = false;
+  if (approverUser?.email) {
+    const result = await sendApprovalEmail(c.env, approverUser.email, {
+      invoiceId: id,
+      vendor: inv.vendor,
+      totalAmount: inv.total_amount,
+      business,
+      dueDate: inv.due_date,
+      invoiceNumber: inv.invoice_number,
+    });
+    emailed = result.ok;
+  }
+
+  const u = user(c);
+  await audit(c.env, {
+    invoiceId: id,
+    userId: u.id,
+    action: AUDIT_ACTION.INVOICE_REROUTED,
+    prevValue: {
+      business: inv.business,
+      class: inv.class,
+      approved_by: inv.approved_by,
+      status: inv.status,
+    },
+    newValue: {
+      business,
+      class: klass,
+      approved_by: approvedBy,
+      status: INVOICE_STATUS.PENDING_APPROVAL,
+    },
+    note: `Re-routed to ${approvedBy} by ${u.name}`,
+  });
+
+  const updated = await getInvoice(c.env, id);
+  return c.json({
+    invoice: updated && hydrateInvoice(updated),
+    approver: approvedBy,
+    emailed,
+    emailConfigured: emailConfigured(c.env),
+  });
+});
+
 // ----- GET /approvers/pending-counts ----------------------------------
 // Exec/admin digest support: how many PENDING_APPROVAL invoices each distinct
 // approver name carries, plus whether that name maps to an active, emailable
@@ -247,6 +415,7 @@ invoices.post("/remind-approvers", async (c) => {
   if (recipients.length === 0)
     return c.json({ error: "At least one recipient is required" }, 400);
   const note = body.note?.trim() || undefined;
+  const configured = emailConfigured(c.env);
 
   let sent = 0;
   let failed = 0;
@@ -284,24 +453,38 @@ invoices.post("/remind-approvers", async (c) => {
       continue;
     }
 
-    try {
-      await sendApproverDigestEmail(c.env, target.email, target.name, pendingCount, note);
-      sent++;
-      results.push({ name: target.name, ok: true });
-      await audit(c.env, {
-        invoiceId: null,
-        userId: user(c).id,
-        action: AUDIT_ACTION.REMINDER_SENT,
-        note: `Approver digest sent to ${target.name} (${target.email}) — ${pendingCount} pending${note ? `: ${note}` : ""}`,
-      });
-    } catch (e) {
-      console.error("[remind-approvers] email failed:", e);
+    // send() never throws — it returns an EmailResult we inspect for honesty.
+    const result = await sendApproverDigestEmail(
+      c.env,
+      target.email,
+      target.name,
+      pendingCount,
+      note,
+    );
+    if (!result.ok) {
       failed++;
-      results.push({ name: target.name, ok: false, reason: "Email send failed" });
+      // No audit on not_configured — nothing was actually sent or attempted.
+      results.push({
+        name: target.name,
+        ok: false,
+        reason:
+          result.reason === "not_configured"
+            ? "Email not configured"
+            : "Email send failed",
+      });
+      continue;
     }
+    sent++;
+    results.push({ name: target.name, ok: true });
+    await audit(c.env, {
+      invoiceId: null,
+      userId: user(c).id,
+      action: AUDIT_ACTION.REMINDER_SENT,
+      note: `Approver digest sent to ${target.name} (${target.email}) — ${pendingCount} pending${note ? `: ${note}` : ""}`,
+    });
   }
 
-  return c.json({ sent, failed, results });
+  return c.json({ sent, failed, emailConfigured: configured, results });
 });
 
 // ----- GET /:id --------------------------------------------------------
@@ -792,6 +975,56 @@ invoices.post("/:id/reject", async (c) => {
     } catch (e) { console.error("[reject] email failed:", e); }
   }
   return c.json({ status: INVOICE_STATUS.REJECTED });
+});
+
+// ----- POST /:id/manual-review ----------------------------------------
+// Feature B (v1.1.7): the assigned executive (or admin) sends an invoice back
+// to the accountants for routing review with a required note. It leaves the
+// exec queue (status → NEEDS_REVIEW), keeps the note on the approvals row for
+// the accountant, audits, and best-effort emails the accountants. Modeled on
+// POST /:id/reject. Only allowed from PENDING_APPROVAL.
+invoices.post("/:id/manual-review", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({}));
+  const note = (body as { note?: string }).note?.trim();
+  if (!note) return c.json({ error: "A review note is required" }, 400);
+
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+  const u = user(c);
+  const assigned = u.role === ROLES.EXECUTIVE && sameName(inv.approved_by, u.name);
+  if (!assigned && u.role !== ROLES.ADMIN)
+    return c.json({ error: "Only the assigned executive can send for review" }, 403);
+  if (inv.status !== INVOICE_STATUS.PENDING_APPROVAL)
+    return c.json({ error: "Only a pending invoice can be sent for manual review" }, 409);
+
+  await c.env.DB.prepare("UPDATE invoices SET status = ? WHERE id = ?")
+    .bind(INVOICE_STATUS.NEEDS_REVIEW, id)
+    .run();
+  // Keep the approvals row PENDING but stash the exec's note (the accountant
+  // sees it as the reason this came back for routing review).
+  await c.env.DB.prepare(
+    "UPDATE approvals SET status = ?, decision_note = ?, decided_at = ? WHERE invoice_id = ?",
+  )
+    .bind(APPROVAL_STATUS.PENDING, note, nowIso(), id)
+    .run();
+  await audit(c.env, {
+    invoiceId: id, userId: u.id, action: AUDIT_ACTION.MANUAL_REVIEW_REQUESTED,
+    prevValue: { status: inv.status }, newValue: { status: INVOICE_STATUS.NEEDS_REVIEW },
+    note: `Sent for manual review by ${u.name}: ${note}`,
+  });
+
+  const accountants = await c.env.DB.prepare(
+    "SELECT * FROM users WHERE role = ? AND is_active = 1",
+  ).bind(ROLES.ACCOUNTANT).all<UserRow>();
+  for (const acc of accountants.results ?? []) {
+    // send() never throws — best-effort, no need to wrap.
+    await sendManualReviewEmail(c.env, acc.email, {
+      invoiceId: id, vendor: inv.vendor, totalAmount: inv.total_amount,
+      business: inv.business, dueDate: inv.due_date, invoiceNumber: inv.invoice_number,
+    }, u.name, note);
+  }
+  return c.json({ status: INVOICE_STATUS.NEEDS_REVIEW });
 });
 
 // ----- POST /:id/remind -----------------------------------------------

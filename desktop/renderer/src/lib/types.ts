@@ -165,6 +165,7 @@ export interface DashboardStats {
   totalPending: number;
   awaitingApproval: number;
   needsReview: number;
+  needsRouting: number;
   exportReady: number;
   rejected: number;
   exportedThisMonth: number;

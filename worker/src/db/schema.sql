@@ -222,7 +222,8 @@ INSERT OR IGNORE INTO vendor_mappings (id, vendor_name, business_entity, class, 
  ('ven-togo','TOGO','Admin',NULL,'Bonnie',0,NULL),
  ('ven-guthriefrey','Guthrie & Frey','Admin',NULL,'Bonnie',0,NULL),
  ('ven-globalsight','Global Sight','Admin',NULL,'Bonnie',0,NULL),
- ('ven-adelman','Adelman','Admin',NULL,'Bonnie',0,NULL);
+ ('ven-adelman','Adelman','Admin',NULL,'Bonnie',0,NULL),
+ ('ven-olivegarden','Olive Garden',NULL,NULL,NULL,1,'Retail / Product Costs');
 
 -- =====================================================================
 -- LIVE D1 MIGRATION — run once against an existing (pre-split) database.
@@ -236,3 +237,5 @@ ALTER TABLE invoices ADD COLUMN split_type TEXT;
 CREATE TABLE IF NOT EXISTS invoice_allocations (id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE, business TEXT NOT NULL, class TEXT NOT NULL, percentage REAL, amount REAL NOT NULL, gl_account TEXT, source TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
 CREATE INDEX IF NOT EXISTS idx_allocations_invoice ON invoice_allocations(invoice_id);
 INSERT OR IGNORE INTO location_mappings (id, address, keywords, business, class, default_approver) VALUES ('loc-nala','Nala','["Nala"]','Nala','Nala','Bonnie');
+-- v1.1.7: Olive Garden (beauty brushes) → Retail / Product Costs (inventory/retail).
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-olivegarden','Olive Garden',NULL,NULL,NULL,1,'Retail / Product Costs');

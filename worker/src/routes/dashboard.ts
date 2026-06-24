@@ -22,7 +22,7 @@ dashboard.get("/stats", async (c) => {
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
   let totalPending = 0, awaitingApproval = 0, exportReady = 0, rejected = 0,
-    exportedThisMonth = 0, overdueCount = 0;
+    exportedThisMonth = 0, overdueCount = 0, needsRouting = 0;
   const byEntity: Record<string, { count: number; total: number }> = {};
   const byStatus: Record<string, number> = {};
 
@@ -38,6 +38,7 @@ dashboard.get("/stats", async (c) => {
       awaitingApproval++;
       if (hoursSince(i.created_at) >= OVERDUE_HOURS) overdueCount++;
     }
+    if (i.status === INVOICE_STATUS.NEEDS_REVIEW) needsRouting++;
     if (i.status === INVOICE_STATUS.APPROVED && !reviewIds.has(i.id)) exportReady++;
     if (i.status === INVOICE_STATUS.REJECTED) rejected++;
     if (i.status === INVOICE_STATUS.EXPORTED && i.exported_at && new Date(i.exported_at) >= monthStart)
@@ -45,7 +46,7 @@ dashboard.get("/stats", async (c) => {
   }
 
   return c.json({
-    totalPending, awaitingApproval, needsReview: reviewIds.size, exportReady,
+    totalPending, awaitingApproval, needsReview: reviewIds.size, needsRouting, exportReady,
     rejected, exportedThisMonth, overdueCount,
     byEntity: Object.entries(byEntity).map(([entity, v]) => ({ entity, count: v.count, total: v.total })),
     byStatus: Object.entries(byStatus).map(([status, count]) => ({ status, count })),

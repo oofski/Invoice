@@ -7,6 +7,7 @@ import {
   XCircle,
   FileCheck,
   BellRing,
+  Undo2,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCard } from "@/components/StatCard";
@@ -31,6 +32,7 @@ const STATUS_TABS = [
   { key: INVOICE_STATUS.PROCESSING, label: "Processing" },
   { key: INVOICE_STATUS.PENDING_APPROVAL, label: "Awaiting Approval" },
   { key: "REVIEW", label: "Needs Review" },
+  { key: INVOICE_STATUS.NEEDS_REVIEW, label: "Routing Review" },
   { key: INVOICE_STATUS.APPROVED, label: "Export Ready" },
   { key: INVOICE_STATUS.REJECTED, label: "Rejected" },
   { key: INVOICE_STATUS.EXPORTED, label: "Exported" },
@@ -133,7 +135,7 @@ export default function DashboardPage() {
 
       <div className="space-y-6 p-6">
         {/* Stat cards */}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
           <StatCard
             label="Total Pending"
             value={stats?.totalPending ?? "—"}
@@ -145,6 +147,12 @@ export default function DashboardPage() {
             value={stats?.awaitingApproval ?? "—"}
             tone="amber"
             icon={<CheckSquare className="h-4 w-4" />}
+          />
+          <StatCard
+            label="Routing Review"
+            value={stats?.needsRouting ?? "—"}
+            tone="amber"
+            icon={<Undo2 className="h-4 w-4" />}
           />
           <StatCard
             label="Needs Review"
