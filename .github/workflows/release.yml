@@ -52,6 +52,14 @@ jobs:
             echo "No desktop/renderer/package.json found; skipping renderer install."
           fi
 
+      # Guard: the entity Chart-of-Accounts maps are duplicated in the worker
+      # and the renderer (no shared package). They MUST stay identical or the UI
+      # would show one account number while the export emits another. Fail the
+      # release before building if they drift.
+      - name: Check COA sync (worker ↔ renderer)
+        shell: bash
+        run: node scripts/check-coa-sync.mjs
+
       # Build the renderer with the backend URL baked in. VITE_API_BASE_URL is
       # taken from a repository variable/secret of the same name and defaults to
       # empty if unset. Resilient to a renderer that has no build script.
