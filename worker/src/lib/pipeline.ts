@@ -7,11 +7,9 @@ import {
   matchLocation,
   routeApprover,
   codeLineItem,
-  resolveGlAccount,
 } from "./rules";
 import {
   CONFIDENCE_LEVEL,
-  REQUIRES_MANUAL_REVIEW,
   type BusinessEntity,
   type ClassName,
 } from "./constants";
@@ -74,32 +72,43 @@ export async function runRulesPipeline(
     };
   });
 
-  // Post-pass — non-school discount netting (v1.1.8 G). For each negative-amount
-  // line NOT already coded to "Discounts" (i.e. the entity has no Discounts
-  // account, so L0 fell through), net the discount into the invoice's dominant
-  // positive line's GL category — the line with the largest positive amount — so
-  // the credit reduces that same account (e.g. +$100 and -$25 both on GL X => net
-  // $75). Fall back to the vendor-mapping default category, else REQUIRES_MANUAL_REVIEW.
-  // (School lines already got "Discounts" in codeLineItem L0 and are skipped here.)
-  const dominantIdx = prompt3.reduce(
-    (best, l, i) =>
-      l.Amount > 0 && (best < 0 || l.Amount > prompt3[best].Amount) ? i : best,
-    -1,
-  );
-  const fallbackCategory =
-    resolveGlAccount(vendorMapping) /* gl_override / inventory / else MANUAL_REVIEW */;
-  for (const l of prompt3) {
-    if (l.Amount < 0 && l.Category !== "Discounts") {
-      const netCategory =
-        dominantIdx >= 0 ? prompt3[dominantIdx].Category : fallbackCategory;
-      l.Category = netCategory;
-      l.LogicPathUsed = "DISCOUNT NET";
-      // Confidence follows resolution: a real GL nets cleanly; only a stray
-      // unresolved fallback should still flag for review.
-      l.ConfidenceLevel =
-        netCategory === REQUIRES_MANUAL_REVIEW
-          ? CONFIDENCE_LEVEL.MANUAL_REVIEW
-          : CONFIDENCE_LEVEL.LOW;
+  // Post-pass — non-school discount DROP (v1.2.0 FIX 2). For entities WITHOUT a
+  // "Discounts" account (everything except IBW/Chicago, whose negatives L0 already
+  // coded to "Discounts"), we DON'T track the discount at all: REMOVE every
+  // negative-amount line that wasn't booked to "Discounts". Then, if the remaining
+  // positives overshoot the invoice subtotal by ≈ the dropped discount total
+  // (gross-price-then-discount invoices), reduce the DOMINANT positive line so the
+  // booked lines sum to the subtotal. School negatives (Category === "Discounts")
+  // are KEPT untouched. (v1.1.8's netting-into-dominant-GL is replaced by this drop.)
+  const droppedDiscountTotal = prompt3.reduce(
+    (s, l) => (l.Amount < 0 && l.Category !== "Discounts" ? s + l.Amount : s),
+    0,
+  ); // negative or 0
+  if (droppedDiscountTotal < 0) {
+    // Remove the non-school negative lines.
+    for (let i = prompt3.length - 1; i >= 0; i--) {
+      if (prompt3[i].Amount < 0 && prompt3[i].Category !== "Discounts") {
+        prompt3.splice(i, 1);
+      }
+    }
+    // If Σ(remaining positives) exceeds the subtotal by ≈ the dropped discount,
+    // reduce the dominant positive line so booked == subtotal (gross-price case).
+    const subtotal = x.subtotal;
+    if (subtotal != null) {
+      const posSum = prompt3.reduce((s, l) => (l.Amount > 0 ? s + l.Amount : s), 0);
+      const overshoot = Math.round((posSum - subtotal) * 100) / 100;
+      const tol = Math.max(0.02, Math.abs(subtotal) * 0.005);
+      if (overshoot > tol) {
+        const dominantIdx = prompt3.reduce(
+          (best, l, i) =>
+            l.Amount > 0 && (best < 0 || l.Amount > prompt3[best].Amount) ? i : best,
+          -1,
+        );
+        if (dominantIdx >= 0) {
+          prompt3[dominantIdx].Amount =
+            Math.round((prompt3[dominantIdx].Amount - overshoot) * 100) / 100;
+        }
+      }
     }
   }
 

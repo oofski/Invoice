@@ -189,8 +189,8 @@ INSERT OR IGNORE INTO location_mappings (id, address, keywords, business, class,
  ('loc-brookfield','3885 N Brookfield','["3885 N Brookfield","Brookfield"]','Neroli','Brookfield','Lori'),
  ('loc-shorewood','4005 N Downer','["4005 N Downer","Shorewood"]','SKNBar','Shorewood','Lisa'),
  ('loc-pewaukee','145 W Wisconsin','["145 W Wisconsin","Pewaukee"]','SKNBar','Pewaukee','Lisa'),
- ('loc-milwaukee','327 E St Paul 5th Floor','["327 E St Paul 5th Floor","IBW-Milwaukee","IBW Milwaukee"]','IBW','Milwaukee','Kari'),
- ('loc-madison','7021 Tree Ln','["7021 Tree Ln","IBW-Madison","IBW Madison","Madison"]','IBW','Madison','Kari'),
+ ('loc-milwaukee','327 E St Paul 5th Floor','["327 E St Paul 5th Floor","IBW-Milwaukee","IBW Milwaukee","Institute of Beauty & Wellness","Institute of Beauty and Wellness","Institute of Beauty","IBW"]','IBW','Milwaukee','Kari'),
+ ('loc-madison','7021 Tree Ln','["7021 Tree Ln","IBW-Madison","IBW Madison","Madison","Institute of Beauty & Wellness","Institute of Beauty and Wellness","Institute of Beauty","IBW"]','IBW','Madison','Kari'),
  ('loc-chicago','2828 N Clark St','["2828 N Clark St","Chicago"]','Chicago','Chicago','Bonnie'),
  ('loc-nala','Nala','["Nala"]','Nala','Nala','Bonnie'),
  ('loc-admin','Admin / Corporate','["Admin","Corporate","Nala"]','Admin','None','None');
@@ -239,3 +239,13 @@ CREATE INDEX IF NOT EXISTS idx_allocations_invoice ON invoice_allocations(invoic
 INSERT OR IGNORE INTO location_mappings (id, address, keywords, business, class, default_approver) VALUES ('loc-nala','Nala','["Nala"]','Nala','Nala','Bonnie');
 -- v1.1.7: Olive Garden (beauty brushes) → Retail / Product Costs (inventory/retail).
 INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-olivegarden','Olive Garden',NULL,NULL,NULL,1,'Retail / Product Costs');
+-- v1.2.0 FIX 5: refresh IBW Milwaukee + Madison keywords with the school NAME
+-- ("Institute of Beauty & Wellness" / "IBW") so the longest-match router routes a
+-- shared-address (327 E St Paul) IBW invoice to IBW, not Neroli/Downtown.
+INSERT OR REPLACE INTO location_mappings (id, address, keywords, business, class, default_approver) VALUES ('loc-milwaukee','327 E St Paul 5th Floor','["327 E St Paul 5th Floor","IBW-Milwaukee","IBW Milwaukee","Institute of Beauty & Wellness","Institute of Beauty and Wellness","Institute of Beauty","IBW"]','IBW','Milwaukee','Kari');
+INSERT OR REPLACE INTO location_mappings (id, address, keywords, business, class, default_approver) VALUES ('loc-madison','7021 Tree Ln','["7021 Tree Ln","IBW-Madison","IBW Madison","Madison","Institute of Beauty & Wellness","Institute of Beauty and Wellness","Institute of Beauty","IBW"]','IBW','Madison','Kari');
+-- v1.2.0 FIX 4: cosmetic-distributor inventory mappings → HIGH-confidence Retail /
+-- Product Costs regardless of tax (business_entity NULL = applies to any entity).
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-wella','Wella',NULL,NULL,NULL,1,'Retail / Product Costs');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-abbvie','AbbVie',NULL,NULL,NULL,1,'Retail / Product Costs');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-opi','OPI',NULL,NULL,NULL,1,'Retail / Product Costs');

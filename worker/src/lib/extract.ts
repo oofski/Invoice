@@ -185,62 +185,10 @@ export function normalizeExtract(data: unknown): ExtractedInvoice {
   };
 }
 
-export interface ReconcileResult {
-  /** total - (Σ line amounts + sales_tax); positive => lines undershoot the total. */
-  gap: number;
-  /** max($0.02, 0.5% of |total|). */
-  tolerance: number;
-  /** True when |gap| > tolerance AND the invoice is itemized (recon should flag). */
-  flagged: boolean;
-  /** The synthetic catch-all line to append when flagged, else null. */
-  syntheticLine: ExtractedLineItem | null;
-}
-
-/**
- * Reconciliation guard (v1.1.8 B). Computes the gap between the stated invoice
- * total and (Σ line amounts + sales_tax). When the invoice is itemized (more
- * than the single un-itemized fallback total-line) and the gap exceeds the
- * tolerance — max($0.02, 0.5% of total) — it returns a single synthetic
- * REQUIRES_MANUAL_REVIEW line (amount = gap, so Σ lines stays honest) that the
- * caller appends. The synthetic line's requires_review flag reuses the existing
- * export gate, so no missing-line invoice can be exported until a human verifies.
- *
- * Skips (flagged=false, syntheticLine=null) when total or subtotal is null, or
- * when only the single fallback total-line exists (un-itemized invoices), to
- * avoid false flags.
- */
-export function reconcile(x: ExtractedInvoice): ReconcileResult {
-  const total = x.total;
-  const tolerance = Math.max(0.02, Math.abs(total ?? 0) * 0.005);
-
-  // Skip when we can't trust the header math (no total / no subtotal) or when
-  // the invoice isn't itemized (a single fallback total-line). subtotal null is
-  // a strong signal the parser didn't break the invoice down.
-  const itemized = x.line_items.length > 1;
-  if (total == null || x.subtotal == null || !itemized) {
-    return { gap: 0, tolerance, flagged: false, syntheticLine: null };
-  }
-
-  const lineSum = x.line_items.reduce((s, l) => s + (l.amount ?? 0), 0);
-  const salesTax = x.sales_tax ?? 0;
-  const gap = Math.round((total - (lineSum + salesTax)) * 100) / 100;
-
-  if (Math.abs(gap) <= tolerance) {
-    return { gap, tolerance, flagged: false, syntheticLine: null };
-  }
-
-  const syntheticLine: ExtractedLineItem = {
-    description: `⚠ Extraction incomplete — lines + tax ≠ invoice total (off by $${Math.abs(
-      gap,
-    ).toFixed(2)}). Verify against the PDF and add any missing lines.`,
-    amount: gap,
-    suggested_category: REQUIRES_MANUAL_REVIEW,
-    tax: null,
-    quantity: null,
-    unit_price: null,
-  };
-  return { gap, tolerance, flagged: true, syntheticLine };
-}
+// v1.2.0: the reconciliation guard (reconcile / reconcileAmounts — the synthetic
+// "⚠ Extraction incomplete" review line emitted when lines + tax ≠ invoice total)
+// was REMOVED by request. The app no longer flags total mismatches; extraction
+// runs at highest fidelity and the accountant can add a missed line manually.
 
 /** Runs Reducto /extract for an uploaded document and returns the raw + normalized data. */
 export async function extractInvoice(

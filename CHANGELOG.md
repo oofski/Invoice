@@ -5,6 +5,36 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.0] — 2026-06-24
+
+### Fixed
+- **Products now code to Retail / Product Costs by default.** The product
+  detector was too narrow, so real product names ("HA5 HydraCollagen Hydrator",
+  "OPI Black Onyx", "Super Gloss Top Coat") fell through to a salon's generic
+  account (Service Costs or Repairs & Maintenance). Now, for the salons (Neroli
+  & SKNBar), any line that isn't clearly a service / rent / freight / fee is
+  treated as a product and coded by how it's taxed: **untaxed → Retail / Product
+  Costs** (tagged Retail), **taxed → Service Costs** (tagged Backbar). These stay
+  low-confidence so they're easy to review, and any explicit Type or manual edit
+  still wins.
+- **Invoices for the Institute of Beauty & Wellness route to IBW, not Neroli.**
+  IBW-Milwaukee and Neroli-Downtown share the building at 327 E St Paul, and the
+  matcher was picking the less-specific match. It now prefers the **most-specific
+  location** and recognizes the school by name ("Institute of Beauty & Wellness"
+  / "IBW"), so those invoices land on **IBW / Milwaukee** correctly.
+- **Non-school discounts are no longer booked as a separate line.** The discount
+  comes off the relevant account and the invoice books to its subtotal + tax —
+  which also removes the false "off by $X" review line some invoices showed. The
+  schools (IBW, Chicago) still track discounts to their Discounts account.
+
+### Changed
+- **The app no longer flags when line items + tax don't equal the invoice
+  total.** It focuses on reading the invoice at the highest fidelity instead; if
+  a line is genuinely missing, an accountant can still add it. (Per-line "needs
+  review" flags for low-confidence or un-coded lines remain.)
+- **Known product vendors seeded** — Wella, AbbVie, OPI, and Olive Garden now
+  code to Retail / Product Costs with high confidence.
+
 ## [1.1.9] — 2026-06-24
 
 ### Changed
@@ -420,6 +450,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.2.0]: https://github.com/oofski/Invoice/releases/tag/v1.2.0
 [1.1.9]: https://github.com/oofski/Invoice/releases/tag/v1.1.9
 [1.1.8]: https://github.com/oofski/Invoice/releases/tag/v1.1.8
 [1.1.7]: https://github.com/oofski/Invoice/releases/tag/v1.1.7

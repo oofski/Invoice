@@ -124,15 +124,31 @@ function safeArray(s: string): string[] {
   }
 }
 
-/** Matches the first non-Admin location whose keyword appears in the text. */
+/**
+ * Matches the MOST-SPECIFIC non-Admin location: the one carrying the LONGEST
+ * keyword that appears in the text (FIX 5b, v1.2.0). Longest-match wins so a
+ * shared street address can't shadow a more specific signal — e.g. IBW's
+ * "327 E St Paul 5th Floor" and "Institute of Beauty & Wellness" beat Neroli's
+ * generic "327 E St Paul" / "Downtown", fixing the IBW-vs-Neroli collision at the
+ * shared building. Tie on length keeps array order. Admin (generic keywords) is
+ * still skipped. Case-insensitive substring match as before.
+ */
 export function matchLocation(text: string, locs: LocationRow[]): LocationRow | null {
   const hay = (text || "").toLowerCase();
   if (!hay) return null;
+  let best: LocationRow | null = null;
+  let bestLen = -1;
   for (const l of locs) {
     if (l.business === "Admin") continue; // Admin keywords ("Admin","Corporate") are too generic to match on
-    if (l.keywords.some((k) => k && hay.includes(k.toLowerCase()))) return l;
+    for (const k of l.keywords) {
+      if (!k) continue;
+      if (hay.includes(k.toLowerCase()) && k.length > bestLen) {
+        best = l;
+        bestLen = k.length;
+      }
+    }
   }
-  return null;
+  return best;
 }
 
 // --------------------------------------------------------------- approver routing
@@ -252,12 +268,43 @@ function isTaxLine(desc: string): boolean {
   return false;
 }
 
-/** True when a line looks product-like (drives the L2.5 retail/backbar split). */
-function isProductLike(desc: string, vendorMapping: VendorMappingRow | null): boolean {
+/**
+ * Conservative non-product denylist for the SALON broad default (FIX 1, v1.2.0).
+ * A salon (Neroli/SKNBar) line that doesn't look like a service / fee / occupancy
+ * line is treated as a product. The denylist is biased toward product: a false
+ * "product" merely yields the desired Retail/Backbar L2.5 default (still LOW /
+ * reviewable), while a false "non-product" would mis-route a real good. Word-
+ * boundary care: "cleaning" (the service) NOT bare "clean" (so "Cleansing Milk" /
+ * "Cleanser" stay product); NO bare "tax" (L1 isolates tax; bare "tax" would catch
+ * "taxable").
+ */
+const NON_PRODUCT_RE =
+  /\b(rent|lease|freight|shipping|postage|courier|delivery|consult\w*|professional service|outside service|labor|install\w*|repair|maintenance|cleaning|janitor|software|subscription|saas|licen[sc]e|utilit\w*|electric\w*|telephone|phone|internet|insurance|payroll|wage|salary|interest|bank fee|processing fee|accounting|legal|tuition|education|training|marketing|advertis\w*|depreciat\w*|amortiz\w*|donation|membership|dues|occupancy|property tax|cam\b)/i;
+
+/** High-signal product allowlist (any entity). Broadened a bit; harmless. */
+const PRODUCT_ALLOW_RE =
+  /\b(product|retail|backbar|shampoo|conditioner|color|aveda|sku|case|unit|bottle|jar|polish|lacquer|serum|cream|lotion|gel|mask|treatment|kit|wax|spray|oz|ml)\b/i;
+
+/**
+ * True when a line looks product-like (drives the L2.5 retail/backbar split).
+ *  - vendor mapping flagged inventory => always product.
+ *  - narrow high-signal allowlist (any entity) => product (no behavior change for
+ *    non-salon entities).
+ *  - SALON (Neroli/SKNBar) broad default: NOT clearly a service/fee/occupancy line
+ *    (i.e. NOT NON_PRODUCT_RE) => product. Bias toward product (FIX 1, v1.2.0).
+ *  - Other entities (IBW/Chicago/Admin/Nala): allowlist only — unchanged.
+ */
+function isProductLike(
+  desc: string,
+  vendorMapping: VendorMappingRow | null,
+  business: BusinessEntity,
+): boolean {
   if (vendorMapping?.is_inventory) return true;
-  return /\b(product|retail|backbar|shampoo|conditioner|color|aveda|sku|case|unit|bottle|jar)\b/i.test(
-    desc,
-  );
+  if (PRODUCT_ALLOW_RE.test(desc)) return true;
+  if (business === "Neroli" || business === "SKNBar") {
+    return !NON_PRODUCT_RE.test(desc);
+  }
+  return false;
 }
 
 /**
@@ -342,7 +389,7 @@ export function codeLineItem(opts: {
   // The Aveda-only gate is dropped; per-line tax (lineTax) still takes priority
   // over the header signal. Explicit per-line Type (TYPE_GL) and manual edits run
   // later and still win. Entity-gated — falls through when invalid for the entity.
-  if (isProductLike(desc, vendorMapping)) {
+  if (isProductLike(desc, vendorMapping, business)) {
     const taxAbsent = lineTax != null ? lineTax === 0 : !salesTaxPresent;
     const taxPresent = lineTax != null ? lineTax > 0 : salesTaxPresent;
     // RETAIL: product-like + untaxed. Also tag item_type "Retail" (v1.1.8 N) so

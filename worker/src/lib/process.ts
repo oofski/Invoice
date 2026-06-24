@@ -3,7 +3,6 @@ import { uploadToReducto } from "./reducto";
 import {
   extractInvoice,
   normalizeExtract,
-  reconcile,
   type ExtractedInvoice,
 } from "./extract";
 import { getPdf, putPdf, pdfKey, putReductoRaw } from "./storage";
@@ -105,38 +104,11 @@ export async function processInvoiceAI(
       (m) => !aiKeys.has(`${normDesc(m.description)}|${cents(m.amount)}`),
     );
 
-    // Reconciliation guard (v1.1.8 B): if the coded/itemized lines + tax don't
-    // reconcile to the invoice total (beyond tolerance), append ONE synthetic
-    // REQUIRES_MANUAL_REVIEW line for the gap. amount=gap keeps Σ lines honest;
-    // its requires_review flag (set by the existing export gate below, since its
-    // category is REQUIRES_MANUAL_REVIEW) blocks export until a human verifies.
-    // Count the preserved manual lines toward the reconciliation so a manual line
-    // that fills the gap isn't ALSO represented by a synthetic RECONCILE line
-    // (the most common reason a line was added in the first place).
-    const reconInput = preserved.length
-      ? {
-          ...extracted,
-          line_items: [
-            ...extracted.line_items,
-            ...preserved.map((m) => ({
-              description: m.description ?? "",
-              amount: m.amount ?? 0,
-              tax: null,
-            })),
-          ],
-        }
-      : extracted;
-    const recon = reconcile(reconInput);
-    if (recon.flagged && recon.syntheticLine) {
-      result.prompt3.push({
-        BusinessEntity: result.prompt1.Business as BusinessEntity,
-        LineItemDescription: recon.syntheticLine.description,
-        Amount: recon.syntheticLine.amount ?? 0,
-        Category: REQUIRES_MANUAL_REVIEW,
-        ConfidenceLevel: CONFIDENCE_LEVEL.MANUAL_REVIEW,
-        LogicPathUsed: "RECONCILE",
-      });
-    }
+    // v1.2.0: the reconciliation guard (the synthetic "⚠ Extraction incomplete"
+    // review line that flagged when lines + tax ≠ invoice total) has been removed
+    // by request — the app no longer nags about totals not adding up. Extraction
+    // runs at highest fidelity (deep_extract + citations) and the accountant can
+    // still add a missed line manually; we just don't auto-flag a mismatch.
 
     const subtotal =
       inv.subtotal == null && result.prompt1.Subtotal
