@@ -29,6 +29,8 @@ export interface DesktopApi {
   checkForUpdates?: () => Promise<UpdateStatus>;
   installUpdate?: () => Promise<void>;
   onUpdateStatus?: (cb: (s: UpdateStatus) => void) => () => void;
+  /** Open an external URL (mailto: / http(s):) in the OS default app. */
+  openExternal?: (url: string) => Promise<boolean>;
 }
 
 declare global {

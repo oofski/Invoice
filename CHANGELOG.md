@@ -5,6 +5,17 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.3] — 2026-06-24
+
+### Added
+- **"Remind approvers" works without any email setup.** When automatic email
+  (Resend) isn't configured, the **Remind** button now opens a ready-to-send draft
+  in your own mail app (Outlook, Gmail, etc.) with the selected approvers
+  pre-addressed (BCC) and the subject/message filled in — you just hit Send, from
+  your own mailbox. If automatic email is configured later, it goes back to
+  one-click sending automatically. (Replaces the dead-end "Email isn't configured"
+  message.)
+
 ## [1.2.2] — 2026-06-24
 
 ### Fixed
@@ -478,6 +489,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.2.3]: https://github.com/oofski/Invoice/releases/tag/v1.2.3
 [1.2.2]: https://github.com/oofski/Invoice/releases/tag/v1.2.2
 [1.2.1]: https://github.com/oofski/Invoice/releases/tag/v1.2.1
 [1.2.0]: https://github.com/oofski/Invoice/releases/tag/v1.2.0

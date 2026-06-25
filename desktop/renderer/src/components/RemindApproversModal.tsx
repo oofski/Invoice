@@ -5,7 +5,33 @@ import { Button, Spinner } from "@/components/ui/primitives";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { cn } from "@/lib/utils";
+import { desktop } from "@/lib/desktop";
 import type { ApproverPendingCount } from "@/lib/types";
+
+/**
+ * Builds a `mailto:` link that opens the user's own mail client with the selected
+ * approvers pre-addressed (BCC, for privacy + a shorter URL) and a subject/body
+ * filled in. Used as a fallback when server-side email (Resend) isn't configured,
+ * so reminders still go out — sent from the user's own mailbox.
+ */
+function buildReminderMailto(emails: string[], note: string): string {
+  const subject = "Invoices awaiting your approval";
+  const lines = [
+    "Hi,",
+    "",
+    "This is a reminder that you have invoices awaiting your approval in InvoiceIQ. Please review them at your earliest convenience.",
+  ];
+  if (note) lines.push("", note);
+  lines.push("", "Thank you.");
+  // Keep the address list literal (commas + "@" unencoded) for the widest mail-
+  // client compatibility; percent-encode only the subject/body.
+  const bcc = emails.join(",");
+  return (
+    `mailto:?bcc=${bcc}` +
+    `&subject=${encodeURIComponent(subject)}` +
+    `&body=${encodeURIComponent(lines.join("\n"))}`
+  );
+}
 
 interface RemindResult {
   sent: number;
@@ -110,10 +136,26 @@ export function RemindApproversModal({
         { recipients, note: trimmed || undefined },
       );
       if (res.emailConfigured === false) {
-        // Email isn't set up — nothing was sent. Keep the modal open so the
-        // exec/admin isn't misled into thinking reminders went out.
+        // Automatic email (Resend) isn't set up — fall back to opening a draft in
+        // the user's own mail client with the selected approvers pre-addressed.
+        const emails = approvers
+          .filter((a) => selected.has(keyOf(a)) && a.email)
+          .map((a) => a.email as string);
+        const openExternal = desktop()?.openExternal;
+        if (emails.length > 0 && openExternal) {
+          try {
+            await openExternal(buildReminderMailto(emails, trimmed));
+            toast.success("Opened a reminder draft in your mail app");
+            onClose();
+            return;
+          } catch {
+            // fall through to the guidance message below
+          }
+        }
         toast.error(
-          "Email isn't configured — no reminders were sent. Ask your admin to set up email (Resend).",
+          emails.length === 0
+            ? "Email isn't configured and the selected approvers have no email on file."
+            : "Couldn't open your mail app. Automatic email (Resend) isn't set up — ask your admin to configure it.",
         );
         return;
       }

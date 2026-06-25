@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld("invoiceiq", {
   // Quit and install a downloaded update ("Restart now").
   installUpdate: () => ipcRenderer.invoke("updates:install"),
 
+  // Open an external URL (mailto: / http(s):) in the OS default app — used by the
+  // "Remind approvers" mail-client fallback when server-side email isn't set up.
+  openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
+
   // Subscribe to update lifecycle events. Returns an unsubscribe function.
   onUpdateStatus: (cb) => {
     const handler = (_event, status) => cb(status);
