@@ -351,6 +351,22 @@ export function codeLineItem(opts: {
       ? { category, confidence, logic, ...(itemType ? { itemType } : {}) }
       : null;
 
+  // Tax-based retail/backbar split — THE primary product-coding rule. The presence
+  // of sales tax decides retail vs backbar for a PRODUCT line: untaxed => "Retail /
+  // Product Costs" (5100, retail / resale-exempt, item_type Retail); taxed =>
+  // "Service Costs" (5000, backbar consumed in services, item_type Backbar). A
+  // per-line tax amount (lineTax) takes priority over the header signal. Returns
+  // null when neither signal resolves or the category is invalid for the entity
+  // (so the caller falls through). Used by BOTH the known-vendor L2 path (HIGH) and
+  // the unknown-vendor L2.5 default (LOW).
+  const taxAbsent = lineTax != null ? lineTax === 0 : !salesTaxPresent;
+  const taxPresent = lineTax != null ? lineTax > 0 : salesTaxPresent;
+  const taxSplit = (confidence: ConfidenceLevel, tag: string): Coded | null => {
+    if (taxPresent) return gated("Service Costs", confidence, `${tag} BACKBAR`, "Backbar");
+    if (taxAbsent) return gated("Retail / Product Costs", confidence, `${tag} RETAIL`, "Retail");
+    return null;
+  };
+
   // L0 — discount isolation (v1.1.8). A negative-amount line is a discount /
   // credit. For school entities whose COA carries "Discounts" (IBW, Chicago)
   // code it to that tracked account (HIGH). For entities WITHOUT a Discounts
@@ -373,38 +389,35 @@ export function codeLineItem(opts: {
   if (vCat && isCategoryValidForEntity(business, vCat))
     return { category: vCat, confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 2 VENDOR" };
 
-  // L2 — admin vendor mapping (gl_override / inventory).
+  // L2 — admin vendor mapping. An explicit gl_override to a NON-product category
+  // (Freight, Computer & IT, …) is an absolute override and wins as-is. But a
+  // vendor flagged as inventory — OR overridden to a PRODUCT category (Retail /
+  // Product Costs or Service Costs) — only tells us "this is a product line"; the
+  // retail-vs-backbar choice is then made by TAX (the primary rule above), NOT
+  // forced to Retail. (Fix: is_inventory previously forced Retail HIGH and ignored
+  // sales tax, so a taxed supplies invoice — e.g. CTC Supplies with $18.54 tax —
+  // wrongly coded to 5100 Retail instead of 5000 Service Costs / backbar.)
   if (vendorMapping) {
     const ov = vendorMapping.gl_override;
-    if (ov && GL_CATEGORIES_FLAT.includes(ov))
+    const ovIsProduct =
+      ov === "Retail / Product Costs" || ov === "Service Costs";
+    if (ov && GL_CATEGORIES_FLAT.includes(ov) && !ovIsProduct)
       return { category: ov, confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 2" };
-    if (vendorMapping.is_inventory)
-      return { category: "Retail / Product Costs", confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 2" };
+    if (ovIsProduct || vendorMapping.is_inventory) {
+      // Known product vendor → tax decides retail vs backbar (HIGH: vendor known).
+      const r = taxSplit(CONFIDENCE_LEVEL.HIGH, "LEVEL 2 TAX");
+      if (r) return r;
+    }
   }
 
-  // L2.5 — DEFAULT tax-based coding for product-like lines (v1.1.8, broadened).
-  // A product-like line defaults by tax signal: untaxed => "Retail / Product
-  // Costs" (sold to guests, exempt from purchase tax); taxed => "Service Costs"
-  // (backbar consumed in services). LOW confidence so it's flagged/reviewable.
-  // The Aveda-only gate is dropped; per-line tax (lineTax) still takes priority
-  // over the header signal. Explicit per-line Type (TYPE_GL) and manual edits run
-  // later and still win. Entity-gated — falls through when invalid for the entity.
+  // L2.5 — DEFAULT tax-based coding for an UNKNOWN-vendor product-like line. Same
+  // tax split as the known-vendor path above, but LOW confidence (heuristic) so
+  // it's flagged/reviewable. item_type Retail/Backbar is tagged so the export tax
+  // recompute + exec split Type follow. Explicit per-line Type and manual edits
+  // run later and still win. Entity-gated — falls through when invalid for entity.
   if (isProductLike(desc, vendorMapping, business)) {
-    const taxAbsent = lineTax != null ? lineTax === 0 : !salesTaxPresent;
-    const taxPresent = lineTax != null ? lineTax > 0 : salesTaxPresent;
-    // RETAIL: product-like + untaxed. Also tag item_type "Retail" (v1.1.8 N) so
-    // the export tax recompute treats it as retail-exempt and the exec split
-    // Type is pre-filled.
-    if (taxAbsent) {
-      const r = gated("Retail / Product Costs", CONFIDENCE_LEVEL.LOW, "L2.5 RETAIL", "Retail");
-      if (r) return r;
-    }
-    // BACKBAR/SERVICE: product-like + taxed. Tag item_type "Backbar" (v1.1.8 N).
-    if (taxPresent) {
-      const r = gated("Service Costs", CONFIDENCE_LEVEL.LOW, "L2.5 BACKBAR", "Backbar");
-      if (r) return r;
-    }
-    // Category invalid for entity — fall through.
+    const r = taxSplit(CONFIDENCE_LEVEL.LOW, "L2.5");
+    if (r) return r;
   }
 
   // L3 — keyword rules (≥90% confident).

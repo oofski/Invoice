@@ -5,6 +5,19 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.5] — 2026-06-25
+
+### Fixed
+- **Sales tax now correctly decides retail vs. backbar — even for known product
+  vendors.** Previously a vendor flagged as an "inventory" supplier was always
+  coded to **Retail / Product Costs (5100)**, ignoring the invoice's sales tax — so
+  a taxed supplies invoice (e.g. CTC Supplies, $18.54 tax) wrongly landed in 5100.
+  Now the rule is consistent everywhere: **sales tax on the invoice → 5000 Service
+  Costs (backbar); no sales tax → 5100 Retail / Product Costs.** A per-line tax
+  overrides the invoice-level tax, an explicit non-product account (Freight, IT,
+  etc.) still wins, and manual edits still win. **Reprocess** an affected invoice to
+  re-code it.
+
 ## [1.2.4] — 2026-06-25
 
 ### Added
@@ -500,6 +513,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.2.5]: https://github.com/oofski/Invoice/releases/tag/v1.2.5
 [1.2.4]: https://github.com/oofski/Invoice/releases/tag/v1.2.4
 [1.2.3]: https://github.com/oofski/Invoice/releases/tag/v1.2.3
 [1.2.2]: https://github.com/oofski/Invoice/releases/tag/v1.2.2
