@@ -41,7 +41,9 @@ const STATUS_TABS = [
 export default function DashboardPage() {
   const profile = useProfile();
   const canRemind =
-    profile.role === ROLES.EXECUTIVE || profile.role === ROLES.ADMIN;
+    profile.role === ROLES.ACCOUNTANT ||
+    profile.role === ROLES.EXECUTIVE ||
+    profile.role === ROLES.ADMIN;
   const { data: stats, refetch: refetchStats } =
     useApi<DashboardStats>("/api/dashboard/stats");
   const {

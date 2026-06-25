@@ -46,7 +46,9 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
 
   const invoices = data?.invoices ?? [];
   const canRemind =
-    profile.role === ROLES.EXECUTIVE || profile.role === ROLES.ADMIN;
+    profile.role === ROLES.ACCOUNTANT ||
+    profile.role === ROLES.EXECUTIVE ||
+    profile.role === ROLES.ADMIN;
 
   useEffect(() => {
     const id = setInterval(() => refetch(), 15000);

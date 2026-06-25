@@ -1,7 +1,7 @@
 {
   "name": "invoiceiq-desktop",
   "private": true,
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "InvoiceIQ desktop AP automation app",
   "main": "electron/main.js",
   "type": "commonjs",
@@ -10,7 +10,8 @@
     "build:renderer": "npm --prefix renderer install && npm --prefix renderer run build",
     "dist": "npm run build:renderer && electron-builder --win nsis --publish never",
     "dist:dir": "npm run build:renderer && electron-builder --win dir --publish never",
-    "release": "npm run build:renderer && electron-builder --win nsis --publish always"
+    "release": "npm run build:renderer && electron-builder --win nsis --publish always",
+    "release:mac": "npm run build:renderer && electron-builder --mac dmg --publish always"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
@@ -34,6 +35,13 @@
         "nsis"
       ],
       "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.business",
+      "identity": null
     },
     "nsis": {
       "oneClick": false,

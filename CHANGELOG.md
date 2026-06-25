@@ -5,6 +5,17 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.4] — 2026-06-25
+
+### Added
+- **Accountants can send approval reminders.** The **Remind** button (recipient
+  picker + a draft in your own mail app, or automated email if Resend is set up)
+  is now available to accountants as well as executives/admins — so an accountant
+  can nudge approvers to go in and review/approve.
+- **macOS installer (.dmg).** Each release now also publishes a **`.dmg`**
+  alongside the Windows `.exe`. It's unsigned, so on first open macOS may warn
+  "unidentified developer" — right-click the app → **Open** to proceed.
+
 ## [1.2.3] — 2026-06-24
 
 ### Added
@@ -489,6 +500,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.2.4]: https://github.com/oofski/Invoice/releases/tag/v1.2.4
 [1.2.3]: https://github.com/oofski/Invoice/releases/tag/v1.2.3
 [1.2.2]: https://github.com/oofski/Invoice/releases/tag/v1.2.2
 [1.2.1]: https://github.com/oofski/Invoice/releases/tag/v1.2.1

@@ -93,3 +93,61 @@ jobs:
           name: invoiceiq-windows-installer
           path: desktop/release/*.exe
           if-no-files-found: error
+
+  # macOS DMG. electron-builder's dmg target requires a macOS runner. Runs AFTER
+  # the Windows job so the GitHub Release already exists (the mac job just adds
+  # the .dmg asset, avoiding a create-release race). The build is UNSIGNED
+  # (identity: null) — macOS Gatekeeper will warn ("unidentified developer");
+  # users open it via right-click → Open the first time.
+  build-macos:
+    needs: build-windows
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install desktop dependencies
+        run: npm --prefix desktop install
+
+      - name: Install renderer dependencies
+        shell: bash
+        run: |
+          if [ -f desktop/renderer/package.json ]; then
+            npm --prefix desktop/renderer install
+          else
+            echo "No desktop/renderer/package.json found; skipping renderer install."
+          fi
+
+      - name: Build renderer
+        shell: bash
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL || '' }}
+        run: |
+          if [ -f desktop/renderer/package.json ]; then
+            npm --prefix desktop/renderer run build
+          else
+            echo "No desktop/renderer/package.json found; skipping renderer build."
+          fi
+
+      # Build + publish the .dmg to the same GitHub Release (created by the
+      # Windows job). CSC_IDENTITY_AUTO_DISCOVERY=false keeps electron-builder
+      # from attempting to code-sign without a certificate.
+      - name: Build + publish DMG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL || '' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm --prefix desktop run release:mac
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoiceiq-macos-dmg
+          path: desktop/release/*.dmg
+          if-no-files-found: error

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "./helpers";
-import { user, hasRole, isStaffOrAdmin, isExecOrAdmin, canViewInvoice } from "./helpers";
+import { user, hasRole, isStaffOrAdmin, canViewInvoice } from "./helpers";
 import {
   audit,
   getInvoice,
@@ -375,7 +375,8 @@ invoices.post("/:id/reroute", async (c) => {
 // approver name carries, plus whether that name maps to an active, emailable
 // user. Counts are computed case-/whitespace-insensitively on approved_by.
 invoices.get("/approvers/pending-counts", async (c) => {
-  if (!isExecOrAdmin(c)) return c.json({ error: "Forbidden" }, 403);
+  if (!hasRole(c, ROLES.ACCOUNTANT, ROLES.EXECUTIVE, ROLES.ADMIN))
+    return c.json({ error: "Forbidden" }, 403);
 
   // Group pending invoices by normalized approver, but keep one representative
   // raw name per group so we can resolve it to a user.
@@ -411,7 +412,8 @@ invoices.get("/approvers/pending-counts", async (c) => {
 // RE-COUNTED server-side per recipient (never trusts client counts); recipients
 // with no resolvable email or zero pending are skipped (counted as failed).
 invoices.post("/remind-approvers", async (c) => {
-  if (!isExecOrAdmin(c)) return c.json({ error: "Forbidden" }, 403);
+  if (!hasRole(c, ROLES.ACCOUNTANT, ROLES.EXECUTIVE, ROLES.ADMIN))
+    return c.json({ error: "Forbidden" }, 403);
 
   const body = (await c.req.json().catch(() => ({}))) as {
     recipients?: { userId?: string; name?: string }[];
