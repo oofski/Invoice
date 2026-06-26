@@ -256,7 +256,7 @@ export function resolveGlAccount(
  * the L3 "Utilities" keyword category. Single source of truth for both.
  */
 const UTILITY_EXPENSE_RE =
-  /\b(water\s*(volume|service|usage|consumption|meter|base|readiness|distribution|charge)|sewer\w*|sewage|storm\s*water|septic|utilit\w*|electric\w*|natural\s*gas|energy\s*(charge|fee)|power\s*(charge|usage)|kwh|therm|waste\s*(water|management|disposal|collection)|\btrash\b|\bgarbage\b|\brefuse\b|recycl\w*|public\s*fire|fire\s*(fee|protection|line|service)|service\s*charge|sur\s?charge|assessment|franchise\s*fee|late\s*fee|finance\s*charge|connection\s*fee|readiness\s*to\s*serve)/i;
+  /\b(water\s*(volume|service|usage|consumption|meter|base|readiness|distribution|charge)|sewer\w*|sewage|storm\s*water|septic|utilit\w*|electric\w*|natural\s*gas|energy\s*(charge|fee)|power\s*(charge|usage)|kwh|therm|waste\s*(water|management|disposal|collection)|\btrash\b|\bgarbage\b|\brefuse\b|recycl\w*|public\s*fire|fire\s*(fee|protection|line|service)|assessment|readiness\s*to\s*serve)/i;
 
 /**
  * Service / repair / labor / trade lines (v1.2.6). A salon line describing a
@@ -269,21 +269,48 @@ const UTILITY_EXPENSE_RE =
 const SERVICE_REPAIR_RE =
   /\b(repair\w*|replac\w*|reinstall\w*|install\w*|\blabor\b|service\s*call|diverter|cartridge|plumb\w*|\bleak\w*|fixture|faucet|valve|\bhvac\b|electrical\s*work|handy\s*man|handyman|maintenance|inspection|troubleshoot\w*|caulk\w*|grout|drywall|technician)\b/i;
 
+/** Freight / shipping / carrier lines (v1.2.7) → Freight. Word-bounded carriers. */
+const FREIGHT_RE = /\b(freight|shipping|postage|courier|parcel|fedex|ups|usps|dhl)\b/i;
+
+/**
+ * Tariff / duty / customs / surcharge / generic-fee lines (v1.2.7) → "Penalties &
+ * Fees" (the user's "fees" bucket). The fee terms were moved OUT of
+ * UTILITY_EXPENSE_RE so a tariff/fuel/late surcharge is a fee, not a utility.
+ */
+const FEE_RE =
+  /(\btariff\b|\bcustoms\b|import\s*dut(y|ies)|\bdut(y|ies)\b|sur\s?charge|\blate\s*fee\b|finance\s*charge|franchise\s*fee|connection\s*fee)/i;
+
+/**
+ * The non-product EXPENSE category for a line by its description, or null — using
+ * the product-safe regexes above (qualifier/word-bounded; NOT the loose /clean/,
+ * which would catch "Cleansing Milk"). SINGLE SOURCE OF TRUTH (v1.2.7): used by the
+ * salon product-default carve-out, the inventory-vendor branch, AND L3
+ * keywordCategory, so every coding path recognizes the same non-product line types
+ * consistently — closing the gap where an inventory vendor blanket-coded freight /
+ * utility / repair / fee lines as product.
+ */
+function expenseCategory(desc: string): string | null {
+  if (UTILITY_EXPENSE_RE.test(desc)) return "Utilities";
+  if (SERVICE_REPAIR_RE.test(desc)) return "Repairs & Maintenance";
+  if (FREIGHT_RE.test(desc)) return "Freight";
+  if (FEE_RE.test(desc)) return "Penalties & Fees";
+  return null;
+}
+
 /** Tax-line helpers (v1.2.6): a jurisdiction word + a percentage => a tax line. */
 const JURISDICTION_RE = /\b(city|county|state|village|town|township|municipal|parish|borough)\b/i;
 const PERCENT_RE = /\d+(?:\.\d+)?\s*%/;
 
 /** The brief's LEVEL 3 keyword rules (kept deliberately small/safe, ≥90% sure). */
 function keywordCategory(desc: string): string | null {
-  // Utility/fee and service/repair lines first — so they win over the generic
-  // /clean/ rule below and never fall to the entity default (v1.2.6).
-  if (UTILITY_EXPENSE_RE.test(desc)) return "Utilities";
-  if (SERVICE_REPAIR_RE.test(desc)) return "Repairs & Maintenance";
+  // Non-product expense lines (utilities / repairs / freight / fees) first — so they
+  // win over the generic /clean/ rule below and never fall to the entity default.
+  const e = expenseCategory(desc);
+  if (e) return e;
   if (/\btuition\b/.test(desc)) return "Tuition Revenue";
   if (/\bconsultant\b/.test(desc)) return "Professional / Outside Services";
   if (/clean/.test(desc)) return "Repairs & Maintenance";
   if (/\brent\b/.test(desc)) return "Occupancy - Rent";
-  if (/freight|shipping/.test(desc)) return "Freight";
   if (/software|\bit\b|computer|subscription|saas|license/.test(desc)) return "Computer & IT";
   return null;
 }
@@ -352,11 +379,10 @@ function isProductLike(
   if (vendorMapping?.is_inventory) return true;
   if (PRODUCT_ALLOW_RE.test(desc)) return true;
   if (business === "Neroli" || business === "SKNBar") {
-    // v1.2.6: utility/fee lines and service/repair/labor lines are NEVER products
-    // (in either tax direction) — they get their own L3 category (Utilities /
-    // Repairs & Maintenance), not the retail/backbar tax split.
-    if (UTILITY_EXPENSE_RE.test(desc)) return false;
-    if (SERVICE_REPAIR_RE.test(desc)) return false;
+    // A recognized non-product expense (utility / repair / freight / fee) is NEVER
+    // a product, in either tax direction — it gets its own L3 category, not the
+    // retail/backbar split (v1.2.6, broadened v1.2.7 to freight + fees).
+    if (expenseCategory(desc)) return false;
     return !NON_PRODUCT_RE.test(desc);
   }
   return false;
@@ -461,7 +487,22 @@ export function codeLineItem(opts: {
     if (ov && GL_CATEGORIES_FLAT.includes(ov) && !ovIsProduct)
       return { category: ov, confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 2" };
     if (ovIsProduct || vendorMapping.is_inventory) {
-      // Known product vendor → tax decides retail vs backbar (HIGH: vendor known).
+      // v1.2.7 ROOT-CAUSE FIX: a product vendor still bills NON-product lines —
+      // freight, tariffs/fees, utilities, repairs. Previously this branch ran the
+      // tax split on EVERY line (inspecting only tax, never the description) and
+      // returned BEFORE any line-level recognition, so e.g. a Pivot Point invoice
+      // coded shipping + tariff to Retail at HIGH confidence. Now: read the line
+      // first — a clear product (allowlist) takes the tax split; a recognized
+      // expense (utility/repair/freight/fee) gets its real category; only an
+      // unrecognized line falls to the product tax split.
+      if (!PRODUCT_ALLOW_RE.test(desc)) {
+        const e = expenseCategory(desc);
+        if (e) {
+          const r = gated(e, CONFIDENCE_LEVEL.MEDIUM, "LEVEL 2 EXPENSE");
+          if (r) return r;
+        }
+      }
+      // Genuine product (or unrecognized line) → tax decides retail vs backbar.
       const r = taxSplit(CONFIDENCE_LEVEL.HIGH, "LEVEL 2 TAX");
       if (r) return r;
     }

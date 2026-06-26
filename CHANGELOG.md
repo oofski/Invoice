@@ -5,6 +5,23 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.7] — 2026-06-26
+
+### Fixed
+- **Product-vendor invoices now code each line by what it actually is.** When a
+  vendor was flagged as selling product (e.g. Pivot Point, CTC, Ultraceuticals),
+  the app was stamping *every* line — shipping, tariffs, utilities, repairs — as
+  Retail/Backbar based only on tax, **before reading the line**. That single defect
+  was behind the recurring mis-codes. Those invoices now read each line:
+  - **Shipping / freight / carriers** (UPS, FedEx, USPS, DHL) → **Freight (6150)**
+  - **Tariffs / duties / surcharges / fees** → **Penalties & Fees (6255)**
+  - **Utilities** → **Utilities (6360)**; **repairs / labor** → **Repairs & Maintenance (6290)**
+  - genuine products still split by tax (untaxed → Retail, taxed → Backbar)
+  Measured against an 86-line coding audit, accuracy on product-vendor invoices went
+  from **35% → 100%** (overall 70% → 100%), and the high-confidence mis-bookings that
+  were never flagged for review are gone. **Reprocess** an affected invoice to
+  re-code it.
+
 ## [1.2.6] — 2026-06-25
 
 ### Fixed
@@ -533,6 +550,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.2.7]: https://github.com/oofski/Invoice/releases/tag/v1.2.7
 [1.2.6]: https://github.com/oofski/Invoice/releases/tag/v1.2.6
 [1.2.5]: https://github.com/oofski/Invoice/releases/tag/v1.2.5
 [1.2.4]: https://github.com/oofski/Invoice/releases/tag/v1.2.4
