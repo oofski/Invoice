@@ -5,6 +5,26 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.6] — 2026-06-25
+
+### Fixed
+- **Non-product expenses are no longer coded as products.** The "sales tax decides
+  retail vs. backbar" rule had become a catch-all that swept *any* untaxed line
+  into **Retail / Product Costs** and *any* taxed line into **Service Costs /
+  Backbar** — even when the line wasn't a product. So a **water/sewer utility
+  bill** landed in Retail, a **plumbing repair** ("Shower Leak — diverter cartridge
+  replaced") landed in Backbar, and a **tax line** written as "Milwaukee City
+  (7.9%)" was treated as a backbar product. Those line types are now recognized and
+  coded correctly:
+  - **Utilities** (water, sewer, electric, gas, trash/recycling, municipal fees) →
+    **Utilities (6360)**
+  - **Repairs / plumbing / labor / trade work** → **Repairs & Maintenance (6290)**
+  - **Tax lines** written as a jurisdiction + percentage ("City (7.9%)") →
+    **Sales/Use Tax**
+  Genuine products still split by tax exactly as before — untaxed → Retail, taxed →
+  Backbar — and the v1.2.5 inventory-vendor behavior is unchanged. **Reprocess** an
+  affected invoice to re-code it.
+
 ## [1.2.5] — 2026-06-25
 
 ### Fixed
@@ -513,6 +533,7 @@ installer on the GitHub Releases page.
   the repository root (`src/`, `supabase/`) for teams that prefer a web/PWA
   deployment.
 
+[1.2.6]: https://github.com/oofski/Invoice/releases/tag/v1.2.6
 [1.2.5]: https://github.com/oofski/Invoice/releases/tag/v1.2.5
 [1.2.4]: https://github.com/oofski/Invoice/releases/tag/v1.2.4
 [1.2.3]: https://github.com/oofski/Invoice/releases/tag/v1.2.3

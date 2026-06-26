@@ -73,6 +73,7 @@ export async function runRulesPipeline(
       salesTaxPresent,
       lineTax: li.tax,
       amount: li.amount,
+      headerTax: x.sales_tax,
     });
     // Light confidence gating (v1.1.8 P): a clearly-low Reducto citation
     // confidence flags the line for review and downgrades its confidence to LOW

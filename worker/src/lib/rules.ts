@@ -246,8 +246,39 @@ export function resolveGlAccount(
 }
 
 // ------------------------------------------------------------------- GL coding
+
+/**
+ * Utility / municipal-service / occupancy-fee expense lines (v1.2.6). Qualifier-
+ * gated: bare "water"/"charge"/"fee"/"service" NEVER match alone — each needs a
+ * utility-specific neighbor — so real products ("Micellar Water", "Cucumber Water
+ * Spray", "Cleansing Milk", "Hand Sanitizer Gel", "Water-based serum") are NOT
+ * caught. Used to (a) exclude these from the salon product default and (b) drive
+ * the L3 "Utilities" keyword category. Single source of truth for both.
+ */
+const UTILITY_EXPENSE_RE =
+  /\b(water\s*(volume|service|usage|consumption|meter|base|readiness|distribution|charge)|sewer\w*|sewage|storm\s*water|septic|utilit\w*|electric\w*|natural\s*gas|energy\s*(charge|fee)|power\s*(charge|usage)|kwh|therm|waste\s*(water|management|disposal|collection)|\btrash\b|\bgarbage\b|\brefuse\b|recycl\w*|public\s*fire|fire\s*(fee|protection|line|service)|service\s*charge|sur\s?charge|assessment|franchise\s*fee|late\s*fee|finance\s*charge|connection\s*fee|readiness\s*to\s*serve)/i;
+
+/**
+ * Service / repair / labor / trade lines (v1.2.6). A salon line describing a
+ * repair, installation, plumbing/electrical/HVAC trade, inspection, or labor is
+ * NOT a product and NOT backbar — it is Repairs & Maintenance. Word-bounded; NO
+ * bare "service" (so "Shampoo Service Pack" / a "Service" product stay product;
+ * "service call" requires the second word). Single source of truth for both the
+ * salon product-default carve-out and the L3 "Repairs & Maintenance" category.
+ */
+const SERVICE_REPAIR_RE =
+  /\b(repair\w*|replac\w*|reinstall\w*|install\w*|\blabor\b|service\s*call|diverter|cartridge|plumb\w*|\bleak\w*|fixture|faucet|valve|\bhvac\b|electrical\s*work|handy\s*man|handyman|maintenance|inspection|troubleshoot\w*|caulk\w*|grout|drywall|technician)\b/i;
+
+/** Tax-line helpers (v1.2.6): a jurisdiction word + a percentage => a tax line. */
+const JURISDICTION_RE = /\b(city|county|state|village|town|township|municipal|parish|borough)\b/i;
+const PERCENT_RE = /\d+(?:\.\d+)?\s*%/;
+
 /** The brief's LEVEL 3 keyword rules (kept deliberately small/safe, ≥90% sure). */
 function keywordCategory(desc: string): string | null {
+  // Utility/fee and service/repair lines first — so they win over the generic
+  // /clean/ rule below and never fall to the entity default (v1.2.6).
+  if (UTILITY_EXPENSE_RE.test(desc)) return "Utilities";
+  if (SERVICE_REPAIR_RE.test(desc)) return "Repairs & Maintenance";
   if (/\btuition\b/.test(desc)) return "Tuition Revenue";
   if (/\bconsultant\b/.test(desc)) return "Professional / Outside Services";
   if (/clean/.test(desc)) return "Repairs & Maintenance";
@@ -257,16 +288,35 @@ function keywordCategory(desc: string): string | null {
   return null;
 }
 
-/** True when a tax-isolation L1 match should fire (broadened, but not "taxable"/"tax-exempt"). */
-function isTaxLine(desc: string): boolean {
+/**
+ * True when a tax-isolation L1 match should fire (broadened, but not "taxable"/
+ * "tax-exempt"). v1.2.6: also catches a jurisdiction/percentage tax line written
+ * without the word "tax" (e.g. "Milwaukee City (7.9%)") — a percent sign AND
+ * either a jurisdiction word OR a line amount equal to the invoice's header tax.
+ */
+function isTaxLine(
+  desc: string,
+  opts?: { lineAmount?: number | null; headerTax?: number | null },
+): boolean {
   // Never treat "taxable" / "tax-exempt" / "non-taxable" as a tax line.
   if (/\btax(able|[- ]?exempt)\b/.test(desc) || /non[- ]?tax/.test(desc)) return false;
   // sales/use/state tax, "tax code", or a standalone tax line.
   if (/(sales|use|state)\s*tax/.test(desc)) return true;
   if (/tax\s*code/.test(desc)) return true;
   if (/^\s*tax\s*$/.test(desc)) return true;
+  // A percentage line that is jurisdiction-labeled OR whose amount equals the
+  // invoice's header sales tax (within a cent) is a tax line. Low false-positive:
+  // a bare percent with no jurisdiction and amount != header tax does NOT match
+  // (so "10% off" / "20% Glycolic Peel" are never mis-flagged).
+  if (PERCENT_RE.test(desc)) {
+    if (JURISDICTION_RE.test(desc)) return true;
+    const amt = opts?.lineAmount;
+    const ht = opts?.headerTax;
+    if (amt != null && ht != null && ht > 0 && Math.abs(amt - ht) <= 0.01) return true;
+  }
   return false;
 }
+
 
 /**
  * Conservative non-product denylist for the SALON broad default (FIX 1, v1.2.0).
@@ -302,6 +352,11 @@ function isProductLike(
   if (vendorMapping?.is_inventory) return true;
   if (PRODUCT_ALLOW_RE.test(desc)) return true;
   if (business === "Neroli" || business === "SKNBar") {
+    // v1.2.6: utility/fee lines and service/repair/labor lines are NEVER products
+    // (in either tax direction) — they get their own L3 category (Utilities /
+    // Repairs & Maintenance), not the retail/backbar tax split.
+    if (UTILITY_EXPENSE_RE.test(desc)) return false;
+    if (SERVICE_REPAIR_RE.test(desc)) return false;
     return !NON_PRODUCT_RE.test(desc);
   }
   return false;
@@ -331,9 +386,11 @@ export function codeLineItem(opts: {
   lineTax?: number | null;
   /** Line amount (signed). A negative amount is a discount/credit (v1.1.8 L0). */
   amount?: number | null;
+  /** Invoice header sales tax — lets L1 recognize a jurisdiction/% tax line (v1.2.6). */
+  headerTax?: number | null;
 }): { category: string; confidence: ConfidenceLevel; logic: string; itemType?: ItemType } {
   const desc = (opts.description || "").toLowerCase();
-  const { business, vendor, vendorMapping, salesTaxPresent, lineTax, amount } = opts;
+  const { business, vendor, vendorMapping, salesTaxPresent, lineTax, amount, headerTax } = opts;
 
   type Coded = { category: string; confidence: ConfidenceLevel; logic: string; itemType?: ItemType };
   // Returns a concrete-category result ONLY if it is valid for this entity's COA
@@ -378,7 +435,7 @@ export function codeLineItem(opts: {
   }
 
   // L1 — tax isolation (absolute, never overridden) — but only if valid for entity.
-  if (isTaxLine(desc)) {
+  if (isTaxLine(desc, { lineAmount: amount, headerTax })) {
     const r = gated("Sales/Use Tax", CONFIDENCE_LEVEL.HIGH, "LEVEL 1");
     if (r) return r;
   }
