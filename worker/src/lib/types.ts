@@ -57,6 +57,7 @@ export interface InvoiceRow {
   ai_processed_at: string | null;
   exported_at: string | null;
   export_id: string | null;
+  archived_at: string | null;
   created_at: string;
 }
 

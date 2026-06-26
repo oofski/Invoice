@@ -37,6 +37,37 @@ export function getReductoRaw(env: Env, pdfR2Key: string) {
   return env.PDFS.get(reductoKey(pdfR2Key));
 }
 
+/**
+ * R2 key for the "APPROVED"-stamped copy of an invoice PDF (F2), stored as a
+ * sidecar next to the clean original so the original is never overwritten.
+ * e.g. "invoices/2026/<id>.pdf" -> "invoices/2026/<id>.pdf.approved.pdf".
+ */
+export function stampedKey(pdfR2Key: string): string {
+  return `${pdfR2Key}.approved.pdf`;
+}
+
+/**
+ * Stores the stamped PDF sidecar. customMetadata records the approval state the
+ * stamp was rendered for (decidedAt + approver) so the reader can detect a stale
+ * cache (re-approval/reroute changes decided_at) and re-stamp.
+ */
+export async function putStampedPdf(
+  env: Env,
+  pdfR2Key: string,
+  bytes: ArrayBuffer | Uint8Array,
+  meta: { decidedAt: string; approver: string },
+): Promise<void> {
+  await env.PDFS.put(stampedKey(pdfR2Key), bytes as ArrayBuffer, {
+    httpMetadata: { contentType: "application/pdf" },
+    customMetadata: { decidedAt: meta.decidedAt, approver: meta.approver },
+  });
+}
+
+/** Returns the stamped sidecar R2 object (with .body + .customMetadata) or null. */
+export function getStampedPdf_R2(env: Env, pdfR2Key: string) {
+  return env.PDFS.get(stampedKey(pdfR2Key));
+}
+
 export async function putPdf(
   env: Env,
   key: string,

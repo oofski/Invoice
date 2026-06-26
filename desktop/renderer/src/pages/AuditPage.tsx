@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Download } from "lucide-react";
+import { Download, Eraser } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import {
   Card,
@@ -10,8 +10,12 @@ import {
   Select,
 } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
-import { formatDate } from "@/lib/utils";
-import { AUDIT_ACTION } from "@/lib/constants";
+import { useProfile } from "@/components/ProfileProvider";
+import { api, ApiError } from "@/lib/api";
+import { toast } from "@/components/ui/Toast";
+import { downloadBlob, formatDate } from "@/lib/utils";
+import { buildSheet, buildWorkbook } from "@/lib/workbook";
+import { AUDIT_ACTION, ROLES } from "@/lib/constants";
 import type { UserRow } from "@/lib/types";
 
 interface GlobalAuditEntry {
@@ -24,50 +28,110 @@ interface GlobalAuditEntry {
   vendor: string | null;
 }
 
-function csvEscape(s: string) {
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+const PAGE_LIMIT = 500;
+const EXCEL_HEADER = ["Timestamp", "User", "Action", "Vendor", "Note"];
 
 export default function AuditPage() {
+  const profile = useProfile();
+  const isAdmin = profile.role === ROLES.ADMIN;
+
   const [action, setAction] = useState("");
   const [userId, setUserId] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const query = new URLSearchParams();
   if (action) query.set("action", action);
   if (userId) query.set("userId", userId);
   if (from) query.set("from", new Date(from).toISOString());
   if (to) query.set("to", new Date(to + "T23:59:59").toISOString());
+  if (showAll) query.set("showAll", "1");
 
-  const { data, loading } = useApi<{ entries: GlobalAuditEntry[] }>(
+  const { data, loading, refetch } = useApi<{ entries: GlobalAuditEntry[] }>(
     `/api/audit?${query.toString()}`,
   );
   const { data: usersData } = useApi<{ users: UserRow[] }>("/api/users");
 
   const entries = data?.entries ?? [];
+  const atCap = entries.length >= PAGE_LIMIT;
 
-  function exportCsv() {
-    const header = ["Timestamp", "User", "Action", "Vendor", "Note"];
-    const rows = entries.map((e) =>
-      [
-        new Date(e.created_at).toISOString(),
-        e.user_name,
-        e.action,
-        e.vendor ?? "",
-        e.note ?? "",
-      ]
-        .map((x) => csvEscape(String(x)))
-        .join(","),
-    );
-    const csv = [header.join(","), ...rows].join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `InvoiceIQ_Audit_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  // Projects the loaded entries into an .xlsx Blob. Shared by "Download Excel"
+  // AND the export-before-clear safety step.
+  function buildExcel(): Blob {
+    const rows = entries.map((e) => [
+      new Date(e.created_at).toISOString(),
+      e.user_name,
+      e.action,
+      e.vendor ?? "",
+      e.note ?? "",
+    ]);
+    const sheet = buildSheet("Audit", EXCEL_HEADER, rows);
+    return buildWorkbook([sheet]);
+  }
+
+  function downloadExcel() {
+    if (entries.length === 0) {
+      toast.info("No audit entries to export.");
+      return;
+    }
+    try {
+      const blob = buildExcel();
+      downloadBlob(
+        blob,
+        `InvoiceIQ_Audit_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+      if (atCap) {
+        toast.info(
+          `Exported the first ${PAGE_LIMIT} rows — more may exist beyond the cap.`,
+        );
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Excel export failed");
+    }
+  }
+
+  // F3b: "Clear" sets a per-user view cutoff — it NEVER deletes audit rows.
+  // EXPORT the Excel FIRST (locked safety); if it throws, abort the clear.
+  async function clearAudit() {
+    if (
+      !window.confirm(
+        "Clear your audit view? This hides older entries from your view only (no rows are ever deleted; everyone else's view is unaffected). An Excel copy downloads first.",
+      )
+    )
+      return;
+
+    setClearing(true);
+    try {
+      // STEP 1 (locked): export must succeed before the cutoff is set.
+      const blob = buildExcel();
+      downloadBlob(
+        blob,
+        `InvoiceIQ_Audit_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+    } catch (err) {
+      // Export failed → ABORT. Do NOT set the cutoff.
+      toast.error(
+        err instanceof Error
+          ? `Export failed — nothing cleared: ${err.message}`
+          : "Export failed — nothing cleared.",
+      );
+      setClearing(false);
+      return;
+    }
+
+    try {
+      // STEP 2: set the cutoff only after the Excel is safely downloaded.
+      await api.clearAudit();
+      toast.success("Audit view cleared");
+      setShowAll(false);
+      await refetch();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Clear failed");
+    } finally {
+      setClearing(false);
+    }
   }
 
   return (
@@ -76,20 +140,33 @@ export default function AuditPage() {
         title="Audit Trail"
         subtitle="Every state change, chronologically"
         actions={
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={exportCsv}
-            disabled={entries.length === 0}
-          >
-            <Download className="h-4 w-4" /> Export CSV
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={downloadExcel}
+              disabled={entries.length === 0}
+            >
+              <Download className="h-4 w-4" /> Download Excel
+            </Button>
+            {isAdmin && (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={clearAudit}
+                loading={clearing}
+                title="Export the audit log to Excel, then hide older entries from your view (rows are never deleted)."
+              >
+                <Eraser className="h-4 w-4" /> Clear
+              </Button>
+            )}
+          </div>
         }
       />
 
       <div className="p-6">
         <Card>
-          <div className="flex flex-wrap gap-2 border-b border-line p-4">
+          <div className="flex flex-wrap items-center gap-2 border-b border-line p-4">
             <Select
               value={action}
               onChange={(e) => setAction(e.target.value)}
@@ -126,7 +203,22 @@ export default function AuditPage() {
               onChange={(e) => setTo(e.target.value)}
               className="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-subtle focus:border-accent focus:ring-ring"
             />
+            <label className="ml-auto inline-flex items-center gap-2 text-sm text-ink-muted">
+              <input
+                type="checkbox"
+                checked={showAll}
+                onChange={(e) => setShowAll(e.target.checked)}
+              />
+              Show all
+            </label>
           </div>
+
+          {atCap && (
+            <div className="border-b border-line bg-surface-2 px-4 py-2 text-xs text-ink-muted">
+              Showing the first {PAGE_LIMIT} entries — more may exist. Narrow the
+              filters to refine.
+            </div>
+          )}
 
           {loading ? (
             <div className="flex justify-center py-12">

@@ -39,3 +39,35 @@ export function buildBillWorkbook(
   const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   return new Blob([out], { type: XLSX_MIME });
 }
+
+// ---------------------------------------------------------------------------
+// Generic single-/multi-sheet workbook builder (used by the Invoices and Audit
+// "Download Excel" buttons). Each sheet is a header row plus an array-of-arrays
+// of cell values. Reuses the same `aoa_to_sheet` / `XLSX_MIME` / 31-char cap.
+// ---------------------------------------------------------------------------
+
+export interface SheetSpec {
+  name: string;
+  /** Header row plus the projected data rows. */
+  aoa: (string | number)[][];
+}
+
+/** Projects a header + rows into a named sheet spec for `buildWorkbook`. */
+export function buildSheet(
+  name: string,
+  header: string[],
+  rows: (string | number)[][],
+): SheetSpec {
+  return { name, aoa: [header, ...rows] };
+}
+
+/** Assembles one or more `SheetSpec`s into a downloadable .xlsx Blob. */
+export function buildWorkbook(sheets: SheetSpec[]): Blob {
+  const wb = XLSX.utils.book_new();
+  for (const sheet of sheets) {
+    const ws = XLSX.utils.aoa_to_sheet(sheet.aoa);
+    XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, MAX_SHEET_NAME));
+  }
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  return new Blob([out], { type: XLSX_MIME });
+}

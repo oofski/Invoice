@@ -165,4 +165,20 @@ export const api = {
     }
     return res.blob();
   },
+
+  // ------------------------------------------------ archive / audit clear
+  /** Archive a single invoice (ADMIN only) — sets `archived_at`. */
+  archiveInvoice: (id: string) =>
+    api.post<{ ok: true; archived_at: string }>(`/api/invoices/${id}/archive`),
+  /** Unarchive a single invoice (ADMIN only) — clears `archived_at`. */
+  unarchiveInvoice: (id: string) =>
+    api.post<{ ok: true }>(`/api/invoices/${id}/unarchive`),
+  /** Batch-archive the given invoice ids (ADMIN only). */
+  archiveInvoices: (invoiceIds: string[]) =>
+    api.post<{ ok: true; archived: number }>(`/api/invoices/archive`, {
+      invoiceIds,
+    }),
+  /** Set this admin's audit-view cutoff (ADMIN only) — hides, never deletes. */
+  clearAudit: () =>
+    api.post<{ ok: true; cutoff_at: string }>(`/api/audit/clear`),
 };

@@ -5,6 +5,20 @@ export function cn(...inputs: ClassValue[]): string {
   return clsx(inputs);
 }
 
+/**
+ * Triggers a browser download of a Blob via a transient `<a download>` anchor.
+ * Works in the Electron `file://` renderer (routes to the OS downloads folder);
+ * no Electron IPC needed. Shared by every "Download X" surface in the app.
+ */
+export function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /** Parses a money string like "$1,234.56" into a number. */
 export function parseAmount(value: string | number | null | undefined): number {
   if (typeof value === "number") return value;

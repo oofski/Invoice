@@ -6,29 +6,27 @@ import {
   FileDown,
   History,
   FileSpreadsheet,
+  FileArchive,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Button, Spinner, EmptyState } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
-import { formatCurrency, formatDate, cn } from "@/lib/utils";
+import { formatCurrency, formatDate, cn, downloadBlob } from "@/lib/utils";
 import { INVOICE_STATUS } from "@/lib/constants";
 import { buildBillWorkbook } from "@/lib/workbook";
+import { zipPdfs } from "@/lib/zip";
 import type { QueueInvoice } from "@/components/InvoiceTable";
 import type { ExportRow, FactorResponse } from "@/lib/types";
 
-function downloadBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 function downloadCsv(csv: string, fileName: string) {
   downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8;" }), fileName);
+}
+
+/** YYYYMMDD for download file names. */
+function yyyymmdd(): string {
+  return new Date().toISOString().slice(0, 10).replace(/-/g, "");
 }
 
 export default function ExportPage() {
@@ -43,6 +41,10 @@ export default function ExportPage() {
   const [exporting, setExporting] = useState(false);
   const [factoring, setFactoring] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [zipping, setZipping] = useState(false);
+  const [zipProgress, setZipProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
 
   const invoices = data?.invoices ?? [];
   const ready = invoices.filter((i) => (i.review_count ?? 0) === 0);
@@ -119,6 +121,36 @@ export default function ExportPage() {
     }
   }
 
+  // F1: zip every export-ready approved invoice that has a PDF. Pulls each PDF
+  // from the existing /pdf endpoint (so APPROVED files arrive stamped), zips
+  // client-side, and downloads a single .zip. Invoices without a PDF are skipped.
+  const zipScope = ready.filter((i) => i.has_pdf !== false);
+
+  async function downloadZip() {
+    const items = zipScope.map((i) => ({
+      id: i.id,
+      fileName: `${i.vendor}_${i.invoice_number}`,
+    }));
+    if (items.length === 0) {
+      toast.info("No approved invoices with a PDF to download.");
+      return;
+    }
+    setZipping(true);
+    setZipProgress({ done: 0, total: items.length });
+    try {
+      const blob = await zipPdfs(items, (done, total) =>
+        setZipProgress({ done, total }),
+      );
+      downloadBlob(blob, `InvoiceIQ_Approved_PDFs_${yyyymmdd()}.zip`);
+      toast.success(`Zipped ${items.length} approved PDF(s)`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Zip download failed");
+    } finally {
+      setZipping(false);
+      setZipProgress(null);
+    }
+  }
+
   async function reDownload(row: ExportRow) {
     setDownloadingId(row.id);
     try {
@@ -154,6 +186,18 @@ export default function ExportPage() {
             >
               <FileSpreadsheet className="h-4 w-4" />
               Factor invoices for bill import
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={downloadZip}
+              loading={zipping}
+              disabled={zipScope.length === 0}
+              title="Download every export-ready approved invoice's PDF as a single .zip"
+            >
+              <FileArchive className="h-4 w-4" />
+              {zipping && zipProgress
+                ? `Zipping ${zipProgress.done} of ${zipProgress.total}…`
+                : "Download approved PDFs (.zip)"}
             </Button>
           </div>
         }

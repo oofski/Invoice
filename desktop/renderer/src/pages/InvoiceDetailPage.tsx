@@ -1,6 +1,13 @@
 import { useMemo, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, RefreshCw, ScanLine, AlertTriangle, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  RefreshCw,
+  ScanLine,
+  AlertTriangle,
+  Trash2,
+  Download,
+} from "lucide-react";
 import { PdfPane } from "@/components/PdfPane";
 import { InvoiceDataPanel } from "@/components/InvoiceDataPanel";
 import { LineItemsTable } from "@/components/LineItemsTable";
@@ -9,6 +16,7 @@ import { Card, Button, Spinner } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
 import { useProfile } from "@/components/ProfileProvider";
 import { api, ApiError } from "@/lib/api";
+import { downloadBlob } from "@/lib/utils";
 import { toast } from "@/components/ui/Toast";
 import { INVOICE_STATUS, ROLES } from "@/lib/constants";
 import type { InvoiceWithRelations } from "@/lib/types";
@@ -27,6 +35,7 @@ export default function InvoiceDetailPage() {
   const [reprocessing, setReprocessing] = useState(false);
   const [rescanning, setRescanning] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const invoice = data?.invoice;
   const lineItems = useMemo(() => invoice?.line_items ?? [], [invoice]);
@@ -98,6 +107,21 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  // F4: download the current PDF. Hits the same /pdf endpoint the viewer uses,
+  // so an APPROVED/EXPORTED invoice's file arrives with the on-the-fly stamp.
+  async function downloadPdf() {
+    if (!invoice) return;
+    setDownloadingPdf(true);
+    try {
+      const blob = await api.getBlob(`/api/invoices/${invoice.id}/pdf`);
+      downloadBlob(blob, `${invoice.vendor}_${invoice.invoice_number}.pdf`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Download failed");
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
+
   async function deleteInvoice() {
     if (
       !window.confirm(
@@ -149,6 +173,17 @@ export default function InvoiceDetailPage() {
           <ArrowLeft className="h-4 w-4" /> Invoices
         </Link>
         <div className="flex items-center gap-2">
+          {invoice.has_pdf && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={downloadPdf}
+              loading={downloadingPdf}
+            >
+              <Download className="h-4 w-4" />
+              Download PDF
+            </Button>
+          )}
           {(profile.role === ROLES.ACCOUNTANT ||
             profile.role === ROLES.ADMIN) && (
             <>

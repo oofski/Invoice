@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ArchiveRestore } from "lucide-react";
 import { StatusBadge } from "@/components/ui/Badges";
 import { EmptyState } from "@/components/ui/primitives";
 import { formatCurrency, ageLabel, cn } from "@/lib/utils";
@@ -12,11 +12,17 @@ export function InvoiceTable({
   basePath = "/invoices",
   emptyTitle = "No invoices",
   emptyDescription,
+  onUnarchive,
+  unarchivingId,
 }: {
   invoices: QueueInvoice[];
   basePath?: string;
   emptyTitle?: string;
   emptyDescription?: string;
+  /** When provided, renders an Archived/Unarchive column (admin only). */
+  onUnarchive?: (id: string) => void;
+  /** Id currently being unarchived (disables its button). */
+  unarchivingId?: string | null;
 }) {
   if (invoices.length === 0) {
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
@@ -34,6 +40,7 @@ export function InvoiceTable({
             <th className="px-4 py-2.5 font-medium">Approver</th>
             <th className="px-4 py-2.5 font-medium">Status</th>
             <th className="px-4 py-2.5 font-medium">Age</th>
+            {onUnarchive && <th className="px-4 py-2.5 font-medium" />}
           </tr>
         </thead>
         <tbody>
@@ -82,6 +89,23 @@ export function InvoiceTable({
                 <td className="px-4 py-3 text-ink-muted">
                   {ageLabel(inv.created_at)}
                 </td>
+                {onUnarchive && (
+                  <td className="px-4 py-3 text-right">
+                    {inv.archived_at ? (
+                      <button
+                        type="button"
+                        onClick={() => onUnarchive(inv.id)}
+                        disabled={unarchivingId === inv.id}
+                        className="inline-flex items-center gap-1 font-medium text-accent hover:underline disabled:opacity-50"
+                      >
+                        <ArchiveRestore className="h-3.5 w-3.5" />
+                        {unarchivingId === inv.id ? "Unarchiving…" : "Unarchive"}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-ink-subtle">—</span>
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}

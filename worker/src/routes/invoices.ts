@@ -10,7 +10,8 @@ import {
   hydrateInvoice,
 } from "../lib/db";
 import { processInvoiceAI, ingestInvoicePdf } from "../lib/process";
-import { getPdf, deletePdf, getReductoRaw } from "../lib/storage";
+import { getPdf, deletePdf, getReductoRaw, stampedKey } from "../lib/storage";
+import { getStampedPdf } from "../lib/pdfStamp";
 import {
   sendReminderEmail,
   sendRejectionEmail,
@@ -183,6 +184,15 @@ invoices.get("/", async (c) => {
   if (approver) { sql += " AND approved_by = ?"; params.push(approver); }
   const q = c.req.query("q");
   if (q) { sql += " AND vendor LIKE ?"; params.push(`%${q}%`); }
+
+  // F3: hide archived rows by default. ?includeArchived=1 (any truthy) shows them.
+  // Gated on archiveReady so a pre-migration DB (no archived_at column) is tolerated
+  // — when the column is absent the clause is skipped and everything shows.
+  const includeArchived = !!c.req.query("includeArchived");
+  if (!includeArchived && (await archiveReady(c.env))) {
+    sql += " AND archived_at IS NULL";
+  }
+
   sql += " ORDER BY created_at DESC LIMIT ?";
   params.push(Number(c.req.query("limit") ?? 500));
 
@@ -202,6 +212,30 @@ invoices.get("/:id/pdf", async (c) => {
     .bind(id)
     .first<{ r2_key: string; mime: string; file_name: string }>();
   if (!meta?.r2_key) return c.json({ error: "No PDF" }, 404);
+
+  // F2: APPROVED/EXPORTED invoices get an on-the-fly "APPROVED" stamp (memoized
+  // to an R2 sidecar). getStampedPdf never throws — it falls back to the original
+  // bytes on any pdf-lib failure. Non-approved invoices take the original-stream
+  // path below byte-identically (no pdf-lib invoked).
+  if (
+    inv.status === INVOICE_STATUS.APPROVED ||
+    inv.status === INVOICE_STATUS.EXPORTED
+  ) {
+    try {
+      const bytes = await getStampedPdf(c.env, inv, meta.r2_key);
+      return new Response(bytes, {
+        headers: {
+          "content-type": meta.mime || "application/pdf",
+          "content-disposition": `inline; filename="${meta.file_name ?? "invoice.pdf"}"`,
+        },
+      });
+    } catch (e) {
+      // getStampedPdf only throws if the original object is missing; treat as 404.
+      console.error("[pdf] stamped read failed:", e);
+      return c.json({ error: "No PDF" }, 404);
+    }
+  }
+
   const obj = await getPdf(c.env, meta.r2_key);
   if (!obj) return c.json({ error: "No PDF" }, 404);
   return new Response(obj.body, {
@@ -670,6 +704,98 @@ invoices.post("/:id/line-items", async (c) => {
   return c.json({ ok: true, id: lineId }, 201);
 });
 
+// ----- POST /archive (batch, admin only) ------------------------------
+// F3: archives a set of invoices (safe, reversible — sets archived_at, never
+// deletes). Body { invoiceIds: string[] } — typically the currently-filtered ids.
+// One audit row per invoice. Registered BEFORE GET /:id so the literal path isn't
+// shadowed by the :id param route. (No /:id collision since this has no param.)
+invoices.post("/archive", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN)) return c.json({ error: "Forbidden" }, 403);
+  if (!(await archiveReady(c.env)))
+    return c.json({ error: "Archiving needs a one-time database setup — run the migration." }, 503);
+
+  const body = (await c.req.json().catch(() => ({}))) as { invoiceIds?: string[] };
+  const ids = Array.isArray(body.invoiceIds)
+    ? body.invoiceIds.filter((x): x is string => typeof x === "string" && !!x)
+    : [];
+  if (ids.length === 0)
+    return c.json({ error: "invoiceIds (non-empty array) is required" }, 400);
+
+  const u = user(c);
+  const at = nowIso();
+  let archived = 0;
+  for (const id of ids) {
+    const inv = await getInvoice(c.env, id);
+    if (!inv || inv.archived_at) continue; // skip unknown / already-archived
+    await c.env.DB.prepare(
+      "UPDATE invoices SET archived_at = ? WHERE id = ?",
+    )
+      .bind(at, id)
+      .run();
+    await audit(c.env, {
+      invoiceId: id,
+      userId: u.id,
+      action: AUDIT_ACTION.INVOICE_ARCHIVED,
+      prevValue: { archived_at: null },
+      newValue: { archived_at: at },
+      note: `Archived by ${u.name}`,
+    });
+    archived++;
+  }
+  return c.json({ ok: true, archived });
+});
+
+// ----- POST /:id/archive (admin only) ---------------------------------
+// F3: archive a single invoice (reversible). Registered BEFORE GET /:id.
+invoices.post("/:id/archive", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN)) return c.json({ error: "Forbidden" }, 403);
+  if (!(await archiveReady(c.env)))
+    return c.json({ error: "Archiving needs a one-time database setup — run the migration." }, 503);
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+
+  const u = user(c);
+  const at = nowIso();
+  await c.env.DB.prepare("UPDATE invoices SET archived_at = ? WHERE id = ?")
+    .bind(at, id)
+    .run();
+  await audit(c.env, {
+    invoiceId: id,
+    userId: u.id,
+    action: AUDIT_ACTION.INVOICE_ARCHIVED,
+    prevValue: { archived_at: inv.archived_at ?? null },
+    newValue: { archived_at: at },
+    note: `Archived by ${u.name}`,
+  });
+  return c.json({ ok: true, archived_at: at });
+});
+
+// ----- POST /:id/unarchive (admin only) -------------------------------
+// F3: restore an archived invoice to the default view. Registered BEFORE GET /:id.
+invoices.post("/:id/unarchive", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN)) return c.json({ error: "Forbidden" }, 403);
+  if (!(await archiveReady(c.env)))
+    return c.json({ error: "Archiving needs a one-time database setup — run the migration." }, 503);
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+
+  const u = user(c);
+  await c.env.DB.prepare("UPDATE invoices SET archived_at = NULL WHERE id = ?")
+    .bind(id)
+    .run();
+  await audit(c.env, {
+    invoiceId: id,
+    userId: u.id,
+    action: AUDIT_ACTION.INVOICE_UNARCHIVED,
+    prevValue: { archived_at: inv.archived_at ?? null },
+    newValue: { archived_at: null },
+    note: `Unarchived by ${u.name}`,
+  });
+  return c.json({ ok: true });
+});
+
 // ----- GET /:id --------------------------------------------------------
 invoices.get("/:id", async (c) => {
   const id = c.req.param("id");
@@ -733,6 +859,8 @@ invoices.delete("/:id", async (c) => {
   if (meta?.r2_key) {
     try {
       await deletePdf(c.env, meta.r2_key);
+      // Best-effort: remove the F2 stamped sidecar if one was ever written.
+      await deletePdf(c.env, stampedKey(meta.r2_key));
     } catch (e) {
       console.error("[delete] R2 delete failed:", e);
     }
@@ -806,6 +934,16 @@ function canSplit(c: import("hono").Context<AppEnv>, inv: InvoiceRow): boolean {
 async function splitReady(env: AppEnv["Bindings"]): Promise<boolean> {
   try {
     await env.DB.prepare("SELECT 1 FROM invoice_allocations LIMIT 1").first();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True once the archive migration (invoices.archived_at column) has been run. */
+async function archiveReady(env: AppEnv["Bindings"]): Promise<boolean> {
+  try {
+    await env.DB.prepare("SELECT archived_at FROM invoices LIMIT 1").first();
     return true;
   } catch {
     return false;

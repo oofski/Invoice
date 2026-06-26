@@ -249,3 +249,13 @@ INSERT OR REPLACE INTO location_mappings (id, address, keywords, business, class
 INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-wella','Wella',NULL,NULL,NULL,1,'Retail / Product Costs');
 INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-abbvie','AbbVie',NULL,NULL,NULL,1,'Retail / Product Costs');
 INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-opi','OPI',NULL,NULL,NULL,1,'Retail / Product Costs');
+-- v1.2.x: safe-archive for invoices (reversible; default list filters archived rows).
+-- archived_at is nullable; ADD COLUMN errors if it already exists — ignore that error.
+ALTER TABLE invoices ADD COLUMN archived_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_invoices_archived ON invoices(archived_at);
+-- v1.2.x: per-user audit-view cutoff (a read bookmark — audit_log rows are NEVER mutated).
+CREATE TABLE IF NOT EXISTS audit_clear_cutoffs (
+  user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  cutoff_at  TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);

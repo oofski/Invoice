@@ -5,6 +5,34 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.8] — 2026-06-26
+
+### Added
+- **Download the invoice PDF while viewing it.** A **Download PDF** button now sits
+  in the invoice detail header — anyone who can see the invoice can save its PDF.
+- **Bulk-download approved PDFs as one .zip.** On the Export screen, **Download
+  approved PDFs (.zip)** packages every export-ready approved invoice's PDF into a
+  single zip (with progress), so you can file them all at once.
+- **"APPROVED" stamp burned into the PDF.** Once an invoice is approved, its PDF
+  carries an **APPROVED** stamp (approver name + approval date) on the first page.
+  The stamp travels with the file everywhere it's downloaded — the single download,
+  the bulk zip, and the QBO export — while the original scan is preserved untouched.
+- **Download to Excel + Clear (safe archive) for the Invoices list and the Audit
+  log.** Each view gets a **Download Excel** button (saves what's currently shown to
+  a spreadsheet) and an admin-only **Clear** button that *exports the Excel first,
+  then declutters the view* — it never deletes:
+  - Invoices are **archived** (reversible): they drop out of the default list but
+    are fully preserved, viewable via the **Show archived** toggle and restorable
+    per-row with **Unarchive**.
+  - The **Audit log is never altered.** Clear sets a personal "cleared up to here"
+    bookmark that hides older entries from your view only; every audit row stays in
+    the database permanently, and **Show all** brings the full history back.
+
+### Note
+- The archive / audit-clear features require a one-time database migration on the
+  backend; until it's applied those Clear actions are safely disabled (everything
+  else works immediately).
+
 ## [1.2.7] — 2026-06-26
 
 ### Fixed

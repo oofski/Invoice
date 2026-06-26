@@ -50,6 +50,7 @@ export interface InvoiceRow {
   exported_at: string | null;
   export_id: string | null;
   created_at: string;
+  archived_at?: string | null;
   review_count?: number;
   has_pdf?: boolean;
 }

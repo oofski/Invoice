@@ -1,9 +1,15 @@
 import { useMemo, useState } from "react";
+import { Download, Archive } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, Spinner, Input } from "@/components/ui/primitives";
+import { Card, Spinner, Input, Button } from "@/components/ui/primitives";
 import { InvoiceTable, type QueueInvoice } from "@/components/InvoiceTable";
 import { useApi } from "@/hooks/useApi";
-import { INVOICE_STATUS, BUSINESS_ENTITIES } from "@/lib/constants";
+import { useProfile } from "@/components/ProfileProvider";
+import { api, ApiError } from "@/lib/api";
+import { toast } from "@/components/ui/Toast";
+import { downloadBlob, formatCurrency, formatDate } from "@/lib/utils";
+import { buildSheet, buildWorkbook } from "@/lib/workbook";
+import { INVOICE_STATUS, BUSINESS_ENTITIES, ROLES } from "@/lib/constants";
 
 const STATUSES = [
   "ALL",
@@ -15,13 +21,33 @@ const STATUSES = [
   INVOICE_STATUS.EXPORTED,
 ];
 
+const PAGE_LIMIT = 500;
+
+const EXCEL_HEADER = [
+  "Vendor",
+  "Number",
+  "Entity",
+  "Class",
+  "Status",
+  "Approver",
+  "Amount",
+  "Date",
+];
+
 export default function InvoicesPage() {
-  const { data, loading } = useApi<{ invoices: QueueInvoice[] }>(
-    "/api/invoices?limit=500",
-  );
+  const profile = useProfile();
+  const isAdmin = profile.role === ROLES.ADMIN;
+
   const [status, setStatus] = useState("ALL");
   const [entity, setEntity] = useState("");
   const [search, setSearch] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [unarchivingId, setUnarchivingId] = useState<string | null>(null);
+
+  const { data, loading, refetch } = useApi<{ invoices: QueueInvoice[] }>(
+    `/api/invoices?limit=${PAGE_LIMIT}${showArchived ? "&includeArchived=1" : ""}`,
+  );
 
   const invoices = useMemo(() => data?.invoices ?? [], [data]);
   const filtered = useMemo(
@@ -36,12 +62,140 @@ export default function InvoicesPage() {
     [invoices, status, entity, search],
   );
 
+  const atCap = invoices.length >= PAGE_LIMIT;
+
+  // Projects the currently-filtered rows into an .xlsx Blob. Shared by the
+  // "Download Excel" button AND the export-before-clear safety step.
+  function buildFilteredExcel(): Blob {
+    const rows = filtered.map((i) => [
+      i.vendor,
+      i.invoice_number,
+      i.business ?? "",
+      i.class && i.class !== "None" ? i.class : "",
+      i.status,
+      i.approved_by ?? "",
+      formatCurrency(Number(i.total_amount)),
+      formatDate(i.inv_date) === "—" ? "" : formatDate(i.inv_date),
+    ]);
+    const sheet = buildSheet("Invoices", EXCEL_HEADER, rows);
+    return buildWorkbook([sheet]);
+  }
+
+  function downloadExcel() {
+    if (filtered.length === 0) {
+      toast.info("No invoices to export.");
+      return;
+    }
+    try {
+      const blob = buildFilteredExcel();
+      downloadBlob(
+        blob,
+        `InvoiceIQ_Invoices_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+      if (atCap) {
+        toast.info(
+          `Exported the first ${PAGE_LIMIT} rows — more may exist beyond the cap.`,
+        );
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Excel export failed");
+    }
+  }
+
+  // F3b: "Clear" = SAFE ARCHIVE. EXPORT the Excel FIRST (locked safety), then
+  // archive the currently-filtered rows. If the export throws, abort the clear.
+  async function clearArchive() {
+    const ids = filtered.map((i) => i.id);
+    if (ids.length === 0) {
+      toast.info("Nothing to clear.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Archive ${ids.length} invoice(s)? They will be hidden from the default list (records, PDFs, and line items are preserved and reversible). An Excel copy downloads first.`,
+      )
+    )
+      return;
+
+    setClearing(true);
+    try {
+      // STEP 1 (locked): export must succeed before any row is archived.
+      const blob = buildFilteredExcel();
+      downloadBlob(
+        blob,
+        `InvoiceIQ_Invoices_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+    } catch (err) {
+      // Export failed → ABORT. Do NOT archive.
+      toast.error(
+        err instanceof Error
+          ? `Export failed — nothing archived: ${err.message}`
+          : "Export failed — nothing archived.",
+      );
+      setClearing(false);
+      return;
+    }
+
+    try {
+      // STEP 2: archive only after the Excel is safely downloaded.
+      const res = await api.archiveInvoices(ids);
+      toast.success(`Archived ${res.archived} invoice(s)`);
+      await refetch();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Archive failed");
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  async function unarchive(id: string) {
+    setUnarchivingId(id);
+    try {
+      await api.unarchiveInvoice(id);
+      toast.success("Invoice unarchived");
+      await refetch();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Unarchive failed");
+    } finally {
+      setUnarchivingId(null);
+    }
+  }
+
   return (
     <div>
-      <PageHeader title="Invoices" subtitle="All invoices you can access" />
+      <PageHeader
+        title="Invoices"
+        subtitle="All invoices you can access"
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={downloadExcel}
+              disabled={filtered.length === 0}
+            >
+              <Download className="h-4 w-4" />
+              Download Excel
+            </Button>
+            {isAdmin && (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={clearArchive}
+                loading={clearing}
+                disabled={filtered.length === 0}
+                title="Export the filtered invoices to Excel, then archive (hide) them. Reversible."
+              >
+                <Archive className="h-4 w-4" />
+                Clear
+              </Button>
+            )}
+          </div>
+        }
+      />
       <div className="p-6">
         <Card>
-          <div className="flex flex-wrap gap-2 border-b border-line p-4">
+          <div className="flex flex-wrap items-center gap-2 border-b border-line p-4">
             <Input
               placeholder="Search vendor…"
               value={search}
@@ -71,13 +225,31 @@ export default function InvoicesPage() {
                 </option>
               ))}
             </select>
+            <label className="ml-auto inline-flex items-center gap-2 text-sm text-ink-muted">
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(e) => setShowArchived(e.target.checked)}
+              />
+              Show archived
+            </label>
           </div>
+          {atCap && (
+            <div className="border-b border-line bg-surface-2 px-4 py-2 text-xs text-ink-muted">
+              Showing the first {PAGE_LIMIT} rows — more may exist. Narrow the
+              filters to refine.
+            </div>
+          )}
           {loading ? (
             <div className="flex justify-center py-16">
               <Spinner />
             </div>
           ) : (
-            <InvoiceTable invoices={filtered} />
+            <InvoiceTable
+              invoices={filtered}
+              onUnarchive={isAdmin && showArchived ? unarchive : undefined}
+              unarchivingId={unarchivingId}
+            />
           )}
         </Card>
       </div>
