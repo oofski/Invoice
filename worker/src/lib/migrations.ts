@@ -76,6 +76,55 @@ const SEED_INVENTORY_VENDORS: { id: string; name: string }[] = [
   { id: "ven-opi", name: "OPI" },
 ];
 
+let schemaEnsured = false;
+
+/**
+ * Runtime SCHEMA migration (v1.2.9). Applies the additive DDL the archive /
+ * audit-clear features (v1.2.8) need — the nullable `invoices.archived_at`
+ * column, its index, and the `audit_clear_cutoffs` table — so the database
+ * upgrades ITSELF on the first request after deploy, with NO manual
+ * `wrangler d1 execute` step on anyone's part.
+ *
+ * SAFETY: purely additive. `ADD COLUMN` only adds a new nullable column (no data
+ * is read, moved, or dropped); the CREATE statements are IF NOT EXISTS. Existing
+ * invoice / line-item / audit / user data is never touched. Mirrors the
+ * `-- live-migration` DDL appended to db/schema.sql (which is used by a fresh
+ * `db:init`); keep the two in sync.
+ *
+ * Idempotency: `ADD COLUMN` is NOT idempotent in SQLite — it errors once the
+ * column exists, which we detect and ignore. Runs once per isolate, never throws
+ * (a transient failure just logs and retries on the next request).
+ */
+export async function ensureSchema(env: Env): Promise<void> {
+  if (schemaEnsured) return;
+  // 1) Add the archive column. Tolerate the expected "duplicate column" error
+  //    when it already exists; bail (without latching) on anything unexpected so
+  //    it's retried next request.
+  try {
+    await env.DB.prepare("ALTER TABLE invoices ADD COLUMN archived_at TEXT").run();
+  } catch (e) {
+    const msg = String((e as { message?: string })?.message ?? e);
+    if (!/duplicate column|already exists/i.test(msg)) {
+      console.error("[migrations] add archived_at failed (will retry):", e);
+      return;
+    }
+  }
+  // 2) Index + cutoff table — both naturally idempotent (IF NOT EXISTS).
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        "CREATE INDEX IF NOT EXISTS idx_invoices_archived ON invoices(archived_at)",
+      ),
+      env.DB.prepare(
+        "CREATE TABLE IF NOT EXISTS audit_clear_cutoffs (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, cutoff_at TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))",
+      ),
+    ]);
+    schemaEnsured = true;
+  } catch (e) {
+    console.error("[migrations] ensureSchema failed (will retry):", e);
+  }
+}
+
 let ensured = false;
 
 /**

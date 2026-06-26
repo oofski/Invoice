@@ -11,7 +11,7 @@ import { vendors } from "./routes/vendors";
 import { audit } from "./routes/audit";
 import { dashboard } from "./routes/dashboard";
 import { users } from "./routes/users";
-import { ensureSeedData } from "./lib/migrations";
+import { ensureSchema, ensureSeedData } from "./lib/migrations";
 
 /**
  * InvoiceIQ Cloudflare Worker — the backend + D1 database for the desktop app.
@@ -22,10 +22,13 @@ const app = new Hono<AppEnv>();
 
 app.use("*", cors({ origin: "*", allowHeaders: ["Content-Type", "Authorization"], allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
 
-// Apply system-managed mapping seeds (location keywords, inventory vendors) on
-// the first request per isolate — so mapping changes go live automatically on
-// deploy with no manual `db:init`. Guarded + never throws (see migrations.ts).
+// On the first request per isolate, self-apply (a) the additive schema migration
+// for the v1.2.8 archive / audit-clear features and (b) the system-managed
+// mapping seeds (location keywords, inventory vendors) — so both go live
+// automatically on deploy with no manual `wrangler`/`db:init`. Both are guarded,
+// idempotent, and never throw (see migrations.ts).
 app.use("*", async (c, next) => {
+  await ensureSchema(c.env);
   await ensureSeedData(c.env);
   return next();
 });

@@ -29,9 +29,10 @@ installer on the GitHub Releases page.
     the database permanently, and **Show all** brings the full history back.
 
 ### Note
-- The archive / audit-clear features require a one-time database migration on the
-  backend; until it's applied those Clear actions are safely disabled (everything
-  else works immediately).
+- The archive / audit-clear features need an additive backend database change
+  (a new column + a small table). This is applied **automatically** by the
+  backend on its next deploy — there is no manual step and nothing to run on
+  anyone's computer.
 
 ## [1.2.7] — 2026-06-26
 
