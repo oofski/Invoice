@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Smartphone,
-  Upload,
-  Bell,
-  ReceiptText,
-  Info,
-} from "lucide-react";
+import { Upload, Bell, ReceiptText } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
 import { Card, Button, Spinner, EmptyState } from "@/components/ui/primitives";
@@ -30,10 +24,7 @@ export default function CcMyReceiptsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Cap One instructions modal
-  const [capOneTx, setCapOneTx] = useState<CcTransaction | null>(null);
-
-  // Amex upload flow
+  // In-app receipt upload + coding flow (Amex AND Capital One)
   const [uploadTx, setUploadTx] = useState<CcTransaction | null>(null);
   const [pickedFile, setPickedFile] = useState<File | null>(null);
   const [existingSplits, setExistingSplits] = useState<EntitySplit[]>([]);
@@ -61,7 +52,7 @@ export default function CcMyReceiptsPage() {
     load();
   }, [load]);
 
-  async function beginAmexUpload(t: CcTransaction) {
+  async function beginUpload(t: CcTransaction) {
     setUploadTx(t);
     setPickedFile(null);
     setExistingSplits([]);
@@ -144,18 +135,11 @@ export default function CcMyReceiptsPage() {
     const needs =
       t.receipt_status === "PENDING" || t.receipt_status === "UPLOADED";
     if (!needs) return null;
-    if (t.source === "CAPITAL_ONE") {
-      return (
-        <Button size="sm" variant="secondary" onClick={() => setCapOneTx(t)}>
-          <Smartphone className="h-3.5 w-3.5" />
-          Submit via Cap One
-        </Button>
-      );
-    }
+    // Both Amex and Capital One: upload the receipt + code it here in-app.
     return (
-      <Button size="sm" onClick={() => beginAmexUpload(t)}>
+      <Button size="sm" onClick={() => beginUpload(t)}>
         <Upload className="h-3.5 w-3.5" />
-        Upload invoice
+        {t.receipt_status === "UPLOADED" ? "Re-upload" : "Upload receipt"}
       </Button>
     );
   }
@@ -262,49 +246,14 @@ export default function CcMyReceiptsPage() {
         </Card>
       </div>
 
-      {/* Cap One instructions modal */}
-      <Modal
-        open={!!capOneTx}
-        onClose={() => setCapOneTx(null)}
-        title="Submit via the Capital One app"
-      >
-        <div className="space-y-4 text-sm text-ink">
-          <div className="flex items-start gap-3 rounded-lg bg-info-soft-bg px-4 py-3 text-info-soft-fg">
-            <Info className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>
-              Capital One receipts are added in the bank's mobile app — there's
-              nothing to upload here.
-            </p>
-          </div>
-          {capOneTx && (
-            <p className="text-ink-muted">
-              Transaction: <span className="text-ink">{capOneTx.vendor}</span> ·{" "}
-              {formatCurrency(capOneTx.amount)} ·{" "}
-              {formatDate(capOneTx.transaction_date)}
-            </p>
-          )}
-          <ol className="list-decimal space-y-1.5 pl-5 text-ink-muted">
-            <li>Open the Capital One mobile app and sign in.</li>
-            <li>Go to your account and find this transaction.</li>
-            <li>
-              Tap the transaction, then tap <strong>“Add Receipt.”</strong>
-            </li>
-            <li>Take a photo of the receipt or attach a saved image/PDF.</li>
-          </ol>
-          <div className="flex justify-end">
-            <Button onClick={() => setCapOneTx(null)}>Got it</Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Amex upload modal */}
+      {/* Receipt upload modal (Amex + Capital One) */}
       <Modal
         open={!!uploadTx && !splitOpen}
         onClose={() => {
           setUploadTx(null);
           setPickedFile(null);
         }}
-        title="Upload Amex invoice"
+        title={`Upload receipt${uploadTx ? ` · ${uploadTx.source === "AMEX" ? "Amex" : "Capital One"}` : ""}`}
       >
         {uploadTx && (
           <div className="space-y-4">

@@ -219,8 +219,9 @@ export interface CapOneRow {
   amount?: number | null;
 }
 
-/** One normalized Amex XLSX row (renderer parse). */
+/** One normalized Amex row (renderer parse — flat activity export OR per-cardholder workbook). */
 export interface AmexRow {
+  /** Per-cardholder workbook: the sheet title ("Lori 36158"). Flat export: "". */
   sheet_name: string;
   transaction_date: string;
   vendor: string;
@@ -228,6 +229,10 @@ export interface AmexRow {
   exp_acct?: string | null;
   have_receipt?: boolean;
   in_qb?: boolean;
+  /** Flat export "Card Member" name (e.g. "LORI B KOTRLY") — resolved by name server-side. */
+  card_member?: string | null;
+  /** Flat export "Account #" last-5 (digits only). */
+  amex_last5?: string | null;
   /** Per-entity allocations keyed by CANONICAL entity name. */
   splits?: { entity_name: string; amount: number }[];
 }

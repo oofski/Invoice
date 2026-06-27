@@ -198,6 +198,125 @@ export interface AmexParseResult {
   sheetNames: string[];
   /** True when no data rows were found across all sheets (blank template). */
   isBlankTemplate: boolean;
+  /** "flat" = the Amex activity export (Date/Description/Card Member/Account #/Amount); "workbook" = per-cardholder sheets. */
+  format: "flat" | "workbook" | "empty";
+}
+
+// ---------------------------------------------------------------------------
+// FLAT Amex "activity" export (Date | Receipt | Description | Card Member |
+// Account # | Amount) — the report Amex hands out from its portal, as XLSX or
+// CSV. This is the common case; the per-cardholder workbook below is the
+// accountant's manual reconciliation file.
+// ---------------------------------------------------------------------------
+
+interface FlatHeaderMap {
+  date: number | null;
+  vendor: number | null;
+  amount: number | null;
+  cardMember: number | null;
+  account: number | null;
+}
+
+function matchFlatHeader(headerRow: unknown[]): FlatHeaderMap {
+  const map: FlatHeaderMap = { date: null, vendor: null, amount: null, cardMember: null, account: null };
+  headerRow.forEach((raw, i) => {
+    const h = norm(raw);
+    if (!h) return;
+    if (map.date === null && /\bdate\b/.test(h)) map.date = i;
+    else if (map.cardMember === null && (/\bcard member\b/.test(h) || /\bcardholder\b/.test(h) || h === "member" || h === "name")) map.cardMember = i;
+    else if (map.account === null && (/\baccount\b/.test(h) || /\bcard\b/.test(h))) map.account = i;
+    else if (map.vendor === null && (/\bdescription\b/.test(h) || /\bvendor\b/.test(h) || /\bmerchant\b/.test(h) || /\bpayee\b/.test(h))) map.vendor = i;
+    else if (map.amount === null && (h === "amount" || /\bamount\b/.test(h) || h === "charge")) map.amount = i;
+  });
+  return map;
+}
+
+function isFlatHeader(m: FlatHeaderMap): boolean {
+  // A flat activity sheet has a date, a description, an amount, AND a per-row
+  // card identity (Card Member name or Account #) — that last column is what the
+  // per-cardholder workbook lacks (its cardholder is the SHEET, not a column).
+  return m.date !== null && m.vendor !== null && m.amount !== null && (m.cardMember !== null || m.account !== null);
+}
+
+/** Collapse runs of whitespace in a merchant string ("ALLERGAN     CA" → "ALLERGAN CA"). */
+function tidy(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/** Parse a flat array-of-arrays into AmexRows, or null if no flat header is present in the first few rows. */
+function parseFlatAoa(aoa: unknown[][]): AmexRow[] | null {
+  let headerIdx = -1;
+  let map: FlatHeaderMap | null = null;
+  for (let i = 0; i < Math.min(aoa.length, 8); i++) {
+    const m = matchFlatHeader((aoa[i] ?? []) as unknown[]);
+    if (isFlatHeader(m)) {
+      headerIdx = i;
+      map = m;
+      break;
+    }
+  }
+  if (headerIdx < 0 || !map) return null;
+
+  const rows: AmexRow[] = [];
+  for (let r = headerIdx + 1; r < aoa.length; r++) {
+    const row = (aoa[r] ?? []) as unknown[];
+    const isoDate = toIsoDate(map.date === null ? null : row[map.date]);
+    const vendor = tidy(strAt(row, map.vendor));
+    const amount = numAt(row, map.amount);
+    if (!isoDate && !vendor && (amount === 0 || amount === null)) continue;
+    if (!isoDate && !vendor) continue;
+
+    const cardMember = tidy(strAt(row, map.cardMember));
+    const acctDigits = strAt(row, map.account).replace(/\D/g, "");
+    const last5 = acctDigits ? acctDigits.slice(-5) : null;
+
+    rows.push({
+      sheet_name: "",
+      transaction_date: isoDate,
+      vendor,
+      amount: Math.abs(amount),
+      card_member: cardMember || null,
+      amex_last5: last5,
+    });
+  }
+  return rows;
+}
+
+/** Minimal CSV → array-of-arrays (handles quoted commas) for the flat Amex CSV export. */
+function csvToAoa(text: string): unknown[][] {
+  const lines = text.split(/\r?\n/);
+  const out: unknown[][] = [];
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    const cells: string[] = [];
+    let cur = "";
+    let q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (q) {
+        if (ch === '"') {
+          if (line[i + 1] === '"') { cur += '"'; i++; } else q = false;
+        } else cur += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === ",") { cells.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    cells.push(cur);
+    out.push(cells);
+  }
+  return out;
+}
+
+/** Parse the Amex CSV activity export (flat columns) into normalized rows. */
+export function parseAmexCsv(text: string): AmexParseResult {
+  const aoa = csvToAoa(text);
+  const flat = parseFlatAoa(aoa) ?? [];
+  return {
+    rows: flat,
+    sheetNames: [],
+    isBlankTemplate: flat.length === 0,
+    format: flat.length ? "flat" : "empty",
+  };
 }
 
 /**
@@ -209,6 +328,7 @@ export function parseAmexWorkbook(buf: ArrayBuffer): AmexParseResult {
   const wb = XLSX.read(buf, { type: "array", cellDates: true });
   const rows: AmexRow[] = [];
   const sheetNames: string[] = [];
+  let sawFlat = false;
 
   for (const sheetName of wb.SheetNames) {
     if (norm(sheetName) === SUMMARY_SHEET) continue;
@@ -221,6 +341,18 @@ export function parseAmexWorkbook(buf: ArrayBuffer): AmexParseResult {
       blankrows: false,
       defval: null,
     });
+    if (aoa.length === 0) continue;
+
+    // First try the FLAT activity format (Date / Description / Card Member /
+    // Account # / Amount). This is the export Amex actually hands out.
+    const flat = parseFlatAoa(aoa);
+    if (flat) {
+      sawFlat = true;
+      rows.push(...flat);
+      continue;
+    }
+
+    // Else fall back to the per-cardholder workbook (header on Row 3, entity columns).
     if (aoa.length <= HEADER_ROW_INDEX) continue;
 
     const headerRow = aoa[HEADER_ROW_INDEX] ?? [];
@@ -268,5 +400,6 @@ export function parseAmexWorkbook(buf: ArrayBuffer): AmexParseResult {
     rows,
     sheetNames,
     isBlankTemplate: rows.length === 0,
+    format: sawFlat ? "flat" : rows.length || sheetNames.length ? "workbook" : "empty",
   };
 }

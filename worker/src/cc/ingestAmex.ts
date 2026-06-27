@@ -35,6 +35,8 @@ export interface AmexParsedRow {
   [key: string]: unknown;
   /** The cardholder sheet name (e.g. "Lori 36158") — resolved to a cardholder server-side. */
   sheet_name?: string | null;
+  /** Flat-export "Card Member" name (e.g. "LORI B KOTRLY") — resolved by name server-side. */
+  card_member?: string | null;
   /** Canonical-keyed per-entity splits from the renderer parse. */
   splits?: { entity_name: string; amount: number }[];
   /** Entity-column amounts keyed by template/display label (e.g. "Skn Bar Rx") — fallback shape. */
@@ -45,11 +47,13 @@ export interface AmexParsedRow {
   amex_sheet_name?: string | null;
 }
 
-/** An Amex cardholder registry entry keyed for sheet-name / last-5 resolution. */
+/** An Amex cardholder registry entry keyed for sheet-name / last-5 / name resolution. */
 export interface AmexRegistryEntry {
   id: string;
   amex_last5: string | null;
   amex_sheet_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
 }
 
 /** Normalize a key for tolerant matching: lower-case, non-alphanumerics → single space. */
@@ -81,8 +85,9 @@ function pick(row: Record<string, unknown>, ...names: string[]): string {
 export async function loadAmexRegistry(env: Env): Promise<AmexRegistryEntry[]> {
   try {
     const res = await env.DB.prepare(
-      `SELECT id, amex_last5, amex_sheet_name FROM cc_cardholders
-        WHERE is_active = 1 AND (amex_last5 IS NOT NULL OR amex_sheet_name IS NOT NULL)`,
+      `SELECT id, amex_last5, amex_sheet_name, first_name, last_name FROM cc_cardholders
+        WHERE is_active = 1
+          AND (amex_last5 IS NOT NULL OR amex_sheet_name IS NOT NULL OR card_source IN ('AMEX','BOTH'))`,
     ).all<AmexRegistryEntry>();
     return res.results ?? [];
   } catch (e) {
@@ -92,28 +97,52 @@ export async function loadAmexRegistry(env: Env): Promise<AmexRegistryEntry[]> {
 }
 
 /**
- * Resolves a sheet name (e.g. "Lori 36158") to an Amex registry entry. Matches in
- * priority order: exact `amex_sheet_name`, then any last-5 digit run in the sheet
- * name equal to a registry `amex_last5`. Returns null when nothing matches.
+ * Resolves an Amex transaction's cardholder against the registry from whatever
+ * identity signals the parsed row carries. The per-cardholder workbook gives a
+ * `sheetName` ("Lori 36158"); the flat activity export (Date / Description / Card
+ * Member / Account # / Amount) gives a `cardMember` name ("LORI B KOTRLY") and an
+ * Account # `last5`. Match priority:
+ *   1. exact `amex_sheet_name`
+ *   2. last-5 (an explicit Account #, else a 5-digit run in the sheet name) vs `amex_last5`
+ *   3. Card Member name → `first_name` (first token, case-insensitive)
+ * The name fallback matters because some seeded last-5s differ from the real Amex
+ * export; the name still resolves them. Returns null when nothing matches.
  */
 export function resolveAmexCardholder(
-  sheetName: string,
+  opts: { sheetName?: string | null; last5?: string | null; cardMember?: string | null },
   registry: AmexRegistryEntry[],
 ): AmexRegistryEntry | null {
-  const sheet = sheetName.trim();
-  if (!sheet) return null;
-  const sheetNorm = normKey(sheet);
+  const sheet = (opts.sheetName || "").trim();
+
   // 1) exact (normalized) amex_sheet_name match.
-  for (const e of registry) {
-    if (e.amex_sheet_name && normKey(e.amex_sheet_name) === sheetNorm) return e;
+  if (sheet) {
+    const sheetNorm = normKey(sheet);
+    for (const e of registry) {
+      if (e.amex_sheet_name && normKey(e.amex_sheet_name) === sheetNorm) return e;
+    }
   }
-  // 2) last-5 digit run embedded in the sheet name (e.g. "...36158").
-  const digitRuns = sheet.match(/\d{5}/g) ?? [];
-  for (const run of digitRuns) {
+
+  // 2) last-5 match: an explicit Account # last-5, else a 5-digit run in the sheet name.
+  const runs: string[] = [];
+  const explicit = (opts.last5 || "").replace(/\D/g, "");
+  if (explicit.length >= 5) runs.push(explicit.slice(-5));
+  if (sheet) runs.push(...(sheet.match(/\d{5}/g) ?? []));
+  for (const run of runs) {
     for (const e of registry) {
       if (e.amex_last5 && e.amex_last5 === run) return e;
     }
   }
+
+  // 3) Card Member name → first_name (first token). The registry here is Amex
+  // cardholders, whose first names are unique, so this is unambiguous.
+  const member = (opts.cardMember || sheet || "").trim();
+  const firstTok = member.split(/\s+/)[0]?.toLowerCase();
+  if (firstTok) {
+    for (const e of registry) {
+      if ((e.first_name || "").trim().toLowerCase() === firstTok) return e;
+    }
+  }
+
   return null;
 }
 
@@ -214,11 +243,20 @@ export function normalizeAmexRow(
 
   const receiptStatus: CcReceiptStatus = haveReceipt ? "RECEIVED" : "PENDING";
 
-  // Resolve the cardholder from the sheet name (server-side registry lookup).
+  // Resolve the cardholder server-side. Per-cardholder workbooks carry a
+  // `sheet_name` ("Lori 36158"); the flat Amex activity export carries a
+  // `card_member` name ("LORI B KOTRLY") and an Account # last-5. We pass all
+  // signals and let the resolver match by sheet/last-5/name.
   const sheetName = pick(row, "sheet_name", "Sheet", "Sheet Name");
-  const resolved = sheetName ? resolveAmexCardholder(sheetName, registry) : null;
+  const cardMember = pick(row, "card_member", "Card Member", "cardholder_name", "Cardholder");
+  const rowLast5Raw = pick(row, "amex_last5", "Account #", "Account", "Account No", "Card #");
+  const rowLast5 = rowLast5Raw.replace(/\D/g, "").slice(-5) || null;
+  const resolved = resolveAmexCardholder(
+    { sheetName, last5: rowLast5, cardMember },
+    registry,
+  );
   const cardholderId = row.cardholder_id ?? resolved?.id ?? null;
-  const amexLast5 = row.amex_last5 ?? resolved?.amex_last5 ?? null;
+  const amexLast5 = rowLast5 ?? row.amex_last5 ?? resolved?.amex_last5 ?? null;
   const amexSheet =
     row.amex_sheet_name ?? resolved?.amex_sheet_name ?? (sheetName || null);
 
@@ -247,7 +285,7 @@ export function normalizeAmexRow(
     dedup_key,
     splits: extractAmexSplits(row),
     is_duplicate: false,
-    // For the unmatched-cards banner: report the sheet name when no cardholder resolved.
-    card_digits: cardholderId ? null : amexLast5 || sheetName || null,
+    // For the unmatched-cards banner: report the last-5 / member / sheet when unresolved.
+    card_digits: cardholderId ? null : amexLast5 || cardMember || sheetName || null,
   };
 }

@@ -431,8 +431,9 @@ export default function CcTransactionsPage() {
                     </Select>
                   </div>
 
-                  {/* Splits (Amex only) */}
-                  {detail.transaction.source === "AMEX" && (
+                  {/* Entity split / coding — Amex + Capital One */}
+                  {(detail.transaction.source === "AMEX" ||
+                    detail.transaction.source === "CAPITAL_ONE") && (
                     <div>
                       <div className="mb-1 flex items-center justify-between">
                         <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
@@ -531,7 +532,9 @@ export default function CcTransactionsPage() {
       </div>
 
       {/* Split modal */}
-      {detail && detail.transaction.source === "AMEX" && (
+      {detail &&
+        (detail.transaction.source === "AMEX" ||
+          detail.transaction.source === "CAPITAL_ONE") && (
         <EntitySplitModal
           open={splitOpen}
           onClose={() => setSplitOpen(false)}

@@ -20,7 +20,7 @@ import {
   type PreviewResponse,
   type UploadBatch,
 } from "@/cc/ccApi";
-import { parseAmexWorkbook } from "@/cc/amexWorkbook";
+import { parseAmexWorkbook, parseAmexCsv } from "@/cc/amexWorkbook";
 
 // ---------------------------------------------------------------------------
 // Capital One CSV hand-roll parser
@@ -228,7 +228,7 @@ function DropZone({
           className="mt-2"
           onClick={() => inputRef.current?.click()}
         >
-          Choose {source === "AMEX" ? "XLSX" : "CSV"} file
+          Choose {source === "AMEX" ? "CSV or XLSX" : "CSV"} file
         </Button>
       )}
     </div>
@@ -286,25 +286,40 @@ export default function CcUploadPage() {
   async function pickAmex(file: File) {
     setPreview(null);
     try {
-      const buf = await file.arrayBuffer();
-      const parsed = parseAmexWorkbook(buf);
+      const isCsv =
+        /\.csv$/i.test(file.name) || file.type === "text/csv" || file.type === "application/vnd.ms-excel";
+      const parsed = isCsv
+        ? parseAmexCsv(await file.text())
+        : parseAmexWorkbook(await file.arrayBuffer());
+
+      // Describe what was found: flat activity export → distinct cardholders;
+      // per-cardholder workbook → sheet count.
+      let extra: string;
+      if (parsed.format === "flat") {
+        const members = new Set(
+          (parsed.rows as AmexRow[]).map((r) => r.amex_last5 || r.card_member || "?"),
+        );
+        extra = `${members.size} cardholder${members.size === 1 ? "" : "s"}`;
+      } else if (parsed.sheetNames.length > 0) {
+        extra = `${parsed.sheetNames.length} cardholder sheet${parsed.sheetNames.length === 1 ? "" : "s"}`;
+      } else {
+        extra = "no transactions";
+      }
+
       setStaged({
         source: "AMEX",
         file,
         rows: parsed.rows,
         rowCount: parsed.rows.length,
-        extra:
-          parsed.sheetNames.length > 0
-            ? `${parsed.sheetNames.length} cardholder sheet${parsed.sheetNames.length === 1 ? "" : "s"}`
-            : "no cardholder sheets",
+        extra,
       });
       if (parsed.isBlankTemplate) {
         toast.info(
-          "This looks like a blank template — 0 transactions found. You can still preview it.",
+          "No transactions found in this file. If it's a blank template, upload the completed export.",
         );
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to read XLSX");
+      toast.error(err instanceof Error ? err.message : "Failed to read the Amex file");
     }
   }
 
@@ -357,7 +372,7 @@ export default function CcUploadPage() {
     <div>
       <PageHeader
         title="Upload Statements"
-        subtitle="Import Capital One (CSV) and Amex (XLSX) transactions"
+        subtitle="Import Capital One and Amex transactions (CSV or XLSX)"
       />
       <CcSubNav />
 
@@ -378,10 +393,10 @@ export default function CcUploadPage() {
           />
           <DropZone
             source="AMEX"
-            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             icon={<FileSpreadsheet className="h-8 w-8" />}
-            title="Amex XLSX"
-            hint="Drop the monthly Amex workbook (one sheet per cardholder)."
+            title="Amex transactions (CSV or XLSX)"
+            hint="Drop the Amex activity export — Date, Description, Card Member, Account #, Amount."
             staged={staged?.source === "AMEX" ? staged : null}
             onPick={pickAmex}
             onClear={() => {

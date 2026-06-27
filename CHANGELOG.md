@@ -5,6 +5,26 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.3.1] — 2026-06-27
+
+### Changed
+- **Credit Cards — Amex import now reads the real Amex activity export (CSV or
+  XLSX).** Previously the importer only accepted a per-cardholder workbook, so the
+  standard Amex transaction report wouldn't upload. It now reads the flat activity
+  export (Date · Description · Card Member · Account # · Amount) directly, as a
+  **CSV or an XLSX**, and matches each row to the right cardholder by **card last-5
+  and Card Member name** (so a cardholder still matches even when the last-5 on the
+  export differs from the one on file). The per-cardholder workbook still works too.
+- **Capital One cardholders can now upload and code their receipts in the app.**
+  Instead of being sent to the Capital One mobile app, a Capital One transaction in
+  **My Receipts** now offers the same in-app flow as Amex: upload the receipt
+  (PDF/photo) and allocate it across the entities. Entity coding is available for
+  both Capital One and Amex transactions (cardholder and manager views), and the
+  manager is notified when a receipt is uploaded for either card.
+
+(Still separate from invoicing; no database changes. Visible to the Credit Card
+Accountant role + the test cardholder, per the beta rollout.)
+
 ## [1.2.10] — 2026-06-27
 
 ### Changed

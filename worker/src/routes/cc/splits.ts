@@ -100,9 +100,8 @@ splits.put("/transactions/:id/splits", async (c) => {
   if (!tx) return c.json({ error: "Not found" }, 404);
   if (!(await ownsOrManages(c, tx))) return c.json({ error: "Forbidden" }, 403);
 
-  // Splits apply to Amex transactions only.
-  if (tx.source !== "AMEX")
-    return c.json({ error: "Splits apply to Amex transactions only" }, 409);
+  // Splits/coding are available for both Amex and Capital One transactions (a
+  // cardholder uploads + codes their own receipt in-app for either card).
 
   const body = (await c.req.json().catch(() => ({}))) as { splits?: EntitySplitInput[] };
   const rows = Array.isArray(body.splits) ? body.splits : [];

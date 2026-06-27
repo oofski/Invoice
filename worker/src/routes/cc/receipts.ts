@@ -305,8 +305,8 @@ receipts.post("/transactions/:id/receipts", async (c) => {
     .run();
 
   // §7.2 manager alert: fire when a non-manager (executive/cardholder) uploads a
-  // receipt for an Amex transaction. Best-effort — sendCcManagerAlert never throws.
-  if (tx.source === "AMEX" && !isManager(c)) {
+  // receipt in-app (Amex OR Capital One). Best-effort — sendCcManagerAlert never throws.
+  if (!isManager(c)) {
     const managerEmail = await resolveManagerEmail(c.env);
     if (managerEmail) {
       const ch = tx.cardholder_id
