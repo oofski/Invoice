@@ -14,10 +14,12 @@ import {
   LogOut,
   Menu,
   X,
+  CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ROLES, type Role } from "@/lib/constants";
 import { useAuth, useProfile } from "@/components/ProfileProvider";
+import { useCcEnabled } from "@/cc/useCcEnabled";
 
 interface NavItem {
   href: string;
@@ -75,6 +77,14 @@ const NAV: NavItem[] = [
     icon: Users,
     roles: [ROLES.ADMIN],
   },
+  // Credit Cards (CCRMS) — shown only when useCcEnabled() is true (the role
+  // list is permissive; the real gate is the ccEnabled flag in the filter).
+  {
+    href: "/credit-cards",
+    label: "Credit Cards",
+    icon: CreditCard,
+    roles: [ROLES.ACCOUNTANT, ROLES.STAFF, ROLES.EXECUTIVE, ROLES.ADMIN],
+  },
   {
     href: "/settings",
     label: "Settings",
@@ -88,8 +98,13 @@ export function AppShell() {
   const { signOut } = useAuth();
   const { pathname } = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const ccEnabled = useCcEnabled();
 
-  const items = NAV.filter((n) => n.roles.includes(profile.role));
+  const items = NAV.filter(
+    (n) =>
+      n.roles.includes(profile.role) &&
+      (n.href !== "/credit-cards" || ccEnabled),
+  );
 
   const sidebar = (
     <div className="flex h-full flex-col bg-sidebar text-[#CFD2D2]">

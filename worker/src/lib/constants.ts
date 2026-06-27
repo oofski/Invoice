@@ -18,6 +18,7 @@ export const ROLES = {
   EXECUTIVE: "executive",
   STAFF: "staff",
   ADMIN: "admin",
+  CREDIT_CARD_ACCOUNTANT: "credit_card_accountant",
 } as const;
 
 export type Role = (typeof ROLES)[keyof typeof ROLES];
@@ -27,6 +28,7 @@ export const ALL_ROLES: Role[] = [
   ROLES.EXECUTIVE,
   ROLES.STAFF,
   ROLES.ADMIN,
+  ROLES.CREDIT_CARD_ACCOUNTANT,
 ];
 
 /** Invoice lifecycle statuses. */

@@ -11,7 +11,9 @@ import { vendors } from "./routes/vendors";
 import { audit } from "./routes/audit";
 import { dashboard } from "./routes/dashboard";
 import { users } from "./routes/users";
+import { cc } from "./routes/cc";
 import { ensureSchema, ensureSeedData } from "./lib/migrations";
+import { ensureCcSchema } from "./cc/ccMigrations";
 
 /**
  * InvoiceIQ Cloudflare Worker — the backend + D1 database for the desktop app.
@@ -30,6 +32,7 @@ app.use("*", cors({ origin: "*", allowHeaders: ["Content-Type", "Authorization"]
 app.use("*", async (c, next) => {
   await ensureSchema(c.env);
   await ensureSeedData(c.env);
+  await ensureCcSchema(c.env);
   return next();
 });
 
@@ -62,6 +65,7 @@ app.route("/api/vendors", vendors);
 app.route("/api/audit", audit);
 app.route("/api/dashboard", dashboard);
 app.route("/api/users", users);
+app.route("/api/cc", cc);
 
 // Surface real error messages to the client (and the Worker logs) instead of a
 // bare 500, so failures like a misconfigured Reducto key or an unexpected

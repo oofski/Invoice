@@ -5,6 +5,32 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.9] — 2026-06-27
+
+### Added
+- **Credit Cards — a new Credit Card Receipt module (beta, limited rollout).** A
+  separate area for tracking corporate-card receipts and reconciling them against
+  card transactions, built on the same OCR and entity-splitting engine as
+  invoices. In this release it is visible **only to the test account (Lori)** while
+  it's validated; everyone else sees no change. It adds:
+  - **Weekly card imports** — upload the Capital One CSV and the Amex XLSX
+    (per-cardholder sheets); transactions are matched to a cardholder by card
+    last-4, with a preview (row count, date range, unmatched cards) before commit,
+    duplicate detection, and blank-template handling.
+  - **Receipt OCR with cardholder matching** — uploaded receipts are read by the
+    same OCR, which now also pulls the **card last-4 and purchaser name** and
+    auto-assigns the receipt to the right cardholder (flagging unmatched ones).
+  - **Receipt tracker + reminders** — a per-cardholder checklist with status
+    badges and one-click check-off, plus batch email reminders (with a mail-app
+    fallback when email isn't configured).
+  - **Entity splitting** — allocate an Amex charge across the business entities;
+    the split must balance to the cent before it can be saved.
+  - A new **Credit Card Accountant** role and Executive/cardholder view are wired
+    but kept off until the beta is signed off.
+- The new module is **fully separate from invoicing** — the existing invoice
+  flow, coding, and screens are unchanged. Its database tables are created
+  automatically on deploy; there is nothing to run.
+
 ## [1.2.8] — 2026-06-26
 
 ### Added

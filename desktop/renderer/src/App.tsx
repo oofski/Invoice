@@ -17,6 +17,28 @@ import AuditPage from "@/pages/AuditPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
 import SettingsPage from "@/pages/SettingsPage";
 
+// Credit-Card Receipt Management (CCRMS) — Lori-only, gated by useCcEnabled().
+import { useCcEnabled } from "@/cc/useCcEnabled";
+import CcDashboardPage from "@/pages/cc/CcDashboardPage";
+import CcUploadPage from "@/pages/cc/CcUploadPage";
+import CcTransactionsPage from "@/pages/cc/CcTransactionsPage";
+import CcReceiptTrackerPage from "@/pages/cc/CcReceiptTrackerPage";
+import CcNotificationsPage from "@/pages/cc/CcNotificationsPage";
+import CcCardholdersPage from "@/pages/cc/CcCardholdersPage";
+import CcMyReceiptsPage from "@/pages/cc/CcMyReceiptsPage";
+
+/**
+ * Client-side gate for the /credit-cards/* routes (defense-in-depth — the API
+ * already 404s for disabled users). Renders the CC route children only when the
+ * flag is on; otherwise redirects home so a disabled user can't open the module
+ * by typing the hash route directly.
+ */
+function CcGate({ children }: { children: React.ReactNode }) {
+  const enabled = useCcEnabled();
+  if (!enabled) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 /**
  * HashRouter is required so client routing works when the SPA is loaded from
  * file:// inside Electron. The authenticated shell guards every nested route by
@@ -50,6 +72,80 @@ export default function App() {
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/admin/users" element={<AdminUsersPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+
+          {/* Credit Cards (CCRMS) — gated by useCcEnabled() */}
+          <Route
+            path="/credit-cards"
+            element={
+              <CcGate>
+                <Navigate to="/credit-cards/dashboard" replace />
+              </CcGate>
+            }
+          />
+          <Route
+            path="/credit-cards/dashboard"
+            element={
+              <CcGate>
+                <CcDashboardPage />
+              </CcGate>
+            }
+          />
+          <Route
+            path="/credit-cards/upload"
+            element={
+              <CcGate>
+                <CcUploadPage />
+              </CcGate>
+            }
+          />
+          <Route
+            path="/credit-cards/transactions"
+            element={
+              <CcGate>
+                <CcTransactionsPage />
+              </CcGate>
+            }
+          />
+          <Route
+            path="/credit-cards/transactions/:id"
+            element={
+              <CcGate>
+                <CcTransactionsPage />
+              </CcGate>
+            }
+          />
+          <Route
+            path="/credit-cards/receipts"
+            element={
+              <CcGate>
+                <CcReceiptTrackerPage />
+              </CcGate>
+            }
+          />
+          <Route
+            path="/credit-cards/notifications"
+            element={
+              <CcGate>
+                <CcNotificationsPage />
+              </CcGate>
+            }
+          />
+          <Route
+            path="/credit-cards/cardholders"
+            element={
+              <CcGate>
+                <CcCardholdersPage />
+              </CcGate>
+            }
+          />
+          <Route
+            path="/credit-cards/my-receipts"
+            element={
+              <CcGate>
+                <CcMyReceiptsPage />
+              </CcGate>
+            }
+          />
         </Route>
 
         {/* Fallback */}
