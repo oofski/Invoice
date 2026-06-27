@@ -5,6 +5,24 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.2.10] — 2026-06-27
+
+### Changed
+- **Credit Cards — split the module into two role-based views.** The beta now
+  shows the right view per person instead of one combined screen:
+  - **Credit Card Accountant** (a new account you create with that role) — and
+    admins — get the **full manager dashboard**: imports, all transactions, the
+    receipt tracker, reminders, and the cardholder registry.
+  - **Executives (cardholders)** get a personal **"My Receipts"** view only — just
+    the card transactions *they* need to submit receipts for, with upload + entity
+    split. No dashboard, no other people's data. During the beta this cardholder
+    view is still limited to the test account (Lori); one switch opens it to every
+    executive later.
+  - The "Credit Cards" menu now lands each person on their correct screen and only
+    offers the screens their role can use (the manager screens were already
+    protected server-side). Still fully separate from invoicing; no database
+    changes.
+
 ## [1.2.9] — 2026-06-27
 
 ### Added

@@ -1,16 +1,22 @@
 /**
- * CCRMS feature-flag + scoping gate trio (NEW).
+ * CCRMS feature-flag + scoping gate trio.
  *
- *   - `isCcEnabled(u)`  — is the credit-card module visible to this user? In
- *                         v1.2.9 (`lori_only`) only Lori passes; the role-based
- *                         branch is coded but dormant.
- *   - `ccReady(env)`    — has the CC schema been migrated? (mirrors invoice
- *                         `splitReady`/`archiveReady`: a probe SELECT in try/catch).
+ *   - `isCcManager(u)`   — does this user get the FULL manager dashboard? The
+ *                          dedicated credit-card-accountant role (+ admin).
+ *   - `isCcCardholder(u)`— does this user get only their OWN "My Receipts" view?
+ *                          Executives. During the controlled rollout this is
+ *                          limited to the pinned test cardholder(s) (Lori); set
+ *                          `CC_CARDHOLDERS_ALL_EXECUTIVES = true` to open it to
+ *                          every executive.
+ *   - `isCcEnabled(u)`   — is the credit-card module visible at all? manager OR
+ *                          cardholder.
+ *   - `ccReady(env)`     — has the CC schema been migrated? (mirrors invoice
+ *                          `splitReady`/`archiveReady`: a probe SELECT in try/catch).
  *   - `ccScopeClause(c)` — manager/admin see all; a cardholder-scoped user is
- *                         limited to their own transactions (mirrors invoice
- *                         `scopeClause`). Dormant in v1.2.9 (Lori is the manager).
+ *                          limited to their own transactions (mirrors invoice
+ *                          `scopeClause`).
  *
- * Routes import all three from this one module.
+ * Routes import these from this one module.
  */
 import type { Context } from "hono";
 import type { Env, AuthUser } from "../lib/types";
@@ -19,39 +25,50 @@ import { user, hasRole } from "../routes/helpers";
 import type { AppEnv } from "../routes/helpers";
 
 /**
- * Editable allowlist — pin Lori's exact login email here when known. The
- * `full_name` first-token fallback ships without it, so the flag works even if
- * the email is not yet pinned. Lower-cased on compare.
+ * Editable allowlist — pin the test cardholder's exact login email here when
+ * known. The `full_name` first-token fallback ("lori") ships without it, so the
+ * gate works even if the email is not yet pinned. Lower-cased on compare.
  */
 export const CC_ALLOWED_EMAILS = new Set<string>([
   /* "lori@company.com" */
 ]);
 
 /**
- * v1.2.9 ships in `lori_only` mode. Flip this ONE constant to `"role_based"` to
- * grant access by role (credit_card_accountant / executive / admin) — all role
- * plumbing (`ccScopeClause`, the role gates in the routes) is already built.
+ * Controlled rollout switch. While `false`, the cardholder ("My Receipts") view
+ * is limited to the pinned test cardholder(s) below (Lori). Flip to `true` to
+ * give every Executive their own cardholder view.
  */
-export const CC_FLAG_MODE: "lori_only" | "role_based" = "lori_only";
+export const CC_CARDHOLDERS_ALL_EXECUTIVES = false;
 
-/**
- * Whether the credit-card module is enabled for `u`.
- *   - role_based: credit_card_accountant | executive | admin.
- *   - lori_only (default): allowlisted email OR full-name first token === "lori".
- */
-export function isCcEnabled(u: AuthUser): boolean {
-  if (CC_FLAG_MODE === "role_based") {
-    return (
-      u.role === ROLES.CREDIT_CARD_ACCOUNTANT ||
-      u.role === ROLES.EXECUTIVE ||
-      u.role === ROLES.ADMIN
-    );
-  }
-  // lori_only: allowlist email OR full_name first token == "lori"
+/** Is this user the pinned test cardholder (Lori)? email allowlist OR name. */
+function isPinnedCardholder(u: AuthUser): boolean {
   const email = (u.email || "").toLowerCase();
-  if (CC_ALLOWED_EMAILS.has(email)) return true;
+  if (email && CC_ALLOWED_EMAILS.has(email)) return true;
   const first = (u.name || "").trim().split(/\s+/)[0]?.toLowerCase();
   return first === "lori";
+}
+
+/**
+ * Managers see the full dashboard: the dedicated credit-card-accountant role and
+ * admins. (This is exactly the role set the route handlers gate on via
+ * `hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN)`.)
+ */
+export function isCcManager(u: AuthUser): boolean {
+  return u.role === ROLES.CREDIT_CARD_ACCOUNTANT || u.role === ROLES.ADMIN;
+}
+
+/**
+ * Cardholders see ONLY their own "My Receipts" view: executives. Limited to the
+ * pinned test cardholder during the controlled rollout (unless opened to all).
+ */
+export function isCcCardholder(u: AuthUser): boolean {
+  if (u.role !== ROLES.EXECUTIVE) return false;
+  return CC_CARDHOLDERS_ALL_EXECUTIVES || isPinnedCardholder(u);
+}
+
+/** Whether the credit-card module is visible to `u` at all (manager OR cardholder). */
+export function isCcEnabled(u: AuthUser): boolean {
+  return isCcManager(u) || isCcCardholder(u);
 }
 
 /**
@@ -75,9 +92,6 @@ export async function ccReady(env: Env): Promise<boolean> {
  * them — by `user_id` first, else by first-name match (mirrors invoice
  * `scopeClause`'s name-tolerant fallback). The clause is meant to be appended to
  * a `WHERE …` that already filters `cc_transactions`.
- *
- * Dormant in v1.2.9 (Lori is the manager and sees all), but coded for the
- * `role_based` flip.
  */
 export function ccScopeClause(c: Context<AppEnv>): { clause: string; params: string[] } {
   if (hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN)) {

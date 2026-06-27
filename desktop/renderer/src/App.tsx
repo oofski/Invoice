@@ -17,8 +17,8 @@ import AuditPage from "@/pages/AuditPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
 import SettingsPage from "@/pages/SettingsPage";
 
-// Credit-Card Receipt Management (CCRMS) — Lori-only, gated by useCcEnabled().
-import { useCcEnabled } from "@/cc/useCcEnabled";
+// Credit-Card Receipt Management (CCRMS) — role-gated by useCcEnabled()/useCcManager().
+import { useCcEnabled, useCcManager } from "@/cc/useCcEnabled";
 import CcDashboardPage from "@/pages/cc/CcDashboardPage";
 import CcUploadPage from "@/pages/cc/CcUploadPage";
 import CcTransactionsPage from "@/pages/cc/CcTransactionsPage";
@@ -37,6 +37,29 @@ function CcGate({ children }: { children: React.ReactNode }) {
   const enabled = useCcEnabled();
   if (!enabled) return <Navigate to="/" replace />;
   return <>{children}</>;
+}
+
+/**
+ * Manager-only gate for the dashboard/upload/transactions/receipts/notifications/
+ * cardholders screens. A cardholder (executive) is redirected to their own "My
+ * Receipts" view — those manager APIs 403 server-side, so the screens are not
+ * offered. Composed inside CcGate (so disabled users are already redirected home).
+ */
+function CcManagerGate({ children }: { children: React.ReactNode }) {
+  const isManager = useCcManager();
+  if (!isManager) return <Navigate to="/credit-cards/my-receipts" replace />;
+  return <>{children}</>;
+}
+
+/** Landing redirect for /credit-cards — managers → dashboard, cardholders → my-receipts. */
+function CcHome() {
+  const isManager = useCcManager();
+  return (
+    <Navigate
+      to={isManager ? "/credit-cards/dashboard" : "/credit-cards/my-receipts"}
+      replace
+    />
+  );
 }
 
 /**
@@ -73,12 +96,12 @@ export default function App() {
           <Route path="/admin/users" element={<AdminUsersPage />} />
           <Route path="/settings" element={<SettingsPage />} />
 
-          {/* Credit Cards (CCRMS) — gated by useCcEnabled() */}
+          {/* Credit Cards (CCRMS) — manager screens vs the cardholder "My Receipts" view */}
           <Route
             path="/credit-cards"
             element={
               <CcGate>
-                <Navigate to="/credit-cards/dashboard" replace />
+                <CcHome />
               </CcGate>
             }
           />
@@ -86,7 +109,9 @@ export default function App() {
             path="/credit-cards/dashboard"
             element={
               <CcGate>
-                <CcDashboardPage />
+                <CcManagerGate>
+                  <CcDashboardPage />
+                </CcManagerGate>
               </CcGate>
             }
           />
@@ -94,7 +119,9 @@ export default function App() {
             path="/credit-cards/upload"
             element={
               <CcGate>
-                <CcUploadPage />
+                <CcManagerGate>
+                  <CcUploadPage />
+                </CcManagerGate>
               </CcGate>
             }
           />
@@ -102,7 +129,9 @@ export default function App() {
             path="/credit-cards/transactions"
             element={
               <CcGate>
-                <CcTransactionsPage />
+                <CcManagerGate>
+                  <CcTransactionsPage />
+                </CcManagerGate>
               </CcGate>
             }
           />
@@ -110,7 +139,9 @@ export default function App() {
             path="/credit-cards/transactions/:id"
             element={
               <CcGate>
-                <CcTransactionsPage />
+                <CcManagerGate>
+                  <CcTransactionsPage />
+                </CcManagerGate>
               </CcGate>
             }
           />
@@ -118,7 +149,9 @@ export default function App() {
             path="/credit-cards/receipts"
             element={
               <CcGate>
-                <CcReceiptTrackerPage />
+                <CcManagerGate>
+                  <CcReceiptTrackerPage />
+                </CcManagerGate>
               </CcGate>
             }
           />
@@ -126,7 +159,9 @@ export default function App() {
             path="/credit-cards/notifications"
             element={
               <CcGate>
-                <CcNotificationsPage />
+                <CcManagerGate>
+                  <CcNotificationsPage />
+                </CcManagerGate>
               </CcGate>
             }
           />
@@ -134,7 +169,9 @@ export default function App() {
             path="/credit-cards/cardholders"
             element={
               <CcGate>
-                <CcCardholdersPage />
+                <CcManagerGate>
+                  <CcCardholdersPage />
+                </CcManagerGate>
               </CcGate>
             }
           />

@@ -1,49 +1,63 @@
 /**
- * Renderer mirror of the worker's `isCcEnabled(user)` gate (see
- * worker/src/cc/flag.ts). Single source so the client (nav item + routes) and
- * the server (404-if-disabled) agree on who can see the Credit Cards module.
+ * Renderer mirror of the worker's CC gate (see worker/src/cc/flag.ts). Single
+ * source so the client (nav item, sub-nav, routes, landing redirect) and the
+ * server agree on who sees the Credit Cards module and in which mode.
  *
- * v1.2.9 mode is `lori_only`: enabled when the user's email is in the
- * allowlist OR the first token of their full name is "lori". Flip to role-based
- * by setting CC_FLAG_MODE = "role_based" (must be flipped in BOTH this file and
- * the worker's flag.ts to stay in sync).
+ *   - manager  (credit_card_accountant / admin) → the full dashboard + all screens.
+ *   - cardholder (executive; limited to the pinned test cardholder "Lori" during
+ *                 the controlled rollout) → only their own "My Receipts" view.
+ *
+ * Keep CC_ALLOWED_EMAILS / CC_CARDHOLDERS_ALL_EXECUTIVES in sync with the worker.
  */
 
 import { useProfile } from "@/components/ProfileProvider";
 import { ROLES } from "@/lib/constants";
 import type { CurrentProfile } from "@/components/ProfileProvider";
 
-// Editable allowlist — pin Lori's exact login email here when known. The
-// full-name fallback ships without it. Keep in sync with the worker.
+// Editable allowlist — pin the test cardholder's exact login email here when
+// known. The full-name fallback ("lori") ships without it. Keep in sync with the worker.
 const CC_ALLOWED_EMAILS = new Set<string>([
   /* "lori@company.com" */
 ]);
 
-const CC_FLAG_MODE: "lori_only" | "role_based" = "lori_only";
+// While false, the cardholder view is limited to the pinned test cardholder(s).
+// Flip to true to give every Executive their own "My Receipts" view.
+const CC_CARDHOLDERS_ALL_EXECUTIVES = false;
 
-/** Pure predicate (testable / reusable outside React). */
-export function isCcEnabled(
-  profile: Pick<CurrentProfile, "name" | "email" | "role">,
-): boolean {
-  if (CC_FLAG_MODE === "role_based") {
-    // The new credit_card_accountant role is dormant in the renderer's ROLES
-    // (worker-only), so compare by string to avoid an import-time coupling.
-    const role = profile.role as string;
-    return (
-      role === ROLES.ADMIN ||
-      role === ROLES.EXECUTIVE ||
-      role === "credit_card_accountant"
-    );
-  }
-  // lori_only
+type CcProfile = Pick<CurrentProfile, "name" | "email" | "role">;
+
+function isPinnedCardholder(profile: CcProfile): boolean {
   const email = (profile.email || "").toLowerCase();
-  if (CC_ALLOWED_EMAILS.has(email)) return true;
+  if (email && CC_ALLOWED_EMAILS.has(email)) return true;
   const first = (profile.name || "").trim().split(/\s+/)[0]?.toLowerCase();
   return first === "lori";
 }
 
-/** Hook form — reads the current profile from context. */
+/** Full manager dashboard: the credit_card_accountant role + admins. */
+export function isCcManager(profile: CcProfile): boolean {
+  // credit_card_accountant is worker-only in ROLES; compare by string to avoid
+  // an import-time coupling on the renderer's ROLES copy.
+  const role = profile.role as string;
+  return role === ROLES.ADMIN || role === "credit_card_accountant";
+}
+
+/** Own "My Receipts" view only: executives (limited to the pinned cardholder for now). */
+export function isCcCardholder(profile: CcProfile): boolean {
+  if ((profile.role as string) !== ROLES.EXECUTIVE) return false;
+  return CC_CARDHOLDERS_ALL_EXECUTIVES || isPinnedCardholder(profile);
+}
+
+/** Visible at all (manager OR cardholder). */
+export function isCcEnabled(profile: CcProfile): boolean {
+  return isCcManager(profile) || isCcCardholder(profile);
+}
+
+/** Hook: is the module visible to the current user? */
 export function useCcEnabled(): boolean {
-  const profile = useProfile();
-  return isCcEnabled(profile);
+  return isCcEnabled(useProfile());
+}
+
+/** Hook: does the current user get the full manager dashboard? */
+export function useCcManager(): boolean {
+  return isCcManager(useProfile());
 }
