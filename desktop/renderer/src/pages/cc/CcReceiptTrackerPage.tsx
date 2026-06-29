@@ -7,6 +7,7 @@ import {
   Ban,
   ListChecks,
   Eye,
+  Download,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
@@ -16,6 +17,7 @@ import { toast } from "@/components/ui/Toast";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { desktop } from "@/lib/desktop";
+import { downloadSheet, exportDateStamp } from "@/cc/ccExport";
 import { CcStatusBadge } from "@/components/cc/CcStatusBadge";
 import { CcReceiptPane } from "@/components/cc/CcReceiptPane";
 import {
@@ -41,6 +43,7 @@ export default function CcReceiptTrackerPage() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // receipt preview
   const [previewTxId, setPreviewTxId] = useState<string | null>(null);
@@ -196,6 +199,52 @@ export default function CcReceiptTrackerPage() {
     }
   }
 
+  // The tracker list is capped at 200 rows; page through the full set for the
+  // export so the worklist file isn't silently truncated. Mirrors the page's own
+  // filter (drop payments/credits that never need a receipt).
+  async function exportExcel() {
+    setExporting(true);
+    try {
+      const PER_PAGE = 200;
+      const MAX_PAGES = 100;
+      const all: CcTransaction[] = [];
+      let page = 1;
+      let total = Infinity;
+      while (page <= MAX_PAGES && all.length < total) {
+        const res = await ccApi.listTransactions({ page, per_page: PER_PAGE });
+        const batch = res.transactions ?? [];
+        all.push(...batch);
+        total = res.total ?? all.length;
+        if (batch.length < PER_PAGE) break;
+        page++;
+      }
+      const rows = all
+        .filter((t) => !t.is_payment)
+        .map((t) => [
+          t.cardholder_name,
+          formatDate(t.transaction_date),
+          t.vendor,
+          t.amount,
+          t.category ?? "",
+          t.receipt_status,
+        ]);
+      if (rows.length === 0) {
+        toast.info("Nothing to export.");
+        return;
+      }
+      downloadSheet(
+        `CC_ReceiptTracker_${exportDateStamp()}.xlsx`,
+        "Receipt Tracker",
+        ["Cardholder", "Date", "Vendor", "Amount", "Category", "Receipt Status"],
+        rows,
+      );
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function openPreview(txId: string) {
     setPreviewTxId(txId);
     setPreviewReceipt(null);
@@ -298,14 +347,26 @@ export default function CcReceiptTrackerPage() {
         title="Receipt Tracker"
         subtitle="Daily receipt-collection workflow"
         actions={
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setFlatList((v) => !v)}
-          >
-            <ListChecks className="h-4 w-4" />
-            {flatList ? "Group by cardholder" : "Flat list"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={exportExcel}
+              loading={exporting}
+              disabled={exporting}
+            >
+              <Download className="h-4 w-4" />
+              Export Excel
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setFlatList((v) => !v)}
+            >
+              <ListChecks className="h-4 w-4" />
+              {flatList ? "Group by cardholder" : "Flat list"}
+            </Button>
+          </div>
         }
       />
       <CcSubNav />

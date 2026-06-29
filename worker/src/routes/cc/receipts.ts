@@ -288,5 +288,28 @@ receipts.delete("/receipts/:id", async (c) => {
   }
   await c.env.DB.prepare("DELETE FROM cc_receipts WHERE id = ?").bind(id).run();
 
+  // Best-effort: if this tx now has zero receipts, revert its status to PENDING so
+  // it doesn't show a stale UPLOADED/RECEIVED with nothing attached. Guarded to
+  // UPLOADED/RECEIVED only — NOT_REQUIRED/WAIVED are deliberate manager states
+  // unrelated to a file being attached, and PENDING is already correct. The single
+  // guarded UPDATE avoids a read-modify-write race. Never break the delete.
+  try {
+    const txId = receipt.transaction_id;
+    const remaining = await c.env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM cc_receipts WHERE transaction_id = ?",
+    )
+      .bind(txId)
+      .first<{ n: number }>();
+    if ((remaining?.n ?? 0) === 0) {
+      await c.env.DB.prepare(
+        "UPDATE cc_transactions SET receipt_status = 'PENDING', updated_at = ? WHERE id = ? AND receipt_status IN ('UPLOADED','RECEIVED')",
+      )
+        .bind(new Date().toISOString(), txId)
+        .run();
+    }
+  } catch (e) {
+    console.error("[cc] receipt_status revert after delete failed:", e);
+  }
+
   return c.body(null, 204);
 });

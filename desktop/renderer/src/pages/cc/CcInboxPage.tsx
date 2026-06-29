@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Inbox, ReceiptText } from "lucide-react";
+import { Inbox, ReceiptText, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
 import { Card, Spinner, EmptyState } from "@/components/ui/primitives";
@@ -11,6 +11,7 @@ import {
   CcInboxReceiptPane,
 } from "@/components/cc/CcInboxPane";
 import { ccApi, type InboxItem } from "@/cc/ccApi";
+import { useCcManager } from "@/cc/useCcEnabled";
 
 /**
  * Manager "Inbox / Unmatched receipts" screen (design §4 — Feature A) at
@@ -36,6 +37,7 @@ function ageOf(iso: string): string {
 }
 
 export default function CcInboxPage() {
+  const isManager = useCcManager();
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -106,6 +108,23 @@ export default function CcInboxPage() {
     }
   }
 
+  /** Discard a junk/duplicate dropped receipt (manager-only). */
+  async function handleDelete(it: InboxItem) {
+    if (!window.confirm("Delete this dropped receipt? This cannot be undone.")) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await ccApi.deleteInbox(it.id);
+      toast.success("Receipt deleted");
+      removeFromQueue(it.id);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <PageHeader
@@ -140,15 +159,18 @@ export default function CcInboxPage() {
           ) : (
             <ul className="scroll-thin min-h-0 flex-1 divide-y divide-line overflow-y-auto">
               {items.map((it) => (
-                <li key={it.id}>
+                <li
+                  key={it.id}
+                  className={cn(
+                    "group relative transition-colors",
+                    it.id === selectedId
+                      ? "bg-selected-bg"
+                      : "hover:bg-surface-2",
+                  )}
+                >
                   <button
                     onClick={() => setSelectedId(it.id)}
-                    className={cn(
-                      "w-full px-4 py-3 text-left transition-colors",
-                      it.id === selectedId
-                        ? "bg-selected-bg"
-                        : "hover:bg-surface-2",
-                    )}
+                    className="w-full px-4 py-3 text-left"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-medium text-ink">
@@ -175,6 +197,21 @@ export default function CcInboxPage() {
                       · {it.file_name}
                     </p>
                   </button>
+                  {isManager && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(it);
+                      }}
+                      disabled={busy}
+                      title="Delete dropped receipt"
+                      aria-label="Delete dropped receipt"
+                      className="absolute bottom-2 right-2 rounded-md p-1.5 text-ink-subtle opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger focus:opacity-100 group-hover:opacity-100 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -207,6 +244,9 @@ export default function CcInboxPage() {
                     busy={busy}
                     onAssign={handleAssign}
                     onReturn={handleReturn}
+                    onDelete={
+                      isManager ? () => handleDelete(selected) : undefined
+                    }
                   />
                 </div>
               </Card>

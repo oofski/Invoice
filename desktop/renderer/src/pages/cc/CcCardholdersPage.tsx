@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Pencil, UserX, Users } from "lucide-react";
+import { Plus, Pencil, UserX, Users, Download } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
 import {
@@ -14,6 +14,7 @@ import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
+import { downloadSheet, exportDateStamp } from "@/cc/ccExport";
 import { ccApi, type Cardholder } from "@/cc/ccApi";
 
 type CardSource = "CAPITAL_ONE" | "AMEX" | "BOTH";
@@ -152,16 +153,58 @@ export default function CcCardholdersPage() {
   const isActive = (c: Cardholder) => c.is_active === true || c.is_active === 1;
   const visible = cardholders.filter((c) => showInactive || isActive(c));
 
+  function exportExcel() {
+    if (visible.length === 0) {
+      toast.info("Nothing to export.");
+      return;
+    }
+    const header = [
+      "Name",
+      "Email",
+      "Source",
+      "CapOne L4",
+      "Amex L5",
+      "Amex Sheet",
+      "Status",
+    ];
+    const rows = visible.map((c) => [
+      `${c.first_name}${c.last_name ? ` ${c.last_name}` : ""}`,
+      c.email ?? "",
+      c.card_source,
+      c.cap_one_last4 ?? "",
+      c.amex_last5 ?? "",
+      c.amex_sheet_name ?? "",
+      isActive(c) ? "Active" : "Inactive",
+    ]);
+    downloadSheet(
+      `CC_Cardholders_${exportDateStamp()}.xlsx`,
+      "Cardholders",
+      header,
+      rows,
+    );
+  }
+
   return (
     <div>
       <PageHeader
         title="Cardholders"
         subtitle="Manage the credit-card cardholder registry"
         actions={
-          <Button onClick={openAdd}>
-            <Plus className="h-4 w-4" />
-            Add cardholder
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={exportExcel}
+              disabled={visible.length === 0}
+            >
+              <Download className="h-4 w-4" />
+              Export Excel
+            </Button>
+            <Button onClick={openAdd}>
+              <Plus className="h-4 w-4" />
+              Add cardholder
+            </Button>
+          </div>
         }
       />
       <CcSubNav />

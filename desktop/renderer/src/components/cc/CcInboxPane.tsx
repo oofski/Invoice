@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Loader2, Check, Search, Undo2 } from "lucide-react";
+import { Loader2, Check, Search, Undo2, Trash2 } from "lucide-react";
 import { Button, Input, Spinner } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/Toast";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
@@ -114,19 +114,23 @@ export function CcInboxReceiptPane({
  *     cardholder, falling back to all open transactions;
  *   - a "Send back" note textarea.
  *
- * Persistence is owned by the parent via `onAssign` / `onReturn` so the page can
- * update its queue + toast once. `busy` disables the controls during a save.
+ * Persistence is owned by the parent via `onAssign` / `onReturn` / `onDelete` so
+ * the page can update its queue + toast once. `busy` disables the controls
+ * during a save. `onDelete` is only passed for managers (the page gates it), so
+ * the Delete button renders only when discard is permitted.
  */
 export function CcInboxPane({
   item,
   busy,
   onAssign,
   onReturn,
+  onDelete,
 }: {
   item: InboxItem;
   busy?: boolean;
   onAssign: (transactionId: string) => void | Promise<void>;
   onReturn: (note: string) => void | Promise<void>;
+  onDelete?: () => void | Promise<void>;
 }) {
   const [note, setNote] = useState("");
   const [search, setSearch] = useState("");
@@ -289,7 +293,22 @@ export function CcInboxPane({
           rows={2}
           className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-subtle outline-none focus:border-accent focus:ring-1 focus:ring-ring"
         />
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between gap-2">
+          {onDelete ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => onDelete()}
+              className="text-ink-subtle hover:text-danger"
+              title="Delete this dropped receipt"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </Button>
+          ) : (
+            <span />
+          )}
           <Button
             variant="secondary"
             size="sm"

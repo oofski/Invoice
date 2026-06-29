@@ -5,6 +5,29 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.3.7] — 2026-06-29
+
+### Added
+- **Download Excel on every Credit Card list.** The Credit Cards module now has a
+  proper **Export Excel** button on **Transactions**, **Receipt Tracker**,
+  **Cardholders**, **Notifications**, and the **Dashboard** — real `.xlsx` files
+  matching the rest of the app (the Transactions export used to be CSV).
+- **Transactions/Receipt-Tracker exports now cover the full filtered set**, not
+  just the first page on screen. The export pulls every matching row (respecting
+  your current filters and search) instead of silently stopping at 200, so a
+  cycle export is complete.
+- **Delete a wrong receipt from the app (managers).** A manager can now remove a
+  mistakenly-attached receipt directly from a transaction's detail panel. When the
+  last receipt is removed, the transaction's receipt status automatically reverts
+  to **Pending** (a deliberate *Not required* / *Waived* status is left untouched).
+- **Discard junk dropped receipts from the inbox (managers).** Manager inbox /
+  returned-receipt views now have a delete (trash) action to clear out duplicate
+  or junk dropped receipts that were sitting in the queue with no way to remove
+  them.
+
+All changes are isolated to the Credit Cards module — the invoice workflow is
+unchanged, and there is no database migration in this release.
+
 ## [1.3.6] — 2026-06-29
 
 ### Fixed / Added

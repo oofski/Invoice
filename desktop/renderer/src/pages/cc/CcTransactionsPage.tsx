@@ -6,6 +6,7 @@ import {
   SlidersHorizontal,
   Paperclip,
   Pencil,
+  Trash2,
   X,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
@@ -20,8 +21,10 @@ import {
 } from "@/components/ui/primitives";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
-import { cn, formatCurrency, formatDate, downloadBlob } from "@/lib/utils";
+import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
+import { useCcManager } from "@/cc/useCcEnabled";
+import { downloadSheet, exportDateStamp } from "@/cc/ccExport";
 import { CcStatusBadge } from "@/components/cc/CcStatusBadge";
 import { CcReceiptPane } from "@/components/cc/CcReceiptPane";
 import { EntitySplitModal } from "@/components/cc/EntitySplitModal";
@@ -48,17 +51,14 @@ const STATUSES: (ReceiptStatus | "ALL")[] = [
   "WAIVED",
 ];
 
-function csvEscape(v: unknown): string {
-  const s = v == null ? "" : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
 export default function CcTransactionsPage() {
   const { id: routeId } = useParams<{ id?: string }>();
+  const isManager = useCcManager();
   const [filters, setFilters] = useState<TransactionsQuery>({ per_page: 200 });
   const [search, setSearch] = useState("");
   const [transactions, setTransactions] = useState<CcTransaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   // detail panel
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -176,46 +176,79 @@ export default function CcTransactionsPage() {
     }
   }
 
-  function exportCsv() {
-    if (transactions.length === 0) {
-      toast.info("No transactions to export.");
-      return;
-    }
-    const header = [
-      "Date",
-      "Cardholder",
-      "Source",
-      "Vendor",
-      "Category",
-      "Amount",
-      "Receipt Status",
-      "In QB",
-      "Exp Acct",
-      "Notes",
-    ];
-    const lines = [header.join(",")];
-    for (const t of transactions) {
-      lines.push(
-        [
-          t.transaction_date,
-          t.cardholder_name,
-          t.source,
-          t.vendor,
-          t.category ?? "",
-          t.amount,
-          t.receipt_status,
-          t.in_qb ? "Yes" : "No",
-          t.exp_acct ?? "",
-          t.notes ?? "",
-        ]
-          .map(csvEscape)
-          .join(","),
+  // Excel export of the FULL filtered set (the list view is capped at 200, so we
+  // page through every result here rather than exporting only what's on screen).
+  async function exportExcel() {
+    setExporting(true);
+    try {
+      const PER_PAGE = 200;
+      const MAX_PAGES = 100; // defensive cap to avoid an infinite loop
+      const all: CcTransaction[] = [];
+      let page = 1;
+      let total = Infinity;
+      while (page <= MAX_PAGES && all.length < total) {
+        const res = await ccApi.listTransactions({
+          ...queryString,
+          page,
+          per_page: PER_PAGE,
+        });
+        const batch = res.transactions ?? [];
+        all.push(...batch);
+        total = res.total ?? all.length;
+        if (batch.length < PER_PAGE) break;
+        page++;
+      }
+      if (all.length === 0) {
+        toast.info("No transactions to export.");
+        return;
+      }
+      const header = [
+        "Date",
+        "Cardholder",
+        "Source",
+        "Vendor",
+        "Category",
+        "Amount",
+        "Receipt Status",
+        "In QB",
+        "Exp Acct",
+        "Notes",
+      ];
+      const rows = all.map((t) => [
+        t.transaction_date,
+        t.cardholder_name,
+        t.source,
+        t.vendor,
+        t.category ?? "",
+        t.amount,
+        t.receipt_status,
+        t.in_qb ? "Yes" : "No",
+        t.exp_acct ?? "",
+        t.notes ?? "",
+      ]);
+      downloadSheet(
+        `CC_Transactions_${exportDateStamp()}.xlsx`,
+        "Transactions",
+        header,
+        rows,
       );
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Export failed");
+    } finally {
+      setExporting(false);
     }
-    downloadBlob(
-      new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" }),
-      `CC_Transactions_${new Date().toISOString().slice(0, 10)}.csv`,
-    );
+  }
+
+  async function deleteReceipt(receipt: Receipt) {
+    if (!window.confirm("Delete this receipt? This cannot be undone.")) return;
+    try {
+      await ccApi.deleteReceipt(receipt.id);
+      toast.success("Receipt deleted");
+      if (detail) await loadDetail(detail.transaction.id);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Delete failed");
+    }
   }
 
   return (
@@ -227,11 +260,12 @@ export default function CcTransactionsPage() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={exportCsv}
-            disabled={transactions.length === 0}
+            onClick={exportExcel}
+            loading={exporting}
+            disabled={exporting}
           >
             <Download className="h-4 w-4" />
-            Export CSV
+            Export Excel
           </Button>
         }
       />
@@ -522,12 +556,27 @@ export default function CcTransactionsPage() {
                               <Paperclip className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
                               <span className="truncate">{r.file_name}</span>
                             </span>
-                            <button
-                              onClick={() => setPreviewReceipt(r)}
-                              className="ml-2 shrink-0 text-xs font-medium text-accent hover:underline"
-                            >
-                              Preview
-                            </button>
+                            <span className="ml-2 flex shrink-0 items-center gap-2">
+                              <button
+                                onClick={() => setPreviewReceipt(r)}
+                                className="text-xs font-medium text-accent hover:underline"
+                              >
+                                Preview
+                              </button>
+                              {isManager && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void deleteReceipt(r);
+                                  }}
+                                  className="text-ink-subtle hover:text-danger"
+                                  title="Delete receipt"
+                                  aria-label="Delete receipt"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </span>
                           </li>
                         ))}
                       </ul>

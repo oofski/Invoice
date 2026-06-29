@@ -7,6 +7,7 @@ import {
   DollarSign,
   BellRing,
   Activity,
+  Download,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
@@ -15,6 +16,7 @@ import { toast } from "@/components/ui/Toast";
 import { cn, formatCurrency, formatDate, ageLabel } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { desktop } from "@/lib/desktop";
+import { downloadSheet, exportDateStamp } from "@/cc/ccExport";
 import {
   ccApi,
   sendCcReminders,
@@ -98,6 +100,36 @@ export default function CcDashboardPage() {
     }
   }
 
+  function exportExcel() {
+    const rows = summary?.cardholder_breakdown ?? [];
+    if (rows.length === 0) {
+      toast.info("Nothing to export.");
+      return;
+    }
+    const header = [
+      "Name",
+      "Card",
+      "Open",
+      "Received",
+      "% Complete",
+      "Last notified",
+    ];
+    const data = rows.map((c) => [
+      c.name,
+      c.card,
+      c.open,
+      c.received,
+      Math.round(c.pct_complete ?? 0),
+      c.last_notified_at ? formatDate(c.last_notified_at) : "",
+    ]);
+    downloadSheet(
+      `CC_Dashboard_${exportDateStamp()}.xlsx`,
+      "Cardholders",
+      header,
+      data,
+    );
+  }
+
   if (loading) {
     return (
       <div>
@@ -120,6 +152,17 @@ export default function CcDashboardPage() {
       <PageHeader
         title="Credit Card Dashboard"
         subtitle="Receipt-collection progress for the current cycle"
+        actions={
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={exportExcel}
+            disabled={!s?.cardholder_breakdown?.length}
+          >
+            <Download className="h-4 w-4" />
+            Export Excel
+          </Button>
+        }
       />
       <CcSubNav />
 

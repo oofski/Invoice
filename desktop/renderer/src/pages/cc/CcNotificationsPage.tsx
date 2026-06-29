@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Mail, Bell } from "lucide-react";
+import { Mail, Bell, Download } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
-import { Card, Spinner, EmptyState } from "@/components/ui/primitives";
+import { Card, Button, Spinner, EmptyState } from "@/components/ui/primitives";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
 import { cn, formatDate } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
+import { downloadSheet, exportDateStamp } from "@/cc/ccExport";
 import {
   ccApi,
   notificationTxIds,
@@ -55,6 +56,28 @@ export default function CcNotificationsPage() {
     load();
   }, [load]);
 
+  function exportExcel() {
+    if (notifications.length === 0) {
+      toast.info("Nothing to export.");
+      return;
+    }
+    const header = ["Date", "To", "Subject", "# Tx", "Follow-up", "Delivery"];
+    const rows = notifications.map((n) => [
+      formatDate(n.created_at),
+      n.cardholder_name ?? n.email_to,
+      n.subject,
+      txCount(n),
+      n.is_followup ? "Yes" : "No",
+      DELIVERY_LABEL[n.delivery] ?? n.delivery,
+    ]);
+    downloadSheet(
+      `CC_Notifications_${exportDateStamp()}.xlsx`,
+      "Notifications",
+      header,
+      rows,
+    );
+  }
+
   async function openDetail(n: Notification) {
     setSelected(n);
     setDetailLoading(true);
@@ -73,6 +96,17 @@ export default function CcNotificationsPage() {
       <PageHeader
         title="Notifications"
         subtitle="History of receipt-reminder emails sent to cardholders"
+        actions={
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={exportExcel}
+            disabled={notifications.length === 0}
+          >
+            <Download className="h-4 w-4" />
+            Export Excel
+          </Button>
+        }
       />
       <CcSubNav />
 

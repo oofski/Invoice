@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Undo2, Eye, RotateCcw } from "lucide-react";
+import { Undo2, Eye, RotateCcw, Trash2 } from "lucide-react";
 import { Card, Button, Spinner } from "@/components/ui/primitives";
 import { Modal } from "@/components/ui/Modal";
+import { toast } from "@/components/ui/Toast";
 import { formatDate } from "@/lib/utils";
+import { ApiError } from "@/lib/api";
 import { ccApi, type InboxItem } from "@/cc/ccApi";
 import { CcInboxReceiptPane } from "@/components/cc/CcInboxPane";
+import { useCcManager } from "@/cc/useCcEnabled";
 
 /**
  * Cardholder "Returned receipts" list (design §4 — Feature A). Shows the items a
@@ -24,8 +27,10 @@ export function CcReturnedReceipts({
   onCount?: (n: number) => void;
   onResubmit?: () => void;
 }) {
+  const isManager = useCcManager();
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string>("Receipt");
 
@@ -48,6 +53,31 @@ export function CcReturnedReceipts({
   useEffect(() => {
     load();
   }, [load, refreshKey]);
+
+  /**
+   * Discard a returned item. The server only permits this for a manager (a
+   * RETURNED item is no longer PENDING_MATCH, so the owner-while-pending rule
+   * doesn't apply); we gate the button on `isManager` to avoid a dead 403.
+   */
+  async function handleDelete(it: InboxItem) {
+    if (!window.confirm("Delete this dropped receipt? This cannot be undone.")) {
+      return;
+    }
+    setDeletingId(it.id);
+    try {
+      await ccApi.deleteInbox(it.id);
+      toast.success("Receipt deleted");
+      setItems((prev) => {
+        const next = prev.filter((x) => x.id !== it.id);
+        onCount?.(next.length);
+        return next;
+      });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Delete failed");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   if (!loading && items.length === 0) return null;
 
@@ -106,6 +136,20 @@ export function CcReturnedReceipts({
                     <RotateCcw className="h-3.5 w-3.5" />
                     Re-submit
                   </Button>
+                  {isManager && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      loading={deletingId === it.id}
+                      disabled={deletingId === it.id}
+                      onClick={() => handleDelete(it)}
+                      className="text-ink-subtle hover:text-danger"
+                      title="Delete this dropped receipt"
+                      aria-label="Delete dropped receipt"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </li>
