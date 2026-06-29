@@ -74,6 +74,7 @@ const CC_DDL: string[] = [
      exp_acct         TEXT,
      notes            TEXT,
      dedup_key        TEXT,
+     archived_at      TEXT,
      created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
      updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
    )`,
@@ -209,6 +210,11 @@ const CC_ADD_COLUMNS: { table: string; column: string; ddl: string }[] = [
     column: "is_followup",
     ddl: "ALTER TABLE cc_notifications ADD COLUMN is_followup INTEGER NOT NULL DEFAULT 0",
   },
+  {
+    table: "cc_transactions",
+    column: "archived_at",
+    ddl: "ALTER TABLE cc_transactions ADD COLUMN archived_at TEXT",
+  },
 ];
 
 /** Seed cardholder registry (15 rows; §1b). Deterministic ids; email seeded NULL. */
@@ -268,6 +274,19 @@ export async function ensureCcSchema(env: Env): Promise<void> {
         return;
       }
     }
+  }
+
+  // 2b) Index on archived_at (v1.3.8 archive). Created AFTER the ALTER above so
+  //     the column is guaranteed to exist on an upgraded table (a pre-existing
+  //     cc_transactions won't have it during the CREATE TABLE batch). IF NOT
+  //     EXISTS — idempotent.
+  try {
+    await env.DB.prepare(
+      "CREATE INDEX IF NOT EXISTS idx_cc_tx_archived ON cc_transactions(archived_at)",
+    ).run();
+  } catch (e) {
+    console.error("[cc-migrations] create archived index failed (will retry):", e);
+    return;
   }
 
   // 3) Idempotent cardholder seed (INSERT OR IGNORE; email NULL, is_active 1).

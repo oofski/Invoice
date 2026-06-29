@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
+  Archive,
+  ArchiveRestore,
   Download,
   ReceiptText,
   SlidersHorizontal,
@@ -176,64 +178,124 @@ export default function CcTransactionsPage() {
     }
   }
 
-  // Excel export of the FULL filtered set (the list view is capped at 200, so we
-  // page through every result here rather than exporting only what's on screen).
+  async function unarchive(id: string) {
+    try {
+      await ccApi.unarchiveTransaction(id);
+      toast.success("Transaction restored");
+      if (detail?.transaction.id === id) await loadDetail(id);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Unarchive failed");
+    }
+  }
+
+  // Page through the FULL filtered set (the list view is capped at 200, so we
+  // fetch every result here rather than only what's on screen). Shared by
+  // exportExcel and exportAndClear so both export an identical row set.
+  const fetchAllFiltered = useCallback(async (): Promise<CcTransaction[]> => {
+    const PER_PAGE = 200;
+    const MAX_PAGES = 100; // defensive cap to avoid an infinite loop
+    const all: CcTransaction[] = [];
+    let page = 1;
+    let total = Infinity;
+    while (page <= MAX_PAGES && all.length < total) {
+      const res = await ccApi.listTransactions({
+        ...queryString,
+        page,
+        per_page: PER_PAGE,
+      });
+      const batch = res.transactions ?? [];
+      all.push(...batch);
+      total = res.total ?? all.length;
+      if (batch.length < PER_PAGE) break;
+      page++;
+    }
+    return all;
+  }, [queryString]);
+
+  // Build + download the xlsx for a fetched row set. Returns false when there
+  // was nothing to export (so callers can bail without archiving).
+  function downloadTransactions(all: CcTransaction[]): boolean {
+    if (all.length === 0) {
+      toast.info("No transactions to export.");
+      return false;
+    }
+    const header = [
+      "Date",
+      "Cardholder",
+      "Source",
+      "Vendor",
+      "Category",
+      "Amount",
+      "Receipt Status",
+      "In QB",
+      "Exp Acct",
+      "Notes",
+    ];
+    const rows = all.map((t) => [
+      t.transaction_date,
+      t.cardholder_name,
+      t.source,
+      t.vendor,
+      t.category ?? "",
+      t.amount,
+      t.receipt_status,
+      t.in_qb ? "Yes" : "No",
+      t.exp_acct ?? "",
+      t.notes ?? "",
+    ]);
+    downloadSheet(
+      `CC_Transactions_${exportDateStamp()}.xlsx`,
+      "Transactions",
+      header,
+      rows,
+    );
+    return true;
+  }
+
   async function exportExcel() {
     setExporting(true);
     try {
-      const PER_PAGE = 200;
-      const MAX_PAGES = 100; // defensive cap to avoid an infinite loop
-      const all: CcTransaction[] = [];
-      let page = 1;
-      let total = Infinity;
-      while (page <= MAX_PAGES && all.length < total) {
-        const res = await ccApi.listTransactions({
-          ...queryString,
-          page,
-          per_page: PER_PAGE,
-        });
-        const batch = res.transactions ?? [];
-        all.push(...batch);
-        total = res.total ?? all.length;
-        if (batch.length < PER_PAGE) break;
-        page++;
-      }
-      if (all.length === 0) {
-        toast.info("No transactions to export.");
-        return;
-      }
-      const header = [
-        "Date",
-        "Cardholder",
-        "Source",
-        "Vendor",
-        "Category",
-        "Amount",
-        "Receipt Status",
-        "In QB",
-        "Exp Acct",
-        "Notes",
-      ];
-      const rows = all.map((t) => [
-        t.transaction_date,
-        t.cardholder_name,
-        t.source,
-        t.vendor,
-        t.category ?? "",
-        t.amount,
-        t.receipt_status,
-        t.in_qb ? "Yes" : "No",
-        t.exp_acct ?? "",
-        t.notes ?? "",
-      ]);
-      downloadSheet(
-        `CC_Transactions_${exportDateStamp()}.xlsx`,
-        "Transactions",
-        header,
-        rows,
-      );
+      const all = await fetchAllFiltered();
+      downloadTransactions(all);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  // Manager: export the current view, THEN archive those rows. Export is locked
+  // before archive — if the fetch/download throws, we archive NOTHING.
+  async function exportAndClear() {
+    if (
+      !window.confirm(
+        "Download an Excel of the current view, then archive (hide) those transactions? Archived transactions are hidden from the list but can be restored with 'Show archived'.",
+      )
+    )
+      return;
+    setExporting(true);
+    try {
+      // EXPORT FIRST. Any throw here aborts before a single archive call.
+      let rows: CcTransaction[];
+      try {
+        rows = await fetchAllFiltered();
+        if (!downloadTransactions(rows)) return; // nothing to export
+      } catch (err) {
+        toast.error(err instanceof ApiError ? err.message : "Export failed");
+        return; // export-locked: archive nothing
+      }
+      // Only after a successful download: archive the (non-archived) rows.
+      const ids = rows.filter((r) => !r.archived_at).map((r) => r.id);
+      if (ids.length === 0) {
+        toast.info("Nothing to archive (already archived).");
+        return;
+      }
+      const res = await ccApi.archiveTransactions(ids);
+      toast.success(`Exported and archived ${res.archived} transaction(s)`);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Archive failed");
     } finally {
       setExporting(false);
     }
@@ -257,16 +319,29 @@ export default function CcTransactionsPage() {
         title="Transactions"
         subtitle="All credit-card transactions"
         actions={
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={exportExcel}
-            loading={exporting}
-            disabled={exporting}
-          >
-            <Download className="h-4 w-4" />
-            Export Excel
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={exportExcel}
+              loading={exporting}
+              disabled={exporting}
+            >
+              <Download className="h-4 w-4" />
+              Export Excel
+            </Button>
+            {isManager && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={exportAndClear}
+                disabled={exporting}
+              >
+                <Archive className="h-4 w-4" />
+                Download Excel + Clear
+              </Button>
+            )}
+          </div>
         }
       />
       <CcSubNav />
@@ -340,6 +415,20 @@ export default function CcTransactionsPage() {
                 }
                 className="w-40"
               />
+              <label className="flex cursor-pointer items-center gap-1.5 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={!!filters.includeArchived}
+                  onChange={(e) =>
+                    setFilters((f) => ({
+                      ...f,
+                      includeArchived: e.target.checked ? 1 : undefined,
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-line accent-accent"
+                />
+                Show archived
+              </label>
             </div>
 
             {loading ? (
@@ -375,6 +464,7 @@ export default function CcTransactionsPage() {
                         className={cn(
                           "cursor-pointer border-b border-line hover:bg-surface-2",
                           selectedId === t.id && "bg-selected-bg",
+                          t.archived_at && "opacity-60",
                         )}
                       >
                         <td className="px-4 py-3 text-ink-muted">
@@ -390,7 +480,14 @@ export default function CcTransactionsPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 font-medium text-ink">
-                          {t.vendor}
+                          <span className="flex items-center gap-2">
+                            <span>{t.vendor}</span>
+                            {t.archived_at && (
+                              <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                                Archived
+                              </span>
+                            )}
+                          </span>
                         </td>
                         <td className="px-4 py-3 text-xs text-ink-muted">
                           {t.source === "AMEX" ? "Amex" : "Cap One"}
@@ -433,6 +530,23 @@ export default function CcTransactionsPage() {
                 </div>
               ) : (
                 <div className="space-y-4 p-4">
+                  {detail.transaction.archived_at && (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm">
+                      <span className="text-ink-muted">
+                        Archived {formatDate(detail.transaction.archived_at)}
+                      </span>
+                      {isManager && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => unarchive(detail.transaction.id)}
+                        >
+                          <ArchiveRestore className="h-4 w-4" />
+                          Unarchive
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   <DetailRow label="Vendor" value={detail.transaction.vendor} />
                   <DetailRow
                     label="Amount"

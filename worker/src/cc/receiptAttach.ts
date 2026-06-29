@@ -74,6 +74,7 @@ async function hydrateTx(env: Env, r: TxRow): Promise<Tx> {
     exp_acct: r.exp_acct,
     notes: r.notes,
     dedup_key: r.dedup_key,
+    archived_at: r.archived_at ?? null,
     created_at: r.created_at,
     updated_at: r.updated_at,
   };

@@ -37,6 +37,12 @@ export const transactions = new Hono<AppEnv>();
 const MIGRATION_MSG =
   "Credit Cards needs a one-time database setup — run the migration.";
 
+/** True once cc_transactions.archived_at exists (the v1.3.8 archive migration). */
+async function ccArchiveReady(env: AppEnv["Bindings"]): Promise<boolean> {
+  try { await env.DB.prepare("SELECT archived_at FROM cc_transactions LIMIT 1").first(); return true; }
+  catch { return false; }
+}
+
 /** A `cc_transactions` row joined with the cardholder display name. */
 type TxRowJoined = TxRow & { cardholder_name: string | null };
 
@@ -61,6 +67,7 @@ function hydrateTx(r: TxRowJoined): Tx {
     exp_acct: r.exp_acct,
     notes: r.notes,
     dedup_key: r.dedup_key,
+    archived_at: r.archived_at ?? null,
     created_at: r.created_at,
     updated_at: r.updated_at,
   };
@@ -209,6 +216,17 @@ transactions.get("/", async (c) => {
   if (category) { cSql += " AND t.category = ?"; cParams.push(category); }
   if (q) { cSql += " AND t.vendor LIKE ?"; cParams.push(`%${q}%`); }
 
+  // v1.3.8: hide archived rows by default. ?includeArchived=1 (any truthy) shows
+  // them. Applied to BOTH the list and the count so `total` matches the page.
+  // Gated on ccArchiveReady so a pre-migration DB (no archived_at column) is
+  // tolerated — when the column is absent the clause is skipped and all rows show.
+  // Both queries alias the table `t`, so `t.archived_at` resolves in each.
+  const includeArchived = !!c.req.query("includeArchived");
+  if (!includeArchived && (await ccArchiveReady(c.env))) {
+    sql += " AND t.archived_at IS NULL";
+    cSql += " AND t.archived_at IS NULL";
+  }
+
   const countRow = await c.env.DB.prepare(cSql).bind(...cParams).first<{ c: number }>();
   const total = countRow?.c ?? 0;
 
@@ -273,6 +291,81 @@ transactions.patch("/bulk", async (c) => {
     if (changes > 0) updated += changes;
   }
   return c.json({ updated_count: updated });
+});
+
+// ----- POST /archive (batch, manager only) ----------------------------
+// v1.3.8: archive a set of transactions (safe, reversible — sets archived_at,
+// never deletes). Body { ids: string[] }. Registered BEFORE GET/PATCH /:id so
+// the literal path isn't shadowed by the :id param route (POST has no method
+// collision regardless). Preamble: flag → archive-ready 503 → manager 403 → 400.
+transactions.post("/archive", async (c) => {
+  if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
+  if (!(await ccArchiveReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+    return c.json({ error: "Forbidden" }, 403);
+
+  const body = (await c.req.json().catch(() => ({}))) as { ids?: unknown };
+  const ids = Array.isArray(body.ids)
+    ? body.ids.filter((x): x is string => typeof x === "string" && !!x)
+    : [];
+  if (ids.length === 0)
+    return c.json({ error: "ids (non-empty array) is required" }, 400);
+
+  const at = new Date().toISOString();
+  let archived = 0;
+  for (const id of ids) {
+    // Skip unknown / already-archived (archived_at IS NULL guard). Bump
+    // updated_at alongside for parity with the PATCH handlers.
+    const res = await c.env.DB.prepare(
+      "UPDATE cc_transactions SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL",
+    )
+      .bind(at, at, id)
+      .run();
+    archived += res.meta?.changes ?? 0;
+  }
+  return c.json({ ok: true, archived });
+});
+
+// ----- POST /:id/archive (manager only) -------------------------------
+// v1.3.8: archive a single transaction (reversible). Registered BEFORE GET /:id.
+transactions.post("/:id/archive", async (c) => {
+  if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
+  if (!(await ccArchiveReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+    return c.json({ error: "Forbidden" }, 403);
+
+  const id = c.req.param("id");
+  const tx = await selectTxJoined(c.env, id);
+  if (!tx) return c.json({ error: "Not found" }, 404);
+
+  const at = new Date().toISOString();
+  await c.env.DB.prepare(
+    "UPDATE cc_transactions SET archived_at = ?, updated_at = ? WHERE id = ?",
+  )
+    .bind(at, at, id)
+    .run();
+  return c.json({ ok: true, archived_at: at });
+});
+
+// ----- POST /:id/unarchive (manager only) -----------------------------
+// v1.3.8: restore an archived transaction to the default view. Before GET /:id.
+transactions.post("/:id/unarchive", async (c) => {
+  if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
+  if (!(await ccArchiveReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+    return c.json({ error: "Forbidden" }, 403);
+
+  const id = c.req.param("id");
+  const tx = await selectTxJoined(c.env, id);
+  if (!tx) return c.json({ error: "Not found" }, 404);
+
+  const at = new Date().toISOString();
+  await c.env.DB.prepare(
+    "UPDATE cc_transactions SET archived_at = NULL, updated_at = ? WHERE id = ?",
+  )
+    .bind(at, id)
+    .run();
+  return c.json({ ok: true });
 });
 
 // ----- GET /:id --------------------------------------------------------

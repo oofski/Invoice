@@ -87,6 +87,7 @@ export interface TxRow {
   exp_acct: string | null;
   notes: string | null;
   dedup_key: string | null;
+  archived_at: string | null; // v1.3.8 archive: ISO timestamp when archived, else NULL
   created_at: string;
   updated_at: string;
 }
@@ -190,6 +191,7 @@ export interface Tx {
   exp_acct: string | null;
   notes: string | null;
   dedup_key: string | null;
+  archived_at: string | null; // v1.3.8 archive: ISO timestamp when archived, else null
   created_at: string;
   updated_at: string;
 }

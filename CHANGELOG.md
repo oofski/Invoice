@@ -5,6 +5,27 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.3.8] — 2026-06-29
+
+### Added
+- **Safe "Download Excel + Clear" for Credit Card transactions.** Managers can now
+  declutter the Transactions list at the end of a cycle the same way the invoice
+  side works: one button **exports the current view to Excel first, and only then
+  archives** those transactions. If the export fails for any reason, nothing is
+  archived — so you never lose a record. Archiving is **reversible** (it hides
+  rows, it does not delete them).
+- **Show archived / Unarchive.** A **Show archived** toggle brings hidden
+  transactions back into view (shown muted with an "Archived" badge), and an
+  **Unarchive** button in a transaction's detail panel restores it to the normal
+  list.
+- The archive covers the **full filtered set**, not just the page on screen, so a
+  cycle clear is complete.
+
+The hidden/restored state is stored in a new, automatically-applied database
+column — **no manual setup or migration step** is required; it upgrades itself on
+update. Changes are isolated to the Credit Cards module; the invoice workflow is
+unchanged.
+
 ## [1.3.7] — 2026-06-29
 
 ### Added

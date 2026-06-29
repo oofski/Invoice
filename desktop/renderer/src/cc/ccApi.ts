@@ -127,6 +127,7 @@ export interface CcTransaction {
   exp_acct: string | null;
   notes: string | null;
   dedup_key?: string | null;
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -471,6 +472,8 @@ export interface TransactionsQuery {
   q?: string;
   page?: number;
   per_page?: number;
+  /** Truthy (1) includes archived rows; omit to hide them (server default). */
+  includeArchived?: number;
 }
 
 export interface NotificationsQuery {
@@ -588,6 +591,21 @@ export const ccApi = {
     transaction_ids: string[];
     updates: Partial<{ receipt_status: ReceiptStatus; in_qb: boolean }>;
   }) => api.patch<{ updated_count: number }>("/api/cc/transactions/bulk", body),
+  /** Manager: archive (hide) a set of transactions. */
+  archiveTransactions: (ids: string[]) =>
+    api.post<{ ok: boolean; archived: number }>(
+      "/api/cc/transactions/archive",
+      { ids },
+    ),
+  /** Manager: archive a single transaction. */
+  archiveTransaction: (id: string) =>
+    api.post<{ ok: boolean; archived_at: string }>(
+      `/api/cc/transactions/${id}/archive`,
+      {},
+    ),
+  /** Manager: restore an archived transaction. */
+  unarchiveTransaction: (id: string) =>
+    api.post<{ ok: boolean }>(`/api/cc/transactions/${id}/unarchive`, {}),
 
   // ---- Splits ------------------------------------------------------------
   getSplits: (id: string) =>
