@@ -139,6 +139,23 @@ CREATE TABLE IF NOT EXISTS vendor_mappings (
   updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
+-- ------------------------------------------------------- VENDOR ALIASES
+-- Canonicalizes OCR spelling variants of a vendor onto a single
+-- vendor_mappings row so the variant inherits its GL coding + routing. The
+-- lookup is deterministic exact-normalized-equality (alias_norm = the same
+-- normalizeVendor() the matcher computes). Many aliases -> one canonical (1:N);
+-- alias_norm UNIQUE prevents one variant from pointing at two canonicals. Fully
+-- additive + reversible: delete an alias row and behavior reverts exactly.
+CREATE TABLE IF NOT EXISTS vendor_aliases (
+  id           TEXT PRIMARY KEY,
+  alias_text   TEXT NOT NULL,              -- raw admin/seed string, e.g. 'Olivia Garden'
+  alias_norm   TEXT NOT NULL UNIQUE,       -- normalizeVendor(alias_text), the lookup key
+  canonical_id TEXT NOT NULL REFERENCES vendor_mappings(id) ON DELETE CASCADE,
+  created_by   TEXT,
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_vendor_aliases_norm ON vendor_aliases(alias_norm);
+
 -- ------------------------------------------------------------- AUDIT LOG
 CREATE TABLE IF NOT EXISTS audit_log (
   id         TEXT PRIMARY KEY,
@@ -259,3 +276,17 @@ CREATE TABLE IF NOT EXISTS audit_clear_cutoffs (
   cutoff_at  TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+-- vendor canonicalization: alias table maps OCR spelling variants -> a canonical
+-- vendor_mappings row (deterministic exact-normalized-equality lookup). Additive +
+-- reversible; mirrors the CREATE near vendor_mappings above. Seeded by ensureSeedData.
+CREATE TABLE IF NOT EXISTS vendor_aliases (
+  id           TEXT PRIMARY KEY,
+  alias_text   TEXT NOT NULL,
+  alias_norm   TEXT NOT NULL UNIQUE,
+  canonical_id TEXT NOT NULL REFERENCES vendor_mappings(id) ON DELETE CASCADE,
+  created_by   TEXT,
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_vendor_aliases_norm ON vendor_aliases(alias_norm);
+-- Seed the reported OCR variant: 'Olivia Garden' -> 'Olive Garden' (ven-olivegarden).
+INSERT OR REPLACE INTO vendor_aliases (id, alias_text, alias_norm, canonical_id) VALUES ('alias-oliviagarden','Olivia Garden','olivia garden','ven-olivegarden');

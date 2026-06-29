@@ -123,6 +123,22 @@ export interface VendorMappingRow {
   updated_at: string;
 }
 
+/**
+ * A vendor alias (vendor canonicalization). Maps an OCR spelling variant
+ * (`alias_text`, normalized to `alias_norm`) onto a canonical `vendor_mappings`
+ * row (`canonical_id`) so the variant inherits its GL coding + routing. Lookup
+ * is deterministic exact-normalized-equality (`alias_norm`); fuzzy is advisory
+ * only and never written here automatically.
+ */
+export interface VendorAliasRow {
+  id: string;
+  alias_text: string;
+  alias_norm: string;
+  canonical_id: string;
+  created_by: string | null;
+  created_at: string;
+}
+
 // --- AI prompt output schemas (Brief §05) ---
 export interface Prompt1Output {
   Vendor: string;

@@ -5,6 +5,24 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.3.6] — 2026-06-29
+
+### Fixed / Added
+- **Misspelled vendor names now code correctly (vendor aliases).** When the OCR
+  reads a vendor name with a spelling/character error (e.g. `Olivia Garden`
+  instead of `Olive Garden`), the invoice used to miss the vendor's mapping and
+  get mis-coded (e.g. Repairs & Maintenance instead of Retail). You can now map a
+  variant to the right vendor and it inherits that vendor's correct GL coding,
+  entity, and approver routing. The known `Olivia Garden → Olive Garden` case is
+  fixed automatically; others you can add yourself.
+- **Manage vendor aliases in the app.** On the **Vendors** admin page, expand a
+  vendor to add/remove alias spellings under it — one field to map, say,
+  `Olivia Garden` to `Olive Garden`. Aliases apply to the next invoice processed.
+- Matching stays **deterministic and safe**: only the aliases you approve change
+  coding — the app never auto-merges two different vendors on its own. (Verified
+  against the coding audit with **zero regressions**; e.g. `Olive Branch` is not
+  treated as `Olive Garden`.)
+
 ## [1.3.5] — 2026-06-29
 
 ### Changed

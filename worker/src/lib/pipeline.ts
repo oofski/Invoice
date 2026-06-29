@@ -2,6 +2,7 @@ import type { Env, PipelineResult, Prompt3LineItem } from "./types";
 import type { ExtractedInvoice } from "./extract";
 import {
   loadVendorMappings,
+  loadVendorAliases,
   findVendorMapping,
   loadLocations,
   matchLocation,
@@ -26,8 +27,12 @@ export async function runRulesPipeline(
   env: Env,
   x: ExtractedInvoice,
 ): Promise<PipelineResult> {
-  const [vendorRows, locs] = await Promise.all([loadVendorMappings(env), loadLocations(env)]);
-  const vendorMapping = findVendorMapping(x.vendor, vendorRows);
+  const [vendorRows, locs, aliases] = await Promise.all([
+    loadVendorMappings(env),
+    loadLocations(env),
+    loadVendorAliases(env),
+  ]);
+  const vendorMapping = findVendorMapping(x.vendor, vendorRows, aliases);
 
   // Business / Class — match the ship-to (and supporting text) against locations.
   const locText = [x.ship_to_address, x.vendor, ...x.line_items.map((l) => l.description)].join(" \n ");

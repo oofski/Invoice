@@ -111,6 +111,37 @@ export interface VendorMappingRow {
   updated_at?: string;
 }
 
+/**
+ * A vendor alias maps a misspelled/variant vendor name (`alias_text`) to a
+ * canonical `vendor_mappings` row (`canonical_id`), so the variant inherits the
+ * canonical vendor's GL coding + routing. Redeclared locally to mirror the
+ * Worker contract (`GET/POST/DELETE /api/vendors/aliases`).
+ */
+export interface VendorAlias {
+  id: string;
+  alias_text: string;
+  alias_norm: string;
+  canonical_id: string;
+  /**
+   * The canonical vendor's display name from the LEFT JOIN, as returned by the
+   * Worker route `GET /api/vendors/aliases` (`v.vendor_name AS canonical_name`)
+   * and the `POST` response. Single field name on both sides (reconciled to the
+   * Worker's `canonical_name`). Optional because the UI already has the canonical
+   * name from the loaded vendor row and groups aliases by `canonical_id`.
+   */
+  canonical_name?: string;
+}
+
+/**
+ * One advisory fuzzy-match suggestion from `GET /api/vendors/suggest?vendor=`.
+ * Non-binding — surfaced only to offer a one-click "create alias" affordance.
+ */
+export interface VendorSuggestion {
+  canonical_id: string;
+  vendor_name: string;
+  score: number;
+}
+
 export interface AuditLogRow {
   id: string;
   invoice_id?: string | null;

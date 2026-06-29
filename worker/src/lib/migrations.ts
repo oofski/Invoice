@@ -1,4 +1,5 @@
 import type { Env } from "./types";
+import { normalizeVendor } from "./rules";
 
 /**
  * Runtime seed/migration (v1.2.1). Applies the idempotent mapping upserts that
@@ -76,6 +77,17 @@ const SEED_INVENTORY_VENDORS: { id: string; name: string }[] = [
   { id: "ven-opi", name: "OPI" },
 ];
 
+// System-managed vendor aliases — confirmed OCR spelling variants that should
+// canonicalize onto an existing vendor_mappings row so they inherit its GL
+// coding (vendor canonicalization). `alias_norm` is computed with the SAME
+// normalizeVendor() that findVendorMapping uses, so the deterministic exact-
+// equality lookup is guaranteed to hit. The canonical_id must be a fixed-id
+// system seed (here ven-olivegarden), so the FK target always exists.
+const SEED_VENDOR_ALIASES: { id: string; alias: string; canonical_id: string }[] = [
+  { id: "alias-oliviagarden", alias: "Olivia Garden", canonical_id: "ven-olivegarden" },
+  // add more confirmed OCR variants here as they surface
+];
+
 let schemaEnsured = false;
 
 /**
@@ -109,7 +121,9 @@ export async function ensureSchema(env: Env): Promise<void> {
       return;
     }
   }
-  // 2) Index + cutoff table — both naturally idempotent (IF NOT EXISTS).
+  // 2) Index + cutoff table + vendor_aliases — all naturally idempotent
+  //    (CREATE … IF NOT EXISTS). vendor_aliases canonicalizes OCR vendor spelling
+  //    variants onto a vendor_mappings row (additive + reversible).
   try {
     await env.DB.batch([
       env.DB.prepare(
@@ -117,6 +131,12 @@ export async function ensureSchema(env: Env): Promise<void> {
       ),
       env.DB.prepare(
         "CREATE TABLE IF NOT EXISTS audit_clear_cutoffs (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, cutoff_at TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))",
+      ),
+      env.DB.prepare(
+        "CREATE TABLE IF NOT EXISTS vendor_aliases (id TEXT PRIMARY KEY, alias_text TEXT NOT NULL, alias_norm TEXT NOT NULL UNIQUE, canonical_id TEXT NOT NULL REFERENCES vendor_mappings(id) ON DELETE CASCADE, created_by TEXT, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))",
+      ),
+      env.DB.prepare(
+        "CREATE INDEX IF NOT EXISTS idx_vendor_aliases_norm ON vendor_aliases(alias_norm)",
       ),
     ]);
     schemaEnsured = true;
@@ -151,6 +171,14 @@ export async function ensureSeedData(env: Env): Promise<void> {
         env.DB.prepare(
           "INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES (?,?,?,?,?,?,?)",
         ).bind(v.id, v.name, null, null, null, 1, "Retail / Product Costs"),
+      ),
+      // Vendor aliases — upserted AFTER the inventory vendors above so the
+      // canonical_id FK target exists in the same batch. `alias_norm` uses the
+      // SAME normalizeVendor() the matcher computes, guaranteeing the lookup hits.
+      ...SEED_VENDOR_ALIASES.map((a) =>
+        env.DB.prepare(
+          "INSERT OR REPLACE INTO vendor_aliases (id, alias_text, alias_norm, canonical_id) VALUES (?,?,?,?)",
+        ).bind(a.id, a.alias, normalizeVendor(a.alias), a.canonical_id),
       ),
     ];
     await env.DB.batch(stmts);

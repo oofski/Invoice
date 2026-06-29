@@ -1,5 +1,13 @@
 import { useMemo, useState } from "react";
-import { Plus, Pencil, Check, X } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Check,
+  X,
+  ChevronRight,
+  ChevronDown,
+  Tags,
+} from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import {
   Card,
@@ -14,20 +22,28 @@ import { useApi } from "@/hooks/useApi";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { APPROVERS, BUSINESS_ENTITIES, CLASSES } from "@/lib/constants";
-import type { VendorMappingRow } from "@/lib/types";
+import type { VendorAlias, VendorMappingRow } from "@/lib/types";
 
 type Draft = Partial<VendorMappingRow>;
+
+const TABLE_COLSPAN = 7;
 
 export default function VendorsPage() {
   const { data, loading, refetch } = useApi<{ vendors: VendorMappingRow[] }>(
     "/api/vendors",
   );
+  const {
+    data: aliasData,
+    loading: aliasesLoading,
+    refetch: refetchAliases,
+  } = useApi<{ aliases: VendorAlias[] }>("/api/vendors/aliases");
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>({});
   const [adding, setAdding] = useState(false);
   const [newRow, setNewRow] = useState<Draft>({ is_inventory: false });
   const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const vendors = useMemo(() => data?.vendors ?? [], [data]);
   const filtered = useMemo(
@@ -37,6 +53,26 @@ export default function VendorsPage() {
       ),
     [vendors, search],
   );
+
+  // Group aliases under their canonical vendor for the per-row sub-list.
+  const aliasesByVendor = useMemo(() => {
+    const map = new Map<string, VendorAlias[]>();
+    for (const a of aliasData?.aliases ?? []) {
+      const list = map.get(a.canonical_id);
+      if (list) list.push(a);
+      else map.set(a.canonical_id, [a]);
+    }
+    return map;
+  }, [aliasData]);
+
+  function toggleExpanded(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   function startEdit(v: VendorMappingRow) {
     setEditingId(v.id);
@@ -81,7 +117,7 @@ export default function VendorsPage() {
     <div>
       <PageHeader
         title="Vendor Mappings"
-        subtitle="Routing & GL defaults · changes apply to the next invoice processed"
+        subtitle="Routing & GL defaults · expand a vendor to map name variants (aliases) · changes apply to the next invoice processed"
         actions={
           <Button onClick={() => setAdding((a) => !a)} size="sm">
             <Plus className="h-4 w-4" /> Add vendor
@@ -196,13 +232,34 @@ export default function VendorsPage() {
 
                   {filtered.map((v) => {
                     const editing = editingId === v.id;
+                    const aliases = aliasesByVendor.get(v.id) ?? [];
+                    const isExpanded = expanded.has(v.id);
                     return (
+                      <FragmentRow key={v.id}>
                       <tr
-                        key={v.id}
                         className="border-b border-line hover:bg-surface-2"
                       >
                         <td className="px-4 py-2.5 font-medium text-ink">
-                          {v.vendor_name}
+                          <button
+                            type="button"
+                            onClick={() => toggleExpanded(v.id)}
+                            className="inline-flex items-center gap-1.5 text-left hover:text-accent"
+                            aria-expanded={isExpanded}
+                            title="Manage aliases"
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
+                            ) : (
+                              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
+                            )}
+                            <span>{v.vendor_name}</span>
+                            {aliases.length > 0 && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
+                                <Tags className="h-3 w-3" />
+                                {aliases.length}
+                              </span>
+                            )}
+                          </button>
                         </td>
                         <td className="px-4 py-2.5">
                           {editing ? (
@@ -303,6 +360,15 @@ export default function VendorsPage() {
                           )}
                         </td>
                       </tr>
+                      {isExpanded && (
+                        <AliasRow
+                          vendor={v}
+                          aliases={aliases}
+                          loading={aliasesLoading}
+                          onChanged={refetchAliases}
+                        />
+                      )}
+                      </FragmentRow>
                     );
                   })}
                 </tbody>
@@ -315,6 +381,140 @@ export default function VendorsPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+/**
+ * Tiny fragment wrapper so each vendor maps to two sibling <tr>s (the data row
+ * + its expandable alias row) under one keyed element — <> can't take a key
+ * inline in the map without this.
+ */
+function FragmentRow({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}
+
+/**
+ * The expandable per-vendor alias sub-list: existing aliases (variant text) each
+ * with a delete (X), plus an inline "Add alias" input that POSTs
+ * { alias_text, canonical_id }. Mirrors the inline add/edit idiom of the main
+ * table. A 409 (duplicate normalized alias) surfaces as a clear toast.
+ */
+function AliasRow({
+  vendor,
+  aliases,
+  loading,
+  onChanged,
+}: {
+  vendor: VendorMappingRow;
+  aliases: VendorAlias[];
+  loading: boolean;
+  onChanged: () => void;
+}) {
+  const [aliasText, setAliasText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function addAlias() {
+    const text = aliasText.trim();
+    if (!text) {
+      toast.error("Alias text is required");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.createVendorAlias(text, vendor.id);
+      toast.success(`Alias “${text}” → ${vendor.vendor_name}`);
+      setAliasText("");
+      onChanged();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error(
+          `“${text}” is already mapped as an alias. Remove the existing mapping first.`,
+        );
+      } else {
+        toast.error(err instanceof ApiError ? err.message : "Add alias failed");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteAlias(alias: VendorAlias) {
+    setDeletingId(alias.id);
+    try {
+      await api.deleteVendorAlias(alias.id);
+      toast.success(`Alias “${alias.alias_text}” removed`);
+      onChanged();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Remove alias failed",
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  return (
+    <tr className="border-b border-line bg-surface-2/40">
+      <td colSpan={TABLE_COLSPAN} className="px-4 py-3">
+        <div className="ml-5 border-l-2 border-line pl-4">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.1em] text-ink-muted">
+            <Tags className="h-3.5 w-3.5" />
+            Aliases for {vendor.vendor_name}
+          </p>
+          <p className="mb-3 text-xs text-ink-subtle">
+            Variant / misspelled names that should inherit this vendor’s GL
+            coding · applies to the next invoice processed.
+          </p>
+
+          {loading ? (
+            <Spinner className="h-4 w-4" />
+          ) : aliases.length === 0 ? (
+            <p className="mb-3 text-xs text-ink-subtle">No aliases yet.</p>
+          ) : (
+            <ul className="mb-3 flex flex-col gap-1.5">
+              {aliases.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-center gap-2 text-sm text-ink"
+                >
+                  <span className="rounded-md bg-surface px-2 py-1 font-medium">
+                    {a.alias_text}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => deleteAlias(a)}
+                    loading={deletingId === a.id}
+                    aria-label={`Remove alias ${a.alias_text}`}
+                    title="Remove alias"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex max-w-md items-center gap-1.5">
+            <Input
+              placeholder={`Add alias (e.g. a misspelling of ${vendor.vendor_name})`}
+              value={aliasText}
+              onChange={(e) => setAliasText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void addAlias();
+                }
+              }}
+            />
+            <Button size="sm" onClick={addAlias} loading={saving}>
+              <Check className="h-4 w-4" /> Add
+            </Button>
+          </div>
+        </div>
+      </td>
+    </tr>
   );
 }
 

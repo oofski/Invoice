@@ -70,12 +70,48 @@ export async function loadVendorMappings(env: Env): Promise<VendorMappingRow[]> 
   return r.results ?? [];
 }
 
+/** A normalized alias -> canonical vendor mapping id (vendor canonicalization). */
+export interface VendorAliasLookup {
+  alias_norm: string;
+  canonical_id: string;
+}
+
+/**
+ * Loads the deterministic vendor-alias lookup rows. Tolerant: if the
+ * `vendor_aliases` table is absent (pre-migration isolate / fresh DB before
+ * ensureSchema ran), returns [] rather than throwing — mirroring how
+ * loadLocations falls back, so the matcher degrades to its existing behavior.
+ */
+export async function loadVendorAliases(env: Env): Promise<VendorAliasLookup[]> {
+  try {
+    const r = await env.DB.prepare(
+      "SELECT alias_norm, canonical_id FROM vendor_aliases",
+    ).all<VendorAliasLookup>();
+    return r.results ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export function findVendorMapping(
   vendor: string,
   rows: VendorMappingRow[],
+  aliases?: VendorAliasLookup[],
 ): VendorMappingRow | null {
   const n = normalizeVendor(vendor);
   if (!n) return null;
+  // 1) ALIAS RESOLUTION (deterministic, exact normalized equality) — runs first.
+  //    A curated alias is a whole-name canonicalization, so we match by exact
+  //    equality (NOT substring) to avoid re-introducing loose merges. On a hit,
+  //    return the canonical vendor_mappings row.
+  if (aliases?.length) {
+    const hit = aliases.find((a) => a.alias_norm === n);
+    if (hit) {
+      const canon = rows.find((r) => r.id === hit.canonical_id);
+      if (canon) return canon;
+    }
+  }
+  // 2) EXISTING normalized-substring match (unchanged) — suffix variants etc.
   return (
     rows.find((r) => {
       const nv = normalizeVendor(r.vendor_name);

@@ -10,6 +10,8 @@
  * - Non-2xx responses throw an ApiError carrying { status, body, message }.
  */
 
+import type { VendorAlias, VendorSuggestion } from "./types";
+
 const API_BASE_KEY = "iq_api_base";
 const TOKEN_KEY = "iq_token";
 
@@ -165,6 +167,28 @@ export const api = {
     }
     return res.blob();
   },
+
+  // ----------------------------------------------------- vendor aliases
+  /** List all vendor aliases joined to their canonical vendor name. */
+  listVendorAliases: () =>
+    api.get<{ aliases: VendorAlias[] }>(`/api/vendors/aliases`),
+  /**
+   * Create an alias mapping `alias_text` → the given canonical vendor. Throws
+   * an ApiError with status 409 if the normalized alias already exists.
+   */
+  createVendorAlias: (alias_text: string, canonical_id: string) =>
+    api.post<{ alias: VendorAlias }>(`/api/vendors/aliases`, {
+      alias_text,
+      canonical_id,
+    }),
+  /** Delete an alias by id — reverts the variant to default coding. */
+  deleteVendorAlias: (id: string) =>
+    api.del<void>(`/api/vendors/aliases/${id}`),
+  /** Advisory fuzzy suggestion for an unmatched vendor name (non-binding). */
+  suggestVendor: (vendor: string) =>
+    api.get<{ suggestions: VendorSuggestion[] }>(
+      `/api/vendors/suggest?vendor=${encodeURIComponent(vendor)}`,
+    ),
 
   // ------------------------------------------------ archive / audit clear
   /** Archive a single invoice (ADMIN only) — sets `archived_at`. */
