@@ -248,6 +248,8 @@ export interface Notification {
 /** A single normalized receipt line item. */
 export interface NormalizedReceiptLine {
   description: string;
+  quantity: number | null;
+  unit_price: number | null;
   amount: number | null;
 }
 
@@ -259,6 +261,8 @@ export interface NormalizedReceipt {
   card_last_4: string;
   cardholder_name: string;
   line_items: NormalizedReceiptLine[];
+  /** Total sales tax printed on the receipt (the tax line); null when absent. */
+  sales_tax: number | null;
 }
 
 /** Confidence band of a cardholder match. */
@@ -285,9 +289,81 @@ export interface ReceiptOcrData {
   card_last_4: string;
   cardholder_name: string;
   line_items?: NormalizedReceiptLine[];
+  /** Total sales tax printed on the receipt; null/absent when none. */
+  sales_tax?: number | null;
   match: MatchKind;
   confidence: MatchConfidence;
   resolved_cardholder_id: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Line-by-line receipt coding (cc_receipt_lines / cc_line_allocations)
+// ---------------------------------------------------------------------------
+
+/** A line's kind: a normal item line, or the single per-receipt sales-tax line. */
+export type CcLineKind = "ITEM" | "TAX";
+
+/** `cc_receipt_lines` row (verbatim column shape — booleans are 0/1 INTEGER). */
+export interface ReceiptLineRow {
+  id: string;
+  transaction_id: string;
+  receipt_id: string | null; // source cc_receipts.id (NULL for a manual line)
+  line_index: number;
+  kind: string; // CcLineKind
+  description: string | null;
+  quantity: number | null;
+  unit_price: number | null;
+  amount: number;
+  is_coded: number; // 0/1
+  created_at: string;
+  updated_at: string;
+}
+
+/** `cc_line_allocations` row (verbatim column shape — booleans are 0/1 INTEGER). */
+export interface LineAllocationRow {
+  id: string;
+  line_id: string;
+  transaction_id: string;
+  entity_name: string; // one of the 7 CC_ENTITIES
+  location: string; // a BUSINESS_CLASSES[entity] member, or the entity name
+  gl_category: string; // 'Service Costs' | 'Retail / Product Costs' | 'Sales/Use Tax'
+  amount: number;
+  is_tax: number; // 0/1
+  created_at: string;
+}
+
+/** Hydrated per-line allocation slice (the API/DTO shape; booleans real). */
+export interface LineAllocation {
+  id?: string;
+  entity_name: string;
+  location: string;
+  gl_category: string;
+  amount: number;
+  is_tax?: boolean;
+}
+
+/** Hydrated receipt line with its allocations (the API/DTO shape; booleans real). */
+export interface ReceiptLine {
+  id?: string;
+  client_id?: string;
+  receipt_id?: string | null;
+  line_index?: number;
+  kind: CcLineKind;
+  description: string;
+  quantity?: number | null;
+  unit_price?: number | null;
+  amount: number;
+  is_coded?: boolean;
+  allocations: LineAllocation[];
+}
+
+/** GET/PUT `/transactions/:id/lines` response payload. */
+export interface LinesResponse {
+  lines: ReceiptLine[];
+  transaction_amount: number;
+  allocated_total: number;
+  remaining: number;
+  reconciled: boolean;
 }
 
 // ---------------------------------------------------------------------------

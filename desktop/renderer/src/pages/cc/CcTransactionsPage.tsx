@@ -25,6 +25,7 @@ import { ApiError } from "@/lib/api";
 import { CcStatusBadge } from "@/components/cc/CcStatusBadge";
 import { CcReceiptPane } from "@/components/cc/CcReceiptPane";
 import { EntitySplitModal } from "@/components/cc/EntitySplitModal";
+import { LineCodingModal } from "@/components/cc/LineCodingModal";
 import {
   ccApi,
   ccEntityLabel,
@@ -33,6 +34,7 @@ import {
   type EntitySplit,
   type Receipt,
   type Notification,
+  type ReceiptLine,
   type ReceiptStatus,
   type TransactionsQuery,
 } from "@/cc/ccApi";
@@ -77,6 +79,10 @@ export default function CcTransactionsPage() {
   const [splitOpen, setSplitOpen] = useState(false);
   const [previewReceipt, setPreviewReceipt] = useState<Receipt | null>(null);
 
+  // Line-by-line coding (loaded lazily per detail; empty -> legacy split path).
+  const [lines, setLines] = useState<ReceiptLine[]>([]);
+  const [linesOpen, setLinesOpen] = useState(false);
+
   const queryString = useMemo(() => {
     const f: TransactionsQuery = { ...filters };
     if (search.trim()) f.q = search.trim();
@@ -102,9 +108,18 @@ export default function CcTransactionsPage() {
 
   const loadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
+    setLines([]);
     try {
       const res = await ccApi.getTransaction(id);
       setDetail(res);
+      // Best-effort: load any OCR/coded lines. Empty (or 503 pre-migration)
+      // falls back to the legacy whole-charge entity split.
+      try {
+        const linesRes = await ccApi.getLines(id);
+        setLines(linesRes.lines ?? []);
+      } catch {
+        setLines([]);
+      }
       try {
         const notifRes = await ccApi.listNotifications({
           cardholder_id: res.transaction.cardholder_id ?? undefined,
@@ -431,45 +446,61 @@ export default function CcTransactionsPage() {
                     </Select>
                   </div>
 
-                  {/* Entity split / coding — Amex + Capital One */}
+                  {/* Line coding (when the receipt has OCR lines) OR the
+                      legacy whole-charge entity split (no-lines fallback). */}
                   {(detail.transaction.source === "AMEX" ||
-                    detail.transaction.source === "CAPITAL_ONE") && (
-                    <div>
-                      <div className="mb-1 flex items-center justify-between">
-                        <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
-                          Entity split
-                        </p>
-                        <button
-                          onClick={() => setSplitOpen(true)}
-                          className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
-                        >
-                          <Pencil className="h-3 w-3" />
-                          Edit
-                        </button>
+                    detail.transaction.source === "CAPITAL_ONE") &&
+                    (lines.length > 0 ? (
+                      <div>
+                        <div className="mb-1 flex items-center justify-between">
+                          <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                            Line coding
+                          </p>
+                          <button
+                            onClick={() => setLinesOpen(true)}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+                          >
+                            <Pencil className="h-3 w-3" />
+                            Edit lines
+                          </button>
+                        </div>
+                        <LineCodingSummary lines={lines} />
                       </div>
-                      {detail.splits.length === 0 ? (
-                        <p className="text-xs text-ink-muted">
-                          No split yet.
-                        </p>
-                      ) : (
-                        <ul className="rounded-lg border border-line text-sm">
-                          {detail.splits.map((s) => (
-                            <li
-                              key={s.id}
-                              className="flex items-center justify-between border-b border-line px-3 py-1.5 last:border-0"
-                            >
-                              <span className="text-ink-muted">
-                                {ccEntityLabel(s.entity_name)}
-                              </span>
-                              <span className="tabular-nums text-ink">
-                                {formatCurrency(s.amount)}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  )}
+                    ) : (
+                      <div>
+                        <div className="mb-1 flex items-center justify-between">
+                          <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                            Entity split
+                          </p>
+                          <button
+                            onClick={() => setSplitOpen(true)}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+                          >
+                            <Pencil className="h-3 w-3" />
+                            Edit
+                          </button>
+                        </div>
+                        {detail.splits.length === 0 ? (
+                          <p className="text-xs text-ink-muted">No split yet.</p>
+                        ) : (
+                          <ul className="rounded-lg border border-line text-sm">
+                            {detail.splits.map((s) => (
+                              <li
+                                key={s.id}
+                                className="flex items-center justify-between border-b border-line px-3 py-1.5 last:border-0"
+                              >
+                                <span className="text-ink-muted">
+                                  {ccEntityLabel(s.entity_name)}
+                                </span>
+                                <span className="tabular-nums text-ink">
+                                  {formatCurrency(s.amount)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
 
                   {/* Receipts */}
                   <div>
@@ -531,7 +562,7 @@ export default function CcTransactionsPage() {
         )}
       </div>
 
-      {/* Split modal */}
+      {/* Split modal (no-lines fallback) */}
       {detail &&
         (detail.transaction.source === "AMEX" ||
           detail.transaction.source === "CAPITAL_ONE") && (
@@ -545,6 +576,24 @@ export default function CcTransactionsPage() {
           onSaved={(splits) =>
             setDetail((d) => (d ? { ...d, splits } : d))
           }
+        />
+      )}
+
+      {/* Line-coding modal (manager edits the OCR-line coding) */}
+      {detail && lines.length > 0 && (
+        <LineCodingModal
+          open={linesOpen}
+          onClose={() => setLinesOpen(false)}
+          transactionId={detail.transaction.id}
+          amount={detail.transaction.amount}
+          vendor={detail.transaction.vendor}
+          lines={lines}
+          onSaved={(res) => {
+            setLines(res.lines ?? []);
+            // The save re-derives cc_entity_splits server-side; refresh detail
+            // so the embedded entity rollup stays correct.
+            void loadDetail(detail.transaction.id);
+          }}
         />
       )}
 
@@ -565,6 +614,57 @@ export default function CcTransactionsPage() {
       </Modal>
     </div>
   );
+}
+
+function LineCodingSummary({ lines }: { lines: ReceiptLine[] }) {
+  return (
+    <ul className="space-y-1.5">
+      {lines.map((line, li) => (
+        <li
+          key={line.id ?? li}
+          className="rounded-lg border border-line px-3 py-2 text-sm"
+        >
+          <div className="flex items-center justify-between">
+            <span className="truncate font-medium text-ink">
+              {line.kind === "TAX"
+                ? line.description || "Sales Tax"
+                : line.description || `Line ${li + 1}`}
+            </span>
+            <span className="shrink-0 tabular-nums text-ink-muted">
+              {formatCurrency(line.amount)}
+            </span>
+          </div>
+          {line.allocations.length === 0 ? (
+            <p className="mt-0.5 text-xs text-ink-subtle">Not coded yet.</p>
+          ) : (
+            <ul className="mt-1 space-y-0.5">
+              {line.allocations.map((a, ai) => (
+                <li
+                  key={a.id ?? ai}
+                  className="flex items-center justify-between text-xs text-ink-muted"
+                >
+                  <span className="truncate">
+                    {ccEntityLabel(a.entity_name)} · {a.location} ·{" "}
+                    {ccCatShort(a.gl_category)}
+                  </span>
+                  <span className="shrink-0 tabular-nums">
+                    {formatCurrency(a.amount)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ccCatShort(gl: string): string {
+  if (gl === "Service Costs") return "Back bar";
+  if (gl === "Retail / Product Costs") return "Retail";
+  if (gl === "Sales/Use Tax") return "Tax";
+  return gl;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {

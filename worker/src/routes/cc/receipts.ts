@@ -31,6 +31,7 @@ import {
 } from "../../cc/ccStorage";
 import { extractReceiptBytes, normalizeReceipt, matchCardholder } from "../../cc/receiptExtract";
 import { sendCcManagerAlert } from "../../cc/ccEmail";
+import { persistReceiptLines } from "../../cc/ccLines";
 import { roundCents } from "../../cc/ccRules";
 import type {
   CcSource,
@@ -239,6 +240,7 @@ receipts.post("/transactions/:id/receipts", async (c) => {
     card_last_4: "",
     cardholder_name: "",
     line_items: [],
+    sales_tax: null,
   };
   let match: MatchResult = { cardholder_id: null, match: "UNMATCHED", confidence: "LOW" };
   try {
@@ -270,6 +272,7 @@ receipts.post("/transactions/:id/receipts", async (c) => {
     card_last_4: normalized.card_last_4,
     cardholder_name: normalized.cardholder_name,
     line_items: normalized.line_items,
+    sales_tax: normalized.sales_tax,
     match: match.match,
     confidence: match.confidence,
     resolved_cardholder_id: match.cardholder_id,
@@ -296,6 +299,16 @@ receipts.post("/transactions/:id/receipts", async (c) => {
       at,
     )
     .run();
+
+  // Best-effort: persist OCR line-by-line rows (cc_receipt_lines) for the new
+  // line-coding flow. A throw here NEVER blocks the receipt insert / 201 (mirrors
+  // the OCR try/catch); a receipt with no line_items + no sales_tax writes no rows
+  // and the tx degrades to the legacy whole-charge split path.
+  try {
+    await persistReceiptLines(c.env, { transactionId: id, receiptId, normalized });
+  } catch (e) {
+    console.error("[cc] persistReceiptLines failed (receipt still stored):", e);
+  }
 
   // Mark the transaction UPLOADED (manager check-off later flips to RECEIVED).
   await c.env.DB.prepare(

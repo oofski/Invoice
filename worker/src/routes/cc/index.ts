@@ -39,6 +39,7 @@ import type { AppEnv } from "../helpers";
 import { uploads } from "./uploads";
 import { splits } from "./splits";
 import { receipts } from "./receipts";
+import { lines } from "./lines";
 import { cardholders } from "./cardholders";
 
 // A3-owned sub-apps (authored in parallel — may not exist yet at A2 finish).
@@ -63,6 +64,10 @@ cc.route("/", splits);
 // Receipts (A2): /api/cc/transactions/:id/receipts + /api/cc/receipts/:id[...] —
 // declares full sub-paths internally.
 cc.route("/", receipts);
+
+// Lines (B): /api/cc/transactions/:id/lines — declares full sub-paths internally.
+// The 3-segment path never shadows /transactions/:id or /transactions/:id/splits.
+cc.route("/", lines);
 
 // Notifications (A3): /api/cc/notifications[...]
 cc.route("/notifications", notifications);

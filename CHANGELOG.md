@@ -5,6 +5,27 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.3.2] — 2026-06-27
+
+### Added
+- **Credit Cards — code a receipt line by line.** When a receipt is uploaded, the
+  OCR now reads it **line by line**, and each line can be coded individually:
+  - Pick the **entity** (Neroli, SKNBar, IBW, …), then the **location(s)** — one,
+    several, or "all". Picking multiple locations **splits that line evenly** across
+    them (3 locations → 3 ways), and a **manual override** lets you set any amount by
+    hand.
+  - Mark each line **Back bar vs Retail** — including a **50/50** split.
+  - The receipt's **sales tax** is read automatically and **split across the same
+    locations** the lines used.
+  - A live reconcile bar shows Receipt total / Allocated / Remaining; **Save unlocks
+    only when it balances to the cent.**
+  - Available to the cardholder at upload (in **My Receipts**) and to the manager in
+    **Transactions**. A receipt the OCR can't itemize falls back to the existing
+    whole-charge entity split.
+
+(Still separate from invoicing; the new line-item tables apply automatically on
+deploy — nothing to run. Back bar/Retail is recorded as a label only.)
+
 ## [1.3.1] — 2026-06-27
 
 ### Changed

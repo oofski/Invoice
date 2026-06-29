@@ -194,7 +194,14 @@ export interface NormalizedReceipt {
   total: number | null;
   card_last_4: string;
   cardholder_name: string;
-  line_items: { description: string; amount: number | null }[];
+  line_items: {
+    description: string;
+    quantity?: number | null;
+    unit_price?: number | null;
+    amount: number | null;
+  }[];
+  /** OCR-read printed sales tax total (the tax line); null when none. */
+  sales_tax?: number | null;
 }
 
 export type ReceiptOcr = NormalizedReceipt & {
@@ -202,6 +209,53 @@ export type ReceiptOcr = NormalizedReceipt & {
   confidence: MatchConfidence;
   resolved_cardholder_id?: string | null;
 };
+
+// ---------------------------------------------------------------------------
+// Line-by-line receipt coding (§4) — redeclared locally from the frozen
+// contract (NOT imported from the worker; same convention as the rest of this
+// file). A line ("ITEM" or the single "TAX" line) fans out into N allocation
+// slices, one per (location × GL category). gl_category is one of the three
+// CC labels: "Service Costs" (Back bar) | "Retail / Product Costs" (Retail) |
+// "Sales/Use Tax".
+// ---------------------------------------------------------------------------
+
+export type LineKind = "ITEM" | "TAX";
+
+/** GL category labels used on the CC side (reused from lib/constants.ts). */
+export const CC_GL_BACK_BAR = "Service Costs";
+export const CC_GL_RETAIL = "Retail / Product Costs";
+export const CC_GL_TAX = "Sales/Use Tax";
+
+export interface LineAllocation {
+  id?: string;
+  entity_name: string; // one of CC_ENTITIES canonical names
+  location: string; // a BUSINESS_CLASSES[entity] member, or the entity name
+  gl_category: string; // CC_GL_BACK_BAR | CC_GL_RETAIL | CC_GL_TAX
+  amount: number;
+  is_tax?: boolean;
+}
+
+export interface ReceiptLine {
+  id?: string;
+  client_id?: string;
+  receipt_id?: string | null;
+  line_index?: number;
+  kind: LineKind;
+  description: string;
+  quantity?: number | null;
+  unit_price?: number | null;
+  amount: number;
+  is_coded?: boolean;
+  allocations: LineAllocation[];
+}
+
+export interface LinesResponse {
+  lines: ReceiptLine[];
+  transaction_amount: number;
+  allocated_total: number;
+  remaining: number;
+  reconciled: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Normalized parsed rows (renderer-parsed; sent to /uploads/preview)
@@ -463,6 +517,12 @@ export const ccApi = {
     putJson<{ splits: EntitySplit[] }>(`/api/cc/transactions/${id}/splits`, {
       splits,
     }),
+
+  // ---- Line coding (§4) --------------------------------------------------
+  getLines: (id: string) =>
+    api.get<LinesResponse>(`/api/cc/transactions/${id}/lines`),
+  putLines: (id: string, lines: ReceiptLine[]) =>
+    putJson<LinesResponse>(`/api/cc/transactions/${id}/lines`, { lines }),
 
   // ---- Receipts ----------------------------------------------------------
   uploadReceipt: (txId: string, form: FormData) =>

@@ -17,7 +17,7 @@ import type { Env } from "../lib/types";
 
 let ccSchemaEnsured = false;
 
-/** The 6 CC tables + their indexes (all IF NOT EXISTS — naturally idempotent). */
+/** The 8 CC tables + their indexes (all IF NOT EXISTS — naturally idempotent). */
 const CC_DDL: string[] = [
   // --- cc_cardholders ---
   `CREATE TABLE IF NOT EXISTS cc_cardholders (
@@ -127,6 +127,39 @@ const CC_DDL: string[] = [
      created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
    )`,
   `CREATE INDEX IF NOT EXISTS idx_cc_notif_cardholder ON cc_notifications(cardholder_id)`,
+
+  // --- cc_receipt_lines (one row per OCR/manual line of a tx; one kind='TAX' row holds the receipt sales tax) ---
+  `CREATE TABLE IF NOT EXISTS cc_receipt_lines (
+     id              TEXT PRIMARY KEY,
+     transaction_id  TEXT NOT NULL,
+     receipt_id      TEXT,
+     line_index      INTEGER NOT NULL,
+     kind            TEXT NOT NULL DEFAULT 'ITEM',
+     description     TEXT,
+     quantity        REAL,
+     unit_price      REAL,
+     amount          REAL NOT NULL,
+     is_coded        INTEGER NOT NULL DEFAULT 0,
+     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+     updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_cc_lines_tx ON cc_receipt_lines(transaction_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_cc_lines_receipt ON cc_receipt_lines(receipt_id)`,
+
+  // --- cc_line_allocations (per-line split across entity × location × GL category) ---
+  `CREATE TABLE IF NOT EXISTS cc_line_allocations (
+     id              TEXT PRIMARY KEY,
+     line_id         TEXT NOT NULL,
+     transaction_id  TEXT NOT NULL,
+     entity_name     TEXT NOT NULL,
+     location        TEXT NOT NULL,
+     gl_category     TEXT NOT NULL,
+     amount          REAL NOT NULL,
+     is_tax          INTEGER NOT NULL DEFAULT 0,
+     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_cc_alloc_tx ON cc_line_allocations(transaction_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_cc_alloc_line ON cc_line_allocations(line_id)`,
 ];
 
 /**

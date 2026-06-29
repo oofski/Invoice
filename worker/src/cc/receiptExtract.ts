@@ -53,17 +53,23 @@ export const RECEIPT_SCHEMA = {
         type: "object",
         properties: {
           description: { type: "string" },
-          amount: { type: "number" },
+          quantity: { type: "number", description: "Quantity if printed; omit otherwise." },
+          unit_price: { type: "number", description: "Per-unit price if printed; omit otherwise." },
+          amount: { type: "number", description: "Extended line amount (qty × unit price)." },
         },
         required: ["description", "amount"],
       },
+    },
+    sales_tax: {
+      type: "number",
+      description: "Total sales tax printed on the receipt (the tax line). Omit if none.",
     },
   },
   required: ["merchant_name", "total"],
 };
 
 /** Receipt-specific system prompt (§3b). */
-export const RECEIPT_SYSTEM_PROMPT = `You are a receipt-extraction engine. Extract a SINGLE credit-card receipt: the merchant name, purchase date (MM/DD/YYYY), and grand total. Find the last 4 digits of the card — typically printed as \`XXXX-XXXX-XXXX-1234\`, \`ending in 1234\`, or \`Acct #...1234\`; return digits only. Find the cardholder/purchaser name near the signature/authorization line. Money values are numbers. Capture itemized lines only if the receipt is itemized; otherwise omit \`line_items\`.`;
+export const RECEIPT_SYSTEM_PROMPT = `You are a receipt-extraction engine. Extract a SINGLE credit-card receipt: the merchant name, purchase date (MM/DD/YYYY), and grand total. Find the last 4 digits of the card — typically printed as \`XXXX-XXXX-XXXX-1234\`, \`ending in 1234\`, or \`Acct #...1234\`; return digits only. Find the cardholder/purchaser name near the signature/authorization line. Money values are numbers. Capture itemized lines only if the receipt is itemized; otherwise omit \`line_items\`; capture each line's quantity and unit price when printed. Capture the sales-tax total as \`sales_tax\` when printed.`;
 
 function num(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -95,7 +101,12 @@ export function normalizeReceipt(data: unknown): NormalizedReceipt {
   const line_items: NormalizedReceiptLine[] = rawItems
     .map((it) => {
       const o = (it ?? {}) as Record<string, unknown>;
-      return { description: str(o.description), amount: num(o.amount) };
+      return {
+        description: str(o.description),
+        quantity: num(o.quantity),
+        unit_price: num(o.unit_price),
+        amount: num(o.amount),
+      };
     })
     .filter((li) => li.description || li.amount != null);
 
@@ -106,6 +117,7 @@ export function normalizeReceipt(data: unknown): NormalizedReceipt {
     card_last_4: last4(d.card_last_4),
     cardholder_name: str(d.cardholder_name),
     line_items,
+    sales_tax: num(d.sales_tax),
   };
 }
 
