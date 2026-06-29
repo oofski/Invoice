@@ -5,6 +5,18 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.3.4] — 2026-06-29
+
+### Fixed
+- **Re-downloading a bill-import (QBO) export from Export History produced a file
+  Excel wouldn't open.** The history "Download" button saved the stored export
+  data as a raw file instead of rebuilding the spreadsheet, so the `.xlsx` wasn't
+  actually a workbook. It now rebuilds a proper multi-tab `.xlsx` on re-download,
+  matching the original export. (The first download at export time was always
+  fine; only the re-download was affected. CSV exports were never affected.) **Any
+  bad file you already saved is recoverable — just click Download again on that
+  export in Export History after updating; no re-export needed.**
+
 ## [1.3.3] — 2026-06-29
 
 ### Added

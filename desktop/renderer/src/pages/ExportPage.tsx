@@ -154,8 +154,19 @@ export default function ExportPage() {
   async function reDownload(row: ExportRow) {
     setDownloadingId(row.id);
     try {
-      const blob = await api.getBlob(`/api/export/${row.id}`);
-      downloadBlob(blob, row.file_name);
+      if (row.file_name.toLowerCase().endsWith(".xlsx")) {
+        // Factor exports store the structured `{entities,header,...}` JSON
+        // payload as their `content`; rebuild the .xlsx workbook client-side
+        // (same path as the initial Factor export) instead of streaming the
+        // raw JSON bytes under an .xlsx name, which Excel can't open.
+        const res = await api.get<FactorResponse>(`/api/export/${row.id}`);
+        const blob = buildBillWorkbook(res.entities, res.header);
+        downloadBlob(blob, row.file_name);
+      } else {
+        // CSV exports: the worker already serves valid CSV bytes verbatim.
+        const blob = await api.getBlob(`/api/export/${row.id}`);
+        downloadBlob(blob, row.file_name);
+      }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Download failed");
     } finally {

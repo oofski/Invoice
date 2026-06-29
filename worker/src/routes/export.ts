@@ -162,12 +162,22 @@ exportRoutes.get("/", async (c) => {
 });
 
 // GET /:id — re-download
+//
+// CSV exports store CSV text as `content` and stream back verbatim. Factor
+// (.xlsx) exports store the structured `{entities,header,...}` JSON payload as
+// `content` — the workbook is built client-side by the renderer — so for those
+// we return JSON (not raw bytes under an .xlsx name, which Excel can't open).
 exportRoutes.get("/:id", async (c) => {
   if (!isStaffOrAdmin(c)) return c.json({ error: "Forbidden" }, 403);
   const row = await c.env.DB.prepare(
     "SELECT file_name, content FROM exports WHERE id = ?",
   ).bind(c.req.param("id")).first<{ file_name: string; content: string }>();
   if (!row) return c.json({ error: "Export not found" }, 404);
+  if (row.file_name.toLowerCase().endsWith(".xlsx")) {
+    return new Response(row.content, {
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
+  }
   return new Response(row.content, {
     headers: {
       "content-type": "text/csv; charset=utf-8",
