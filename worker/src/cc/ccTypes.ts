@@ -367,6 +367,104 @@ export interface LinesResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Receipt inbox / auto-match (cc_receipt_inbox) — Feature A
+// ---------------------------------------------------------------------------
+
+/** Queue status of an inbox (un-attached drop) row. */
+export type InboxStatus = "PENDING_MATCH" | "MATCHED" | "RETURNED";
+
+/** `cc_receipt_inbox` row (verbatim column shape; booleans/JSON as stored TEXT). */
+export interface InboxRow {
+  id: string;
+  uploaded_by: string;
+  cardholder_id: string | null;
+  source_guess: string | null; // CcSource | null (which matcher resolved)
+  r2_key: string;
+  file_name: string;
+  file_type: string | null;
+  file_size_bytes: number | null;
+  ocr_extracted_data: string | null; // JSON: ReceiptOcrData
+  status: string; // InboxStatus
+  matched_transaction_id: string | null;
+  matched_receipt_id: string | null;
+  candidate_transaction_ids: string | null; // JSON array of tx ids
+  return_note: string | null;
+  returned_by: string | null;
+  resolved_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A candidate transaction joined onto a queued inbox item (the manager queue). */
+export interface CandidateTx {
+  id: string;
+  vendor: string;
+  amount: number;
+  transaction_date: string;
+  receipt_status: CcReceiptStatus;
+  cardholder_id: string | null;
+  cardholder_name: string; // joined; "UNMATCHED" when cardholder_id is null
+}
+
+/** Hydrated inbox item (booleans/JSON parsed; candidates joined for the queue). */
+export interface InboxItem {
+  id: string;
+  uploaded_by: string;
+  cardholder_id: string | null;
+  cardholder_name: string; // joined; "UNMATCHED" when unresolved
+  source_guess: CcSource | null;
+  r2_key: string;
+  file_name: string;
+  file_type: string | null;
+  file_size_bytes: number | null;
+  ocr_extracted_data: ReceiptOcrData | null;
+  status: InboxStatus;
+  matched_transaction_id: string | null;
+  matched_receipt_id: string | null;
+  candidate_transaction_ids: string[];
+  return_note: string | null;
+  returned_by: string | null;
+  resolved_by: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Joined candidate transactions (manager queue list only). */
+  candidates?: CandidateTx[];
+}
+
+/**
+ * Outcome of `matchReceiptToTransaction(env, normalized)` (§2). Carries the
+ * resolved cardholder + which matcher source resolved it so the inbox row can be
+ * stamped regardless of branch.
+ */
+export type MatchOutcome =
+  | {
+      kind: "matched";
+      transactionId: string;
+      cardholderId: string | null;
+      sourceGuess: CcSource | null;
+      match: MatchResult;
+    }
+  | {
+      kind: "queued";
+      candidateIds: string[];
+      cardholderId: string | null;
+      sourceGuess: CcSource | null;
+      match: MatchResult;
+    };
+
+/** One per-file result returned by the bulk drop endpoint (`POST .../inbox`). */
+export interface PerFileResult {
+  file_name: string;
+  status: "MATCHED" | "PENDING_MATCH" | "ERROR";
+  inbox_id: string;
+  matched_transaction_id?: string;
+  candidate_transaction_ids?: string[];
+  /** Normalized receipt + match/confidence (same shape as today's upload `ocr`). */
+  ocr?: NormalizedReceipt & { match: MatchKind; confidence: MatchConfidence };
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Upload preview / staging DTOs
 // ---------------------------------------------------------------------------
 

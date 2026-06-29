@@ -23,6 +23,7 @@ import CcDashboardPage from "@/pages/cc/CcDashboardPage";
 import CcUploadPage from "@/pages/cc/CcUploadPage";
 import CcTransactionsPage from "@/pages/cc/CcTransactionsPage";
 import CcReceiptTrackerPage from "@/pages/cc/CcReceiptTrackerPage";
+import CcInboxPage from "@/pages/cc/CcInboxPage";
 import CcNotificationsPage from "@/pages/cc/CcNotificationsPage";
 import CcCardholdersPage from "@/pages/cc/CcCardholdersPage";
 import CcMyReceiptsPage from "@/pages/cc/CcMyReceiptsPage";
@@ -151,6 +152,16 @@ export default function App() {
               <CcGate>
                 <CcManagerGate>
                   <CcReceiptTrackerPage />
+                </CcManagerGate>
+              </CcGate>
+            }
+          />
+          <Route
+            path="/credit-cards/inbox"
+            element={
+              <CcGate>
+                <CcManagerGate>
+                  <CcInboxPage />
                 </CcManagerGate>
               </CcGate>
             }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Upload, Bell, ReceiptText } from "lucide-react";
+import { Upload, Bell, ReceiptText, Undo2 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
 import { Card, Button, Spinner, EmptyState } from "@/components/ui/primitives";
@@ -8,13 +8,13 @@ import { toast } from "@/components/ui/Toast";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { CcStatusBadge } from "@/components/cc/CcStatusBadge";
-import { EntitySplitModal } from "@/components/cc/EntitySplitModal";
 import { LineCodingModal } from "@/components/cc/LineCodingModal";
+import { CcDropReceipts } from "@/components/cc/CcDropReceipts";
+import { CcReturnedReceipts } from "@/components/cc/CcReturnedReceipts";
 import {
   ccApi,
   roundCents,
   type CcTransaction,
-  type EntitySplit,
   type Notification,
   type ReceiptLine,
 } from "@/cc/ccApi";
@@ -30,15 +30,17 @@ export default function CcMyReceiptsPage() {
   // In-app receipt upload + coding flow (Amex AND Capital One)
   const [uploadTx, setUploadTx] = useState<CcTransaction | null>(null);
   const [pickedFile, setPickedFile] = useState<File | null>(null);
-  const [existingSplits, setExistingSplits] = useState<EntitySplit[]>([]);
-  const [splitOpen, setSplitOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  // Line-coding flow: once the receipt is POSTed, if OCR returned itemized
-  // lines we code those instead of the whole-charge entity split.
+  // Coding flow: once the receipt is POSTed we open the Quick-default
+  // LineCodingModal. When OCR returned itemized lines we seed them (the manager
+  // can flip to Line-by-line); otherwise we open with no item lines and Quick
+  // split codes the whole charge.
   const [linesOpen, setLinesOpen] = useState(false);
   const [ocrLines, setOcrLines] = useState<ReceiptLine[]>([]);
-  const [uploadedReceipt, setUploadedReceipt] = useState(false);
   const [preparing, setPreparing] = useState(false);
+  // Force-refresh the "Returned receipts" section after a fresh drop.
+  const [returnedKey, setReturnedKey] = useState(0);
+  const [returnedCount, setReturnedCount] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -61,19 +63,11 @@ export default function CcMyReceiptsPage() {
     load();
   }, [load]);
 
-  async function beginUpload(t: CcTransaction) {
+  function beginUpload(t: CcTransaction) {
     setUploadTx(t);
     setPickedFile(null);
-    setExistingSplits([]);
     setOcrLines([]);
     setLinesOpen(false);
-    setUploadedReceipt(false);
-    try {
-      const res = await ccApi.getSplits(t.id);
-      setExistingSplits(res.splits ?? []);
-    } catch {
-      setExistingSplits([]);
-    }
   }
 
   function pickFile(file: File) {
@@ -90,8 +84,8 @@ export default function CcMyReceiptsPage() {
 
   /**
    * Upload the picked receipt, reflect the new tx status, and return the OCR.
-   * Shared by both the line-coding and the whole-charge split paths. We mark
-   * `uploadedReceipt` so the subsequent coding step does NOT re-upload.
+   * Shared by the coding flow; the receipt is POSTed once here before the
+   * coding modal opens.
    */
   async function uploadPickedReceipt(t: CcTransaction, file: File) {
     const form = new FormData();
@@ -101,15 +95,15 @@ export default function CcMyReceiptsPage() {
     setTransactions((prev) =>
       prev.map((x) => (x.id === t.id ? up.transaction : x)),
     );
-    setUploadedReceipt(true);
     return up;
   }
 
   /**
-   * "Next" handler: POST the receipt first, then branch. If the OCR returned
-   * itemized `line_items` we open the line-coding grid; otherwise we fall back
-   * to the legacy whole-charge entity split. The manager-alert email fires
-   * server-side on the receipt POST in both paths.
+   * "Next" handler: POST the receipt first, then open the Quick-default
+   * `LineCodingModal`. When OCR returned itemized `line_items` we seed them so
+   * the manager can flip to the Line-by-line tab; otherwise we open with no
+   * item lines and Quick split codes the whole charge. The manager-alert email
+   * fires server-side on the receipt POST.
    */
   async function prepareCoding() {
     if (!uploadTx || !pickedFile) {
@@ -154,15 +148,27 @@ export default function CcMyReceiptsPage() {
             });
           }
         }
+      } else {
+        // No OCR item lines: still surface any sales tax to Quick split so the
+        // item subtotal = tx.amount − tax.
+        const tax = up.ocr?.sales_tax;
+        if (typeof tax === "number" && roundCents(tax) > 0) {
+          lines = [
+            {
+              client_id: "ctax",
+              kind: "TAX",
+              description: "Sales Tax",
+              amount: roundCents(tax),
+              allocations: [],
+            },
+          ];
+        }
       }
 
-      if (lines.length > 0) {
-        setOcrLines(lines);
-        setLinesOpen(true);
-      } else {
-        // No OCR lines -> legacy whole-charge split.
-        setSplitOpen(true);
-      }
+      // Always open the Quick-default coding modal (it codes the whole charge
+      // when there are no item lines).
+      setOcrLines(lines);
+      setLinesOpen(true);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Upload failed");
     } finally {
@@ -171,50 +177,9 @@ export default function CcMyReceiptsPage() {
   }
 
   /**
-   * Whole-charge split path (no OCR lines). The receipt is already uploaded by
-   * `prepareCoding`; here we only persist the (possibly edited) split rows the
-   * modal hands back ($0-locked via onSubmit).
-   */
-  async function submitReceiptAndSplit(
-    rows: { entity_name: string; amount: number }[],
-  ) {
-    if (!uploadTx) throw new Error("no transaction");
-    setSubmitting(true);
-    try {
-      // Safety net: upload here if (somehow) not already uploaded.
-      if (!uploadedReceipt && pickedFile) {
-        await uploadPickedReceipt(uploadTx, pickedFile);
-      }
-      const changed =
-        rows.length !== existingSplits.length ||
-        rows.some((r) => {
-          const m = existingSplits.find((s) => s.entity_name === r.entity_name);
-          return !m || Math.abs(m.amount - r.amount) > 0.0001;
-        });
-      if (changed && rows.length > 0) {
-        try {
-          await ccApi.putSplits(uploadTx.id, rows);
-        } catch (err) {
-          toast.error(
-            err instanceof ApiError
-              ? `Receipt uploaded, but split failed: ${err.message}`
-              : "Receipt uploaded, but split failed.",
-          );
-        }
-      }
-      toast.success("Receipt uploaded — your manager has been notified.");
-      finishUpload();
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Upload failed");
-      throw err;
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  /**
-   * Line-coding path. The receipt is already uploaded; here we PUT the coded,
-   * reconciled lines the grid hands back ($0-locked via onSubmit).
+   * Coding path. The receipt is already uploaded; here we PUT the coded,
+   * reconciled lines the modal hands back ($0-locked via onSubmit). This covers
+   * both the Quick (one ITEM + TAX) and Line-by-line tabs.
    */
   async function submitReceiptAndLines(lines: ReceiptLine[]) {
     if (!uploadTx) throw new Error("no transaction");
@@ -236,8 +201,6 @@ export default function CcMyReceiptsPage() {
     setPickedFile(null);
     setOcrLines([]);
     setLinesOpen(false);
-    setSplitOpen(false);
-    setUploadedReceipt(false);
   }
 
   function actionFor(t: CcTransaction) {
@@ -258,10 +221,32 @@ export default function CcMyReceiptsPage() {
       <PageHeader
         title="My Receipts"
         subtitle="Submit receipts for your credit-card transactions"
+        actions={
+          returnedCount > 0 ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-danger/10 px-3 py-1 text-sm font-medium text-danger">
+              <Undo2 className="h-3.5 w-3.5" />
+              {returnedCount} returned
+            </span>
+          ) : undefined
+        }
       />
       <CcSubNav />
 
       <div className="space-y-6 p-6">
+        {/* Drop receipts — multi-file auto-match (Feature A) */}
+        <CcDropReceipts onDropped={load} />
+
+        {/* Returned by manager — re-submit (Feature A) */}
+        <CcReturnedReceipts
+          refreshKey={returnedKey}
+          onCount={setReturnedCount}
+          onResubmit={() => {
+            // Re-open the drop flow: a fresh drop creates a new inbox row.
+            setReturnedKey((k) => k + 1);
+            toast.info("Drop the corrected receipt above to re-submit.");
+          }}
+        />
+
         <Card>
           <div className="flex items-center gap-2 border-b border-line px-4 py-3">
             <ReceiptText className="h-4 w-4 text-ink-subtle" />
@@ -357,7 +342,7 @@ export default function CcMyReceiptsPage() {
 
       {/* Receipt upload modal (Amex + Capital One) */}
       <Modal
-        open={!!uploadTx && !splitOpen && !linesOpen}
+        open={!!uploadTx && !linesOpen}
         onClose={() => {
           setUploadTx(null);
           setPickedFile(null);
@@ -440,20 +425,8 @@ export default function CcMyReceiptsPage() {
         )}
       </Modal>
 
-      {/* Whole-charge split confirm — no-OCR-lines fallback (parent-managed) */}
-      {uploadTx && (
-        <EntitySplitModal
-          open={splitOpen}
-          onClose={finishUpload}
-          amount={uploadTx.amount}
-          vendor={uploadTx.vendor}
-          existingSplits={existingSplits}
-          onSubmit={submitReceiptAndSplit}
-          saving={submitting}
-        />
-      )}
-
-      {/* Line-by-line coding — when the receipt OCR returned itemized lines */}
+      {/* Receipt coding — Quick split (default) or Line-by-line. Opens for both
+          the OCR-lines and the no-OCR (whole-charge) cases. */}
       {uploadTx && (
         <LineCodingModal
           open={linesOpen}

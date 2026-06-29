@@ -19,8 +19,7 @@ import type { AppEnv } from "../helpers";
 import { user, hasRole } from "../helpers";
 import { ROLES } from "../../lib/constants";
 import { isCcEnabled, ccReady } from "../../cc/flag";
-import { uuid, nowIso } from "../../lib/util";
-import { ccEntityLabel } from "../../cc/ccConstants";
+import { uuid } from "../../lib/util";
 import {
   ccReceiptKey,
   ccExtForType,
@@ -30,9 +29,7 @@ import {
   ccDelete,
 } from "../../cc/ccStorage";
 import { extractReceiptBytes, normalizeReceipt, matchCardholder } from "../../cc/receiptExtract";
-import { sendCcManagerAlert } from "../../cc/ccEmail";
-import { persistReceiptLines } from "../../cc/ccLines";
-import { roundCents } from "../../cc/ccRules";
+import { attachReceiptToTx } from "../../cc/receiptAttach";
 import type {
   CcSource,
   CcUploadMethod,
@@ -41,7 +38,6 @@ import type {
   Receipt,
   ReceiptOcrData,
   ReceiptRow,
-  Tx,
   TxRow,
 } from "../../cc/ccTypes";
 
@@ -87,45 +83,6 @@ function fetchTx(env: AppEnv["Bindings"], id: string): Promise<TxRow | null> {
     .first<TxRow>();
 }
 
-/** Joins a cardholder display name (or "UNMATCHED") and hydrates booleans. */
-async function hydrateTx(env: AppEnv["Bindings"], r: TxRow): Promise<Tx> {
-  let name = "UNMATCHED";
-  if (r.cardholder_id) {
-    try {
-      const ch = await env.DB.prepare(
-        "SELECT first_name, last_name FROM cc_cardholders WHERE id = ?",
-      )
-        .bind(r.cardholder_id)
-        .first<{ first_name: string; last_name: string | null }>();
-      if (ch) name = `${ch.first_name}${ch.last_name ? ` ${ch.last_name}` : ""}`;
-    } catch {
-      /* keep UNMATCHED on lookup failure */
-    }
-  }
-  return {
-    id: r.id,
-    source: r.source as CcSource,
-    upload_batch_id: r.upload_batch_id,
-    cardholder_id: r.cardholder_id,
-    cardholder_name: name,
-    transaction_date: r.transaction_date,
-    posted_date: r.posted_date,
-    vendor: r.vendor,
-    description: r.description,
-    category: r.category,
-    amount: r.amount,
-    is_credit: !!r.is_credit,
-    is_payment: !!r.is_payment,
-    receipt_status: r.receipt_status as Tx["receipt_status"],
-    in_qb: !!r.in_qb,
-    exp_acct: r.exp_acct,
-    notes: r.notes,
-    dedup_key: r.dedup_key,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-  };
-}
-
 /** Hydrates a receipt row (parses the OCR JSON). */
 function hydrateReceipt(r: ReceiptRow): Receipt {
   let ocr: ReceiptOcrData | null = null;
@@ -150,44 +107,6 @@ function hydrateReceipt(r: ReceiptRow): Receipt {
     verified_at: r.verified_at,
     created_at: r.created_at,
   };
-}
-
-/**
- * Resolves the manager (Hunter) email for the §7.2 alert: the first active
- * credit-card-accountant (else admin) with an email, falling back to
- * RESEND_FROM_EMAIL so the alert still addresses someone.
- */
-async function resolveManagerEmail(env: AppEnv["Bindings"]): Promise<string> {
-  for (const role of [ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN]) {
-    try {
-      const row = await env.DB.prepare(
-        "SELECT email FROM users WHERE role = ? AND is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY created_at ASC LIMIT 1",
-      )
-        .bind(role)
-        .first<{ email: string }>();
-      if (row?.email) return row.email;
-    } catch {
-      /* fall through to next role */
-    }
-  }
-  return env.RESEND_FROM_EMAIL || "";
-}
-
-/** Builds a short "Nala $10.00, Admin $5.00" split summary for the alert. */
-async function splitSummary(env: AppEnv["Bindings"], txId: string): Promise<string> {
-  try {
-    const res = await env.DB.prepare(
-      "SELECT entity_name, amount FROM cc_entity_splits WHERE transaction_id = ? ORDER BY created_at ASC",
-    )
-      .bind(txId)
-      .all<{ entity_name: string; amount: number }>();
-    const parts = (res.results ?? []).map(
-      (s) => `${ccEntityLabel(s.entity_name)} $${roundCents(s.amount).toFixed(2)}`,
-    );
-    return parts.length ? parts.join(", ") : "(no split)";
-  } catch {
-    return "(no split)";
-  }
 }
 
 // ----- POST /transactions/:id/receipts --------------------------------------
@@ -265,95 +184,30 @@ receipts.post("/transactions/:id/receipts", async (c) => {
     console.error("[cc] receipt OCR failed (storing receipt without OCR):", e);
   }
 
-  const ocrData: ReceiptOcrData = {
-    merchant_name: normalized.merchant_name,
-    transaction_date: normalized.transaction_date,
-    total: normalized.total,
-    card_last_4: normalized.card_last_4,
-    cardholder_name: normalized.cardholder_name,
-    line_items: normalized.line_items,
-    sales_tax: normalized.sales_tax,
-    match: match.match,
-    confidence: match.confidence,
-    resolved_cardholder_id: match.cardholder_id,
-  };
-
+  // Shared attach sequence: INSERT cc_receipts (reusing the stored r2_key + OCR
+  // JSON), persistReceiptLines, flip tx→UPLOADED, and fire the manager alert when
+  // a non-manager uploads. `attachReceiptToTx` is the single shared attach path
+  // (also used by the inbox auto-match / assign flows) — behavior-identical.
   const u = user(c);
-  const at = nowIso();
-  await c.env.DB.prepare(
-    `INSERT INTO cc_receipts
-       (id, transaction_id, uploaded_by, upload_method, r2_key, file_name, file_type,
-        file_size_bytes, ocr_extracted_data, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
-  )
-    .bind(
-      receiptId,
-      id,
-      u.id,
-      uploadMethod,
-      r2Key,
-      fileName,
-      fileType || null,
-      buf.byteLength,
-      JSON.stringify(ocrData),
-      at,
-    )
-    .run();
-
-  // Best-effort: persist OCR line-by-line rows (cc_receipt_lines) for the new
-  // line-coding flow. A throw here NEVER blocks the receipt insert / 201 (mirrors
-  // the OCR try/catch); a receipt with no line_items + no sales_tax writes no rows
-  // and the tx degrades to the legacy whole-charge split path.
-  try {
-    await persistReceiptLines(c.env, { transactionId: id, receiptId, normalized });
-  } catch (e) {
-    console.error("[cc] persistReceiptLines failed (receipt still stored):", e);
-  }
-
-  // Mark the transaction UPLOADED (manager check-off later flips to RECEIVED).
-  await c.env.DB.prepare(
-    "UPDATE cc_transactions SET receipt_status = ?, updated_at = ? WHERE id = ?",
-  )
-    .bind("UPLOADED", at, id)
-    .run();
-
-  // §7.2 manager alert: fire when a non-manager (executive/cardholder) uploads a
-  // receipt in-app (Amex OR Capital One). Best-effort — sendCcManagerAlert never throws.
-  if (!isManager(c)) {
-    const managerEmail = await resolveManagerEmail(c.env);
-    if (managerEmail) {
-      const ch = tx.cardholder_id
-        ? await c.env.DB.prepare(
-            "SELECT first_name, last_name FROM cc_cardholders WHERE id = ?",
-          )
-            .bind(tx.cardholder_id)
-            .first<{ first_name: string; last_name: string | null }>()
-        : null;
-      const cardholderName = ch
-        ? `${ch.first_name}${ch.last_name ? ` ${ch.last_name}` : ""}`
-        : u.name;
-      await sendCcManagerAlert(c.env, {
-        cardholderName,
-        vendor: tx.vendor,
-        amount: tx.amount,
-        date: tx.transaction_date,
-        splitSummary: await splitSummary(c.env, id),
-        txId: id,
-        managerEmail,
-      });
-    }
-  }
-
-  const receiptRow = await c.env.DB.prepare("SELECT * FROM cc_receipts WHERE id = ?")
-    .bind(receiptId)
-    .first<ReceiptRow>();
-  const updatedTx = await fetchTx(c.env, id);
+  const { receipt, transaction } = await attachReceiptToTx(c.env, {
+    txId: id,
+    r2Key,
+    fileName,
+    fileType,
+    sizeBytes: buf.byteLength,
+    normalized,
+    match,
+    uploadMethod,
+    uploadedBy: u.id,
+    fireAlert: !isManager(c),
+    uploaderName: u.name,
+  });
 
   return c.json(
     {
-      receipt: receiptRow ? hydrateReceipt(receiptRow) : null,
+      receipt,
       ocr: { ...normalized, match: match.match, confidence: match.confidence },
-      transaction: updatedTx ? await hydrateTx(c.env, updatedTx) : null,
+      transaction,
     },
     201,
   );

@@ -211,6 +211,85 @@ export type ReceiptOcr = NormalizedReceipt & {
 };
 
 // ---------------------------------------------------------------------------
+// Receipt Inbox / drop-receipts auto-match (Feature A) — redeclared locally
+// from the frozen §3 contract (NOT imported from the worker, per the same
+// no-cross-bundle convention as the rest of this file). The backend mirrors
+// these shapes in worker/src/cc/ccTypes.ts.
+// ---------------------------------------------------------------------------
+
+export type InboxStatus = "PENDING_MATCH" | "MATCHED" | "RETURNED";
+
+/** A candidate transaction the matcher proposes for a queued inbox item. */
+export interface CandidateTx {
+  id: string;
+  vendor: string;
+  amount: number;
+  transaction_date: string; // YYYY-MM-DD
+  receipt_status: ReceiptStatus;
+}
+
+/** A receipt dropped into the inbox (hydrated DTO from the worker). */
+export interface InboxItem {
+  id: string;
+  uploaded_by: string;
+  cardholder_id: string | null;
+  cardholder_name?: string | null;
+  source_guess?: CcSource | null;
+  file_name: string;
+  file_type?: string | null;
+  file_size_bytes?: number | null;
+  /**
+   * Parsed OCR data the worker stamps on the inbox row. The worker DTO names this
+   * field `ocr_extracted_data` (matching `cc_receipt_inbox.ocr_extracted_data`);
+   * the renderer mirrors that exact name so the inbox/returned UI reads the real
+   * payload. (Note: the bulk-drop `PerFileResult` uses `ocr`, not this field.)
+   */
+  ocr_extracted_data?: ReceiptOcr | null;
+  status: InboxStatus;
+  matched_transaction_id?: string | null;
+  matched_receipt_id?: string | null;
+  candidate_transaction_ids?: string[];
+  candidates?: CandidateTx[];
+  return_note?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+/** One per dropped file (bulk drop result). */
+export interface PerFileResult {
+  file_name: string;
+  status: "MATCHED" | "PENDING_MATCH" | "ERROR";
+  inbox_id: string;
+  matched_transaction_id?: string;
+  candidate_transaction_ids?: string[];
+  ocr?: ReceiptOcr;
+  error?: string;
+}
+
+export interface InboxListResponse {
+  items: InboxItem[];
+}
+
+export interface DropReceiptsResponse {
+  results: PerFileResult[];
+}
+
+export interface AssignInboxResponse {
+  item: InboxItem;
+  receipt: Receipt;
+  transaction: CcTransaction;
+}
+
+export interface ReturnInboxResponse {
+  item: InboxItem;
+}
+
+export interface InboxListQuery {
+  status?: InboxStatus;
+  cardholder_id?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Line-by-line receipt coding (§4) — redeclared locally from the frozen
 // contract (NOT imported from the worker; same convention as the rest of this
 // file). A line ("ITEM" or the single "TAX" line) fans out into N allocation
@@ -536,6 +615,28 @@ export const ccApi = {
   receiptFileUrl: (id: string) => `/api/cc/receipts/${id}/file`,
   getReceiptBlob: (id: string) => api.getBlob(`/api/cc/receipts/${id}/file`),
   deleteReceipt: (id: string) => api.del<void>(`/api/cc/receipts/${id}`),
+
+  // ---- Receipt Inbox / drop-receipts auto-match (Feature A) --------------
+  /** Cardholder OR manager: bulk multi-file drop. `form` carries N `file` parts. */
+  dropReceipts: (form: FormData) =>
+    api.postForm<DropReceiptsResponse>("/api/cc/receipts/inbox", form),
+  /** Manager: the unmatched queue (defaults to PENDING_MATCH on the server). */
+  listInbox: (query: InboxListQuery = {}) =>
+    api.get<InboxListResponse>(`/api/cc/receipts/inbox${qs(query)}`),
+  /** Cardholder (or manager): the caller's own dropped receipts. */
+  myInbox: (query: { status?: InboxStatus } = {}) =>
+    api.get<InboxListResponse>(`/api/cc/receipts/inbox/mine${qs(query)}`),
+  /** Manager: assign a queued item to a transaction (creates the cc_receipts row). */
+  assignInbox: (id: string, body: { transaction_id: string }) =>
+    api.post<AssignInboxResponse>(`/api/cc/receipts/inbox/${id}/assign`, body),
+  /** Manager: send an item back to the cardholder with an optional note. */
+  returnInbox: (id: string, body: { note?: string } = {}) =>
+    api.post<ReturnInboxResponse>(`/api/cc/receipts/inbox/${id}/return`, body),
+  /** Path for streaming inbox file bytes (fetch via api.getBlob / getInboxBlob). */
+  inboxFileUrl: (id: string) => `/api/cc/receipts/inbox/${id}/file`,
+  getInboxBlob: (id: string) =>
+    api.getBlob(`/api/cc/receipts/inbox/${id}/file`),
+  deleteInbox: (id: string) => api.del<void>(`/api/cc/receipts/inbox/${id}`),
 
   // ---- Notifications -----------------------------------------------------
   sendNotifications: (body: {

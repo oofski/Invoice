@@ -17,7 +17,7 @@ import type { Env } from "../lib/types";
 
 let ccSchemaEnsured = false;
 
-/** The 8 CC tables + their indexes (all IF NOT EXISTS — naturally idempotent). */
+/** The 9 CC tables + their indexes (all IF NOT EXISTS — naturally idempotent). */
 const CC_DDL: string[] = [
   // --- cc_cardholders ---
   `CREATE TABLE IF NOT EXISTS cc_cardholders (
@@ -160,6 +160,31 @@ const CC_DDL: string[] = [
    )`,
   `CREATE INDEX IF NOT EXISTS idx_cc_alloc_tx ON cc_line_allocations(transaction_id)`,
   `CREATE INDEX IF NOT EXISTS idx_cc_alloc_line ON cc_line_allocations(line_id)`,
+
+  // --- cc_receipt_inbox (un-attached receipt drops awaiting auto-match / manager triage — Feature A) ---
+  `CREATE TABLE IF NOT EXISTS cc_receipt_inbox (
+     id                        TEXT PRIMARY KEY,
+     uploaded_by               TEXT NOT NULL,
+     cardholder_id             TEXT,
+     source_guess              TEXT,
+     r2_key                    TEXT NOT NULL,
+     file_name                 TEXT NOT NULL,
+     file_type                 TEXT,
+     file_size_bytes           INTEGER,
+     ocr_extracted_data        TEXT,
+     status                    TEXT NOT NULL DEFAULT 'PENDING_MATCH',
+     matched_transaction_id    TEXT,
+     matched_receipt_id        TEXT,
+     candidate_transaction_ids TEXT,
+     return_note               TEXT,
+     returned_by               TEXT,
+     resolved_by               TEXT,
+     created_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+     updated_at                TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+   )`,
+  `CREATE INDEX IF NOT EXISTS idx_cc_inbox_status ON cc_receipt_inbox(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_cc_inbox_cardholder ON cc_receipt_inbox(cardholder_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_cc_inbox_uploaded_by ON cc_receipt_inbox(uploaded_by)`,
 ];
 
 /**

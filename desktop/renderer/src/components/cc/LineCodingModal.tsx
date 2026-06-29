@@ -40,6 +40,7 @@ import {
  */
 
 type CatChoice = "BACK_BAR" | "RETAIL" | "HALF";
+type CodingTab = "QUICK" | "LINES";
 
 /** Editable grid state per ITEM line (on top of the OCR line). */
 interface ItemState {
@@ -95,6 +96,7 @@ export function LineCodingModal({
   onSubmit?: (lines: ReceiptLine[]) => Promise<void> | void;
   saving?: boolean;
 }) {
+  const [tab, setTab] = useState<CodingTab>("QUICK");
   const [items, setItems] = useState<ItemState[]>([]);
   const [taxAmount, setTaxAmount] = useState<number>(0);
   const [taxDescription, setTaxDescription] = useState<string>("Sales Tax");
@@ -103,6 +105,14 @@ export function LineCodingModal({
   );
   const [taxMode, setTaxMode] = useState<"spend" | "even">("spend");
   const [savingSelf, setSavingSelf] = useState(false);
+
+  // ---- Quick-split tab state (design §5 — Feature B) --------------------
+  // One entity + location(s) + Back bar/Retail/50-50 applied to the whole
+  // charge, mapped on Save to ONE synthesized ITEM line + the TAX line.
+  const [quickEntity, setQuickEntity] = useState<string>("");
+  const [quickLocations, setQuickLocations] = useState<string[]>([]);
+  const [quickCat, setQuickCat] = useState<CatChoice>("HALF");
+  const [quickTaxMode, setQuickTaxMode] = useState<"spend" | "even">("spend");
 
   const saving = savingProp || savingSelf;
 
@@ -152,8 +162,117 @@ export function LineCodingModal({
     setTaxDescription(seededTaxDesc);
     setTaxReceiptId(seededTaxReceipt);
     setTaxMode("spend");
+
+    // Quick tab is the default. Seed its single coding from the existing
+    // item coding when there is exactly one consistent entity + location set
+    // across all item lines; otherwise leave it blank (default "All locations"
+    // is applied by the chip logic once an entity is chosen).
+    const distinctEntities = Array.from(
+      new Set(seededItems.map((it) => it.entity).filter(Boolean)),
+    );
+    if (distinctEntities.length === 1) {
+      const entity = distinctEntities[0];
+      const allLocs = Array.from(
+        new Set(seededItems.flatMap((it) => it.locations)),
+      ).filter(Boolean);
+      const full = locationsFor(entity);
+      // If every item already covers the entity's full location set, default to
+      // "All locations" (the represented set); else use the union seen.
+      setQuickEntity(entity);
+      setQuickLocations(
+        allLocs.length > 0 ? full.filter((l) => allLocs.includes(l)) : [],
+      );
+      // Infer the category from the union of GL slices.
+      const cats = new Set(
+        seededItems.flatMap((it) =>
+          it.cat === "HALF" ? ["BACK_BAR", "RETAIL"] : [it.cat],
+        ),
+      );
+      setQuickCat(
+        cats.has("BACK_BAR") && cats.has("RETAIL")
+          ? "HALF"
+          : cats.has("RETAIL")
+            ? "RETAIL"
+            : "BACK_BAR",
+      );
+    } else {
+      setQuickEntity("");
+      setQuickLocations([]);
+      setQuickCat("HALF");
+    }
+    setQuickTaxMode("spend");
+    setTab("QUICK");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, transactionId]);
+
+  // Selecting a Quick entity defaults its locations to "All locations".
+  function setQuickEntityAndDefaultLocs(entity: string) {
+    setQuickEntity(entity);
+    setQuickLocations(entity ? locationsFor(entity) : []);
+  }
+
+  function toggleQuickLocation(location: string) {
+    const all = locationsFor(quickEntity);
+    if (location === ALL_LOCATIONS) {
+      const isAll = quickLocations.length === all.length;
+      setQuickLocations(isAll ? [] : [...all]);
+      return;
+    }
+    const has = quickLocations.includes(location);
+    const next = has
+      ? quickLocations.filter((l) => l !== location)
+      : [...quickLocations, location];
+    setQuickLocations(all.filter((l) => next.includes(l)));
+  }
+
+  // The synthesized Quick lines: one ITEM (vendor / tx.amount − tax) + the TAX
+  // line, exactly as design §5 specifies. tax comes from the seeded TAX line.
+  const quickLines = useMemo<ReceiptLine[]>(() => {
+    const tax = roundCents(taxAmount);
+    const itemAmount = roundCents(roundCents(amount) - tax);
+    const item: ReceiptLine = {
+      client_id: "cquick",
+      receipt_id: null,
+      kind: "ITEM",
+      description: vendor,
+      amount: itemAmount,
+      allocations: buildItemAllocations(
+        quickEntity,
+        quickLocations,
+        itemAmount,
+        CAT_OF[quickCat],
+      ),
+    };
+    const lines: ReceiptLine[] = [item];
+    if (tax > 0) {
+      lines.push({
+        client_id: "cquicktax",
+        receipt_id: taxReceiptId ?? null,
+        kind: "TAX",
+        description: taxDescription || "Sales Tax",
+        amount: tax,
+        allocations: allocateTax(tax, locWeights([item]), quickTaxMode),
+      });
+    }
+    return lines;
+  }, [
+    amount,
+    vendor,
+    taxAmount,
+    taxDescription,
+    taxReceiptId,
+    quickEntity,
+    quickLocations,
+    quickCat,
+    quickTaxMode,
+  ]);
+
+  const quickRecon = useMemo(
+    () => reconcile(amount, quickLines),
+    [amount, quickLines],
+  );
+  const quickCoded = Boolean(quickEntity) && quickLocations.length > 0;
+  const canSaveQuick = quickCoded && quickRecon.reconciled && !saving;
 
   // ---- per-line derived allocations -------------------------------------
   /** Resolve the allocation rows for one item line from its grid state. */
@@ -241,6 +360,9 @@ export function LineCodingModal({
   );
   const canSave =
     recon.reconciled && !hasLineErrors && allItemsCoded && !saving;
+
+  // The reconcile bar / Save lock follow the active tab.
+  const activeRecon = tab === "QUICK" ? quickRecon : recon;
 
   // ---- mutations ---------------------------------------------------------
   function patchItem(clientId: string, patch: Partial<ItemState>) {
@@ -352,8 +474,9 @@ export function LineCodingModal({
 
   // ---- save --------------------------------------------------------------
   async function handleSave() {
-    if (!canSave) return;
-    const payload = builtLines;
+    const isQuick = tab === "QUICK";
+    if (isQuick ? !canSaveQuick : !canSave) return;
+    const payload = isQuick ? quickLines : builtLines;
 
     if (onSubmit) {
       try {
@@ -391,77 +514,136 @@ export function LineCodingModal({
       fill
     >
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center justify-between pb-3 text-xs">
-          <p className="text-ink-muted">
-            Code each line by entity, location(s) and Back bar / Retail. Save
-            unlocks when the remaining balance is exactly $0.00.
-          </p>
-          <Button variant="secondary" size="sm" onClick={addManualLine}>
-            <Plus className="h-3.5 w-3.5" />
-            Add line
-          </Button>
-        </div>
-
-        {/* scroll region: the line rows */}
-        <div className="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-          {items.length === 0 && (
-            <p className="px-1 py-6 text-center text-sm text-ink-muted">
-              No item lines. Add a line or use the entity split instead.
-            </p>
-          )}
-          {items.map((it) => (
-            <ItemRow
-              key={it.clientId}
-              item={it}
-              allocations={itemAllocations(it)}
-              error={lineErrors[it.clientId]}
-              readOnlyMeta={readOnlyMeta}
-              onEntity={(e) => setEntity(it.clientId, e)}
-              onToggleLocation={(l) => toggleLocation(it.clientId, l)}
-              onCat={(c) => setCat(it.clientId, c)}
-              onToggleManual={() => toggleManual(it.clientId)}
-              onManualAmount={(loc, gl, v) =>
-                setManualAmount(it.clientId, loc, gl, v)
-              }
-              onAmount={(v) => setItemAmount(it.clientId, v)}
-              onDescription={(v) => patchItem(it.clientId, { description: v })}
-              onRemove={() => removeLine(it.clientId)}
-            />
-          ))}
-        </div>
-
-        {/* Tax footer row */}
-        {roundCents(taxAmount) > 0 && (
-          <div className="mt-2 rounded-lg border border-line bg-surface-2 px-3 py-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-sm">
-                <span className="font-medium text-ink">{taxDescription}</span>
-                <span className="tabular-nums text-ink-muted">
-                  {formatCurrency(taxAmount)}
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-ink-muted">Allocate tax:</span>
-                <Segmented
-                  options={[
-                    { value: "spend", label: "By spend" },
-                    { value: "even", label: "Even" },
-                  ]}
-                  value={taxMode}
-                  onChange={(v) => setTaxMode(v as "spend" | "even")}
-                />
-              </div>
-            </div>
-            <p className="mt-1 text-xs text-ink-subtle">
-              Tax is split across the locations used by the lines above
-              {taxMode === "spend"
-                ? " in proportion to each location's spend."
-                : " equally."}
-            </p>
+        {/* Tab strip — Quick split (default) vs Line by line. */}
+        <div className="mb-3 flex shrink-0 items-center gap-2">
+          <div className="inline-flex overflow-hidden rounded-lg border border-line">
+            <button
+              type="button"
+              onClick={() => setTab("QUICK")}
+              className={cn(
+                "px-3 py-1.5 text-sm font-medium transition-colors",
+                tab === "QUICK"
+                  ? "bg-selected-bg text-accent"
+                  : "bg-surface text-ink-muted hover:bg-surface-2",
+              )}
+            >
+              Quick split
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("LINES")}
+              className={cn(
+                "border-l border-line px-3 py-1.5 text-sm font-medium transition-colors",
+                tab === "LINES"
+                  ? "bg-selected-bg text-accent"
+                  : "bg-surface text-ink-muted hover:bg-surface-2",
+              )}
+            >
+              Line by line
+            </button>
           </div>
+          {tab === "LINES" && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="ml-auto"
+              onClick={addManualLine}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add line
+            </Button>
+          )}
+        </div>
+
+        {tab === "QUICK" ? (
+          <QuickSplitPanel
+            amount={amount}
+            vendor={vendor}
+            taxAmount={taxAmount}
+            taxDescription={taxDescription}
+            entity={quickEntity}
+            locations={quickLocations}
+            cat={quickCat}
+            taxMode={quickTaxMode}
+            lines={quickLines}
+            onEntity={setQuickEntityAndDefaultLocs}
+            onToggleLocation={toggleQuickLocation}
+            onCat={setQuickCat}
+            onTaxMode={setQuickTaxMode}
+          />
+        ) : (
+          <>
+            <p className="pb-3 text-xs text-ink-muted">
+              Code each line by entity, location(s) and Back bar / Retail. Save
+              unlocks when the remaining balance is exactly $0.00.
+            </p>
+
+            {/* scroll region: the line rows */}
+            <div className="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+              {items.length === 0 && (
+                <p className="px-1 py-6 text-center text-sm text-ink-muted">
+                  No item lines. Add a line or use Quick split instead.
+                </p>
+              )}
+              {items.map((it) => (
+                <ItemRow
+                  key={it.clientId}
+                  item={it}
+                  allocations={itemAllocations(it)}
+                  error={lineErrors[it.clientId]}
+                  readOnlyMeta={readOnlyMeta}
+                  onEntity={(e) => setEntity(it.clientId, e)}
+                  onToggleLocation={(l) => toggleLocation(it.clientId, l)}
+                  onCat={(c) => setCat(it.clientId, c)}
+                  onToggleManual={() => toggleManual(it.clientId)}
+                  onManualAmount={(loc, gl, v) =>
+                    setManualAmount(it.clientId, loc, gl, v)
+                  }
+                  onAmount={(v) => setItemAmount(it.clientId, v)}
+                  onDescription={(v) =>
+                    patchItem(it.clientId, { description: v })
+                  }
+                  onRemove={() => removeLine(it.clientId)}
+                />
+              ))}
+            </div>
+
+            {/* Tax footer row */}
+            {roundCents(taxAmount) > 0 && (
+              <div className="mt-2 rounded-lg border border-line bg-surface-2 px-3 py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="font-medium text-ink">
+                      {taxDescription}
+                    </span>
+                    <span className="tabular-nums text-ink-muted">
+                      {formatCurrency(taxAmount)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-ink-muted">Allocate tax:</span>
+                    <Segmented
+                      options={[
+                        { value: "spend", label: "By spend" },
+                        { value: "even", label: "Even" },
+                      ]}
+                      value={taxMode}
+                      onChange={(v) => setTaxMode(v as "spend" | "even")}
+                    />
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-ink-subtle">
+                  Tax is split across the locations used by the lines above
+                  {taxMode === "spend"
+                    ? " in proportion to each location's spend."
+                    : " equally."}
+                </p>
+              </div>
+            )}
+          </>
         )}
 
-        {/* Reconcile bar */}
+        {/* Reconcile bar (reflects the active tab) */}
         <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-surface-2 px-4 py-3 text-sm">
           <div>
             <p className="text-xs text-ink-muted">Receipt total</p>
@@ -472,7 +654,7 @@ export function LineCodingModal({
           <div>
             <p className="text-xs text-ink-muted">Allocated</p>
             <p className="font-medium tabular-nums text-ink">
-              {formatCurrency(recon.allocated)}
+              {formatCurrency(activeRecon.allocated)}
             </p>
           </div>
           <div>
@@ -480,21 +662,25 @@ export function LineCodingModal({
             <p
               className={cn(
                 "font-semibold tabular-nums",
-                recon.reconciled ? "text-success" : "text-danger",
+                activeRecon.reconciled ? "text-success" : "text-danger",
               )}
             >
-              {formatCurrency(recon.remaining)}
+              {formatCurrency(activeRecon.remaining)}
             </p>
           </div>
         </div>
 
         <div className="mt-3 flex items-center justify-between">
           <p className="text-xs text-danger">
-            {hasLineErrors
-              ? "One or more lines don't sum to their amount."
-              : !allItemsCoded
-                ? "Every line needs an entity and at least one location."
-                : ""}
+            {tab === "QUICK"
+              ? !quickCoded
+                ? "Choose an entity and at least one location."
+                : ""
+              : hasLineErrors
+                ? "One or more lines don't sum to their amount."
+                : !allItemsCoded
+                  ? "Every line needs an entity and at least one location."
+                  : ""}
           </p>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={onClose}>
@@ -503,12 +689,14 @@ export function LineCodingModal({
             <Button
               onClick={handleSave}
               loading={saving}
-              disabled={!canSave}
+              disabled={tab === "QUICK" ? !canSaveQuick : !canSave}
               title={
-                recon.reconciled ? undefined : "Remaining must be $0.00 to save"
+                activeRecon.reconciled
+                  ? undefined
+                  : "Remaining must be $0.00 to save"
               }
             >
-              {!recon.reconciled && <Lock className="h-4 w-4" />}
+              {!activeRecon.reconciled && <Lock className="h-4 w-4" />}
               Save coding
             </Button>
           </div>
@@ -743,6 +931,200 @@ function ManualGrid({
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Quick-split panel (design §5 — Feature B). One entity + location chips +
+// Back bar/Retail/50-50 over the whole charge, plus a tax-mode toggle when the
+// receipt carries sales tax. The synthesized ITEM/TAX lines + reconcile + Save
+// lock live on the parent; this panel is presentation + the live allocation
+// preview.
+// ---------------------------------------------------------------------------
+
+function QuickSplitPanel({
+  amount,
+  vendor,
+  taxAmount,
+  taxDescription,
+  entity,
+  locations,
+  cat,
+  taxMode,
+  lines,
+  onEntity,
+  onToggleLocation,
+  onCat,
+  onTaxMode,
+}: {
+  amount: number;
+  vendor: string;
+  taxAmount: number;
+  taxDescription: string;
+  entity: string;
+  locations: string[];
+  cat: CatChoice;
+  taxMode: "spend" | "even";
+  lines: ReceiptLine[];
+  onEntity: (e: string) => void;
+  onToggleLocation: (l: string) => void;
+  onCat: (c: CatChoice) => void;
+  onTaxMode: (m: "spend" | "even") => void;
+}) {
+  const tax = roundCents(taxAmount);
+  const itemAmount = roundCents(roundCents(amount) - tax);
+  const locs = entity ? locationsFor(entity) : [];
+  const allSelected = locs.length > 0 && locations.length === locs.length;
+  const itemAllocs = lines
+    .filter((l) => l.kind === "ITEM")
+    .flatMap((l) => l.allocations);
+  const taxAllocs = lines
+    .filter((l) => l.kind === "TAX")
+    .flatMap((l) => l.allocations);
+
+  return (
+    <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+      <p className="text-xs text-ink-muted">
+        Code the whole charge in one step: pick an entity, the location(s), and
+        Back bar / Retail. Save unlocks when the remaining balance is exactly
+        $0.00.
+      </p>
+
+      {/* Entity */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium uppercase tracking-[0.12em] text-ink-muted">
+          Entity
+        </label>
+        <Select
+          value={entity}
+          onChange={(e) => onEntity(e.target.value)}
+          className="w-full max-w-xs"
+        >
+          <option value="">Choose entity…</option>
+          {CC_ENTITIES.map((e) => (
+            <option key={e.canonical} value={e.canonical}>
+              {e.label}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      {/* Locations */}
+      {entity && (
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium uppercase tracking-[0.12em] text-ink-muted">
+            Locations
+          </label>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {locs.length > 1 && (
+              <Chip
+                active={allSelected}
+                onClick={() => onToggleLocation(ALL_LOCATIONS)}
+              >
+                All locations
+              </Chip>
+            )}
+            {locs.map((l) => (
+              <Chip
+                key={l}
+                active={locations.includes(l)}
+                onClick={() => onToggleLocation(l)}
+              >
+                {l}
+              </Chip>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Category */}
+      {entity && locations.length > 0 && (
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium uppercase tracking-[0.12em] text-ink-muted">
+            Category
+          </label>
+          <Segmented
+            options={[
+              { value: "BACK_BAR", label: "Back bar" },
+              { value: "RETAIL", label: "Retail" },
+              { value: "HALF", label: "50 / 50" },
+            ]}
+            value={cat}
+            onChange={(v) => onCat(v as CatChoice)}
+          />
+        </div>
+      )}
+
+      {/* Tax mode (only when the receipt has sales tax) */}
+      {tax > 0 && entity && locations.length > 0 && (
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium uppercase tracking-[0.12em] text-ink-muted">
+            {taxDescription} · {formatCurrency(tax)}
+          </label>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-ink-muted">Allocate tax:</span>
+            <Segmented
+              options={[
+                { value: "spend", label: "By spend" },
+                { value: "even", label: "Even" },
+              ]}
+              value={taxMode}
+              onChange={(v) => onTaxMode(v as "spend" | "even")}
+            />
+          </div>
+          <p className="text-xs text-ink-subtle">
+            Tax is split across the chosen locations
+            {taxMode === "spend"
+              ? " in proportion to each location's spend."
+              : " equally."}
+          </p>
+        </div>
+      )}
+
+      {/* Live allocation preview */}
+      {entity && locations.length > 0 && (
+        <div className="rounded-lg border border-line bg-surface-2 px-3 py-2.5">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium text-ink">{vendor || "Item"}</span>
+            <span className="tabular-nums text-ink-muted">
+              {formatCurrency(itemAmount)}
+            </span>
+          </div>
+          {itemAllocs.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
+              {itemAllocs.map((a, i) => (
+                <span key={`i${i}`} className="tabular-nums">
+                  {a.location} · {catShort(a.gl_category)}:{" "}
+                  <span className="text-ink">{formatCurrency(a.amount)}</span>
+                </span>
+              ))}
+            </div>
+          )}
+          {tax > 0 && (
+            <div className="mt-2 border-t border-line pt-1.5">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium text-ink">{taxDescription}</span>
+                <span className="tabular-nums text-ink-muted">
+                  {formatCurrency(tax)}
+                </span>
+              </div>
+              {taxAllocs.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
+                  {taxAllocs.map((a, i) => (
+                    <span key={`t${i}`} className="tabular-nums">
+                      {a.location}:{" "}
+                      <span className="text-ink">
+                        {formatCurrency(a.amount)}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

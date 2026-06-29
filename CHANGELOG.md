@@ -5,6 +5,29 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.3.3] — 2026-06-29
+
+### Added
+- **Credit Cards — drop receipts and let them auto-file.** A cardholder can now
+  upload one or more receipt photos/PDFs **without first finding the transaction**.
+  The OCR reads each one and **auto-matches it to one of their transactions** (by
+  card, amount, and date). If it can't be sure, the receipt goes to the **Credit
+  Card Accountant's new Inbox**, who can preview it, **assign it to the right
+  transaction** (with suggested matches), or **send it back** to the cardholder
+  with a note. Drop several at once — each is filed or queued independently.
+- **A "Quick split" tab — the fast way to code a receipt.** The coding screen now
+  opens on **Quick split**: pick the **business** → **location(s)** (defaults to
+  "all") → **Back bar / Retail / 50-50**, applied to the whole charge (sales tax
+  follows the locations). The detailed **Line by line** grid is now a second tab
+  you only use when a receipt needs different coding per item.
+
+### Changed
+- The receipt coding flow now opens on **Quick split** by default instead of the
+  old entity-only split (which remains available behind the scenes).
+
+(Still separate from invoicing; the new inbox table applies automatically on
+deploy — nothing to run.)
+
 ## [1.3.2] — 2026-06-27
 
 ### Added

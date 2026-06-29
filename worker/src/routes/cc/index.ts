@@ -39,6 +39,7 @@ import type { AppEnv } from "../helpers";
 import { uploads } from "./uploads";
 import { splits } from "./splits";
 import { receipts } from "./receipts";
+import { inbox } from "./inbox";
 import { lines } from "./lines";
 import { cardholders } from "./cardholders";
 
@@ -60,6 +61,11 @@ cc.route("/transactions", transactions);
 
 // Splits (A2): /api/cc/transactions/:id/splits — declares full sub-paths internally.
 cc.route("/", splits);
+
+// Receipt inbox (Feature A): /api/cc/receipts/inbox[...] — RELATIVE sub-paths.
+// Mounted BEFORE `receipts` so /receipts/inbox is matched by this more-specific
+// sub-app and never collides with the receipts sub-app's /receipts/:id.
+cc.route("/receipts/inbox", inbox);
 
 // Receipts (A2): /api/cc/transactions/:id/receipts + /api/cc/receipts/:id[...] —
 // declares full sub-paths internally.
