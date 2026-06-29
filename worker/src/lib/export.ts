@@ -269,10 +269,67 @@ function label(business: string | null | undefined): string {
   return ENTITY_LABEL[b] ?? b;
 }
 
-/** `label(business):cls` when cls is present and !== "None", else `label(business)`. */
-function classCell(business: string | null | undefined, cls: string | null | undefined): string {
-  const base = label(business);
-  return cls && cls !== "None" ? `${base}:${cls}` : base;
+/**
+ * Factor Class cell = the bare LOCATION only (the entity is already the tab and
+ * the footer row). `Mequon`, `Madison`, etc.; Admin / "None" / empty → "".
+ * The CSV path keeps its own `Entity:Class` formatting inline — unchanged.
+ */
+function classCellFactor(cls: string | null | undefined): string {
+  return cls && cls !== "None" ? cls : "";
+}
+
+/**
+ * Strips a trailing legal suffix (and a trailing comma) from a vendor name for
+ * the factor export's display cell. Case-insensitive; only removes from the END;
+ * never touches the core of the name. Iterates so "Foo Inc, LLC" → "Foo".
+ * Preserves the original casing of the kept part. Does NOT fix spelling
+ * (e.g. "Olivia Garden" stays "Olivia Garden"). Factor-only — does NOT touch
+ * `normalizeVendor` (rules.ts) used for matching.
+ */
+const VENDOR_SUFFIXES = new Set([
+  "INC", // also INC. / INCORPORATED
+  "INCORPORATED",
+  "LLC", // also L.L.C. (dots stripped before lookup)
+  "CORP", // also CORP. / CORPORATION
+  "CORPORATION",
+  "CO", // also CO. / COMPANY
+  "COMPANY",
+  "LTD", // also LTD. / LIMITED
+  "LIMITED",
+  "LP", // also L.P.
+  "LLP",
+  "PLLC",
+  "PC", // also P.C.
+]);
+
+export function cleanVendorName(vendor: string | null | undefined): string {
+  const original = (vendor ?? "").trim();
+  let v = original;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    // Final whitespace/comma-delimited token of letters and dots, optional
+    // trailing period/comma/space.
+    const m = v.match(/[\s,]+([A-Za-z.]+)\.?\s*$/);
+    if (m && m.index !== undefined) {
+      const token = m[1].replace(/\./g, "").toUpperCase();
+      if (VENDOR_SUFFIXES.has(token)) {
+        v = v.slice(0, m.index).replace(/[\s,]+$/, "").trim();
+        changed = true;
+      }
+    }
+  }
+  return v || original;
+}
+
+/**
+ * Factor `Category/Account` cell = the bare GL category NAME, WITHOUT the
+ * leading GL number (QBO matches the account by name). The stored value is
+ * already the bare name. Factor-only so the CSV export's numbered-account
+ * contract (`formatCategoryAccount`) doesn't drift.
+ */
+function formatCategoryAccountName(account: string): string {
+  return account;
 }
 
 /** Builds the .xlsx filename: InvoiceIQ_QBO_BillImport_YYYYMMDD-HHMMSS.xlsx */
@@ -323,7 +380,7 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
 
   for (const { invoice, lineItems, allocations, vendorMapping } of invoices) {
     const billBase = {
-      vendor: invoice.vendor,
+      vendor: cleanVendorName(invoice.vendor),
       terms: "Net 30",
       billDate: toQboDate(invoice.inv_date),
       dueDate: toQboDate(invoice.due_date),
@@ -487,7 +544,7 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
           Location: "",
           Memo: bill.memo,
           "*Type": "Category Details",
-          "Category/Account": formatCategoryAccount(line.business, line.account),
+          "Category/Account": formatCategoryAccountName(line.account),
           "Product/Service": "",
           Quantity: "",
           Rate: "",
@@ -496,7 +553,7 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
           Billable: "",
           "Customer/Project": "",
           "Tax Rate": "",
-          Class: classCell(line.business, line.cls),
+          Class: classCellFactor(line.cls),
         };
         rows.push(row);
         totalRowCount++;

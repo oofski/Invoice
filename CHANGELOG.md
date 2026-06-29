@@ -5,6 +5,24 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.3.5] — 2026-06-29
+
+### Changed
+- **QuickBooks bill-import export reformatted to match QBO.** The factor / QBO
+  Bill Import spreadsheet now exports:
+  - **Class = the location only** (e.g. `Mequon`, `Madison`) instead of
+    `Entity:Location` — the business is the tab.
+  - **Account/category names without the leading number** (e.g.
+    `Repairs & Maintenance`, not `6290 Repairs & Maintenance`).
+  - **Vendor names without the legal suffix** (e.g. `CTC Supplies INC` →
+    `CTC Supplies`, `AbbVie US LLC` → `AbbVie US`).
+  - A **business total row at the bottom of each entity tab** (a `Total — <Entity>`
+    summary line, kept below a blank row with the import key-fields empty so a QBO
+    import skips it).
+  Invoices **split across multiple entities/locations** continue to land in the
+  correct entity tab with the correct location and amount (verified to reconcile).
+  The CSV export is unchanged.
+
 ## [1.3.4] — 2026-06-29
 
 ### Fixed

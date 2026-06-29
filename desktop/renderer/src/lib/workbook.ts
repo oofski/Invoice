@@ -17,6 +17,34 @@ const XLSX_MIME =
 /** Excel worksheet titles are capped at 31 characters. */
 const MAX_SHEET_NAME = 31;
 
+/**
+ * Builds the per-entity human-summary footer appended below the data grid.
+ * Returns two array-of-arrays rows: a fully-blank spacer row that terminates the
+ * QBO "Import Bills" data region, followed by a labeled total row that is
+ * IMPORT-SAFE — the required QBO key fields (`*Bill Number`, `*Vendor`,
+ * `*Bill Date`) are left BLANK so the importer skips it. The business-entity
+ * label is written in the benign `Memo` column and the summed `Amount` under the
+ * `Amount` column, so it reads as an obvious human summary, never as a bill line.
+ */
+function entityFooterRows(
+  entity: EntitySheet,
+  header: string[],
+  width: number,
+): string[][] {
+  const blank = new Array(width).fill("");
+  const total = entity.rows.reduce(
+    (s, r) => s + (parseFloat(r["Amount"] ?? "") || 0),
+    0,
+  );
+  const footer = new Array(width).fill("");
+  const memoIdx = header.indexOf("Memo");
+  const amountIdx = header.indexOf("Amount");
+  // Fallbacks keep the key fields blank even if a column name ever changes.
+  if (memoIdx >= 0) footer[memoIdx] = `Total — ${entity.entity}`;
+  if (amountIdx >= 0) footer[amountIdx] = total.toFixed(2);
+  return [blank, footer];
+}
+
 export function buildBillWorkbook(
   entities: EntitySheet[],
   header: string[],
@@ -27,6 +55,10 @@ export function buildBillWorkbook(
     const aoa: string[][] = [
       header,
       ...entity.rows.map((r) => header.map((col) => r[col] ?? "")),
+      // Blank spacer + import-safe business-total footer at the bottom of the
+      // sheet. The spacer terminates QBO's contiguous data region; the footer
+      // sits below it (human summary only, never imported as a bill).
+      ...entityFooterRows(entity, header, header.length),
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     XLSX.utils.book_append_sheet(
