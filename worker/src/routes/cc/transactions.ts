@@ -249,7 +249,7 @@ transactions.patch("/bulk", async (c) => {
 
   const body = (await c.req.json().catch(() => ({}))) as {
     transaction_ids?: unknown;
-    updates?: { receipt_status?: unknown; in_qb?: unknown };
+    updates?: { receipt_status?: unknown; in_qb?: unknown; cardholder_id?: unknown };
   };
   const ids = Array.isArray(body.transaction_ids)
     ? body.transaction_ids.filter((x): x is string => typeof x === "string" && !!x)
@@ -259,7 +259,7 @@ transactions.patch("/bulk", async (c) => {
 
   const updates = body.updates ?? {};
   const sets: string[] = [];
-  const setParams: (string | number)[] = [];
+  const setParams: (string | number | null)[] = [];
 
   if ("receipt_status" in updates && updates.receipt_status !== undefined) {
     const rs = updates.receipt_status;
@@ -272,8 +272,29 @@ transactions.patch("/bulk", async (c) => {
     sets.push("in_qb = ?");
     setParams.push(updates.in_qb ? 1 : 0);
   }
+  // cardholder_id reassignment (mirrors the SINGLE PATCH logic): null unassigns;
+  // a string must be an ACTIVE cardholder. Validated ONCE here, before the loop.
+  if ("cardholder_id" in updates && updates.cardholder_id !== undefined) {
+    const ch = updates.cardholder_id;
+    if (ch !== null && typeof ch !== "string")
+      return c.json({ error: "cardholder_id must be a string or null" }, 400);
+    if (ch) {
+      const found = await c.env.DB.prepare(
+        "SELECT id FROM cc_cardholders WHERE id = ? AND is_active = 1",
+      )
+        .bind(ch)
+        .first();
+      if (!found)
+        return c.json({ error: `Unknown or inactive cardholder "${ch}"` }, 400);
+    }
+    sets.push("cardholder_id = ?");
+    setParams.push((ch as string | null) ?? null);
+  }
   if (sets.length === 0)
-    return c.json({ error: "At least one update field (receipt_status, in_qb) is required" }, 400);
+    return c.json(
+      { error: "At least one update field (receipt_status, in_qb, cardholder_id) is required" },
+      400,
+    );
 
   sets.push("updated_at = ?");
   setParams.push(new Date().toISOString());

@@ -3,6 +3,8 @@ import { useParams } from "react-router-dom";
 import {
   Archive,
   ArchiveRestore,
+  Ban,
+  CheckCheck,
   Download,
   ReceiptText,
   SlidersHorizontal,
@@ -55,6 +57,9 @@ const STATUSES: (ReceiptStatus | "ALL")[] = [
   "WAIVED",
 ];
 
+// Receipt statuses for the bulk "Set status" Select (STATUSES minus "ALL").
+const BULK_STATUSES = STATUSES.filter((s) => s !== "ALL") as ReceiptStatus[];
+
 export default function CcTransactionsPage() {
   const { id: routeId } = useParams<{ id?: string }>();
   const isManager = useCcManager();
@@ -63,6 +68,10 @@ export default function CcTransactionsPage() {
   const [transactions, setTransactions] = useState<CcTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+
+  // Manager multi-select (ids of loaded transactions) + bulk-action busy flag.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // detail panel
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -136,6 +145,32 @@ export default function CcTransactionsPage() {
       cardholders.filter((c) => c.is_active === true || c.is_active === 1),
     [cardholders],
   );
+
+  // --- Multi-select -------------------------------------------------------
+  const allSelected =
+    transactions.length > 0 && selectedIds.size === transactions.length;
+
+  function toggleRowSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Header "select all (loaded)" — selects/clears every loaded transaction.
+  function toggleSelectAll() {
+    setSelectedIds((prev) =>
+      prev.size === transactions.length
+        ? new Set()
+        : new Set(transactions.map((t) => t.id)),
+    );
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
 
   const loadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
@@ -355,6 +390,62 @@ export default function CcTransactionsPage() {
     }
   }
 
+  // --- Bulk actions (manager-only) ----------------------------------------
+  // Apply a partial patch to every selected transaction, then clear + reload.
+  async function bulkPatch(
+    updates: Partial<{
+      receipt_status: ReceiptStatus;
+      in_qb: boolean;
+      cardholder_id: string | null;
+    }>,
+  ) {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await ccApi.bulkPatchTransactions({
+        transaction_ids: ids,
+        updates,
+      });
+      toast.success(`Updated ${res.updated_count} transaction(s)`);
+      clearSelection();
+      await load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Bulk update failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function bulkArchive() {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (
+      !window.confirm(
+        `Archive (hide) ${ids.length} selected transaction(s)? They can be restored with 'Show archived'.`,
+      )
+    )
+      return;
+    setBulkBusy(true);
+    try {
+      const res = await ccApi.archiveTransactions(ids);
+      toast.success(`Archived ${res.archived} transaction(s)`);
+      clearSelection();
+      await load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Bulk update failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  // Export ONLY the selected rows, client-side over rows already in state
+  // (same columns as the full "Export Excel"). No refetch.
+  function exportSelected() {
+    const rows = transactions.filter((t) => selectedIds.has(t.id));
+    downloadTransactions(rows);
+  }
+
   return (
     <div>
       <PageHeader
@@ -473,6 +564,106 @@ export default function CcTransactionsPage() {
               </label>
             </div>
 
+            {/* Bulk toolbar (manager-only, ≥1 selected) */}
+            {isManager && selectedIds.size > 0 && (
+              <div className="flex flex-wrap items-center gap-2 border-b border-line bg-selected-bg px-4 py-2.5">
+                <span className="text-sm font-medium text-accent">
+                  {selectedIds.size} selected
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={clearSelection}
+                  disabled={bulkBusy}
+                >
+                  Clear
+                </Button>
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  {/* Set status */}
+                  <Select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value)
+                        bulkPatch({
+                          receipt_status: e.target.value as ReceiptStatus,
+                        });
+                    }}
+                    disabled={bulkBusy}
+                    className="w-40"
+                    aria-label="Set receipt status"
+                  >
+                    <option value="">Set status…</option>
+                    {BULK_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {s.replace(/_/g, " ")}
+                      </option>
+                    ))}
+                  </Select>
+                  {/* In QB */}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => bulkPatch({ in_qb: true })}
+                    loading={bulkBusy}
+                  >
+                    <CheckCheck className="h-3.5 w-3.5" />
+                    Mark in QB
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => bulkPatch({ in_qb: false })}
+                    loading={bulkBusy}
+                  >
+                    <Ban className="h-3.5 w-3.5" />
+                    Mark not in QB
+                  </Button>
+                  {/* Reassign cardholder ("__none__" placeholder so the
+                      "Unassigned" option (value "") still fires onChange) */}
+                  <Select
+                    value="__none__"
+                    onChange={(e) => {
+                      if (e.target.value !== "__none__")
+                        bulkPatch({ cardholder_id: e.target.value || null });
+                    }}
+                    disabled={bulkBusy}
+                    className="w-48"
+                    aria-label="Reassign cardholder"
+                  >
+                    <option value="__none__" disabled>
+                      Reassign cardholder…
+                    </option>
+                    <option value="">— Unassigned —</option>
+                    {activeCardholders.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {cardholderLabel(c)}
+                      </option>
+                    ))}
+                  </Select>
+                  {/* Export selected */}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={exportSelected}
+                    disabled={bulkBusy}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Export selected
+                  </Button>
+                  {/* Archive */}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={bulkArchive}
+                    loading={bulkBusy}
+                  >
+                    <Archive className="h-3.5 w-3.5" />
+                    Archive
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {loading ? (
               <div className="flex justify-center py-16">
                 <Spinner />
@@ -488,6 +679,17 @@ export default function CcTransactionsPage() {
                 <table className="w-full min-w-[820px] text-sm">
                   <thead>
                     <tr className="border-b border-line bg-surface-2 text-left text-xs uppercase tracking-[0.12em] text-ink-muted">
+                      {isManager && (
+                        <th className="px-4 py-2.5 font-medium">
+                          <input
+                            type="checkbox"
+                            checked={allSelected}
+                            onChange={toggleSelectAll}
+                            className="h-4 w-4 rounded border-line accent-accent"
+                            aria-label="Select all loaded"
+                          />
+                        </th>
+                      )}
                       <th className="px-4 py-2.5 font-medium">Date</th>
                       <th className="px-4 py-2.5 font-medium">Cardholder</th>
                       <th className="px-4 py-2.5 font-medium">Vendor</th>
@@ -509,6 +711,20 @@ export default function CcTransactionsPage() {
                           t.archived_at && "opacity-60",
                         )}
                       >
+                        {isManager && (
+                          <td
+                            className="px-4 py-3"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(t.id)}
+                              onChange={() => toggleRowSelect(t.id)}
+                              className="h-4 w-4 rounded border-line accent-accent"
+                              aria-label={`Select ${t.vendor}`}
+                            />
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-ink-muted">
                           {formatDate(t.transaction_date)}
                         </td>

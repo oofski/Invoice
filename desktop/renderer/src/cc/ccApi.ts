@@ -571,6 +571,15 @@ export const ccApi = {
       body,
     ),
   listUploads: () => api.get<{ batches: UploadBatch[] }>("/api/cc/uploads"),
+  /**
+   * Manager: delete an upload batch and its transactions. `force` overrides the
+   * server's safety block (409) when some transactions already have
+   * receipts/coding.
+   */
+  deleteUpload: (id: string, force = false) =>
+    api.del<{ ok: boolean; deleted: { transactions: number; receipts: number } }>(
+      `/api/cc/uploads/${id}${force ? "?force=1" : ""}`,
+    ),
 
   // ---- Transactions ------------------------------------------------------
   listTransactions: (query: TransactionsQuery = {}) =>
@@ -595,7 +604,11 @@ export const ccApi = {
   ) => api.patch<{ transaction: CcTransaction }>(`/api/cc/transactions/${id}`, body),
   bulkPatchTransactions: (body: {
     transaction_ids: string[];
-    updates: Partial<{ receipt_status: ReceiptStatus; in_qb: boolean }>;
+    updates: Partial<{
+      receipt_status: ReceiptStatus;
+      in_qb: boolean;
+      cardholder_id: string | null;
+    }>;
   }) => api.patch<{ updated_count: number }>("/api/cc/transactions/bulk", body),
   /** Manager: archive (hide) a set of transactions. */
   archiveTransactions: (ids: string[]) =>

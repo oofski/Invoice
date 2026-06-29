@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   History,
   CheckCircle2,
+  Trash2,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
@@ -21,6 +22,7 @@ import {
   type UploadBatch,
 } from "@/cc/ccApi";
 import { parseAmexWorkbook, parseAmexCsv } from "@/cc/amexWorkbook";
+import { useCcManager } from "@/cc/useCcEnabled";
 
 // ---------------------------------------------------------------------------
 // Capital One CSV hand-roll parser
@@ -245,6 +247,7 @@ export default function CcUploadPage() {
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [batches, setBatches] = useState<UploadBatch[]>([]);
+  const isManager = useCcManager();
 
   const loadHistory = useCallback(async () => {
     try {
@@ -258,6 +261,49 @@ export default function CcUploadPage() {
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  // Manager: delete an upload batch (+ its transactions). The server blocks
+  // (409) batches whose transactions already have receipts/coding unless forced.
+  async function deleteBatch(batch: UploadBatch) {
+    if (
+      !window.confirm(
+        "Delete this upload batch and its transactions? This cannot be undone.",
+      )
+    )
+      return;
+    try {
+      const res = await ccApi.deleteUpload(batch.id);
+      toast.success(
+        `Deleted batch — ${res.deleted.transactions} transaction(s) removed`,
+      );
+      await loadHistory();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const b = err.body as
+          | { protected_count?: number; transaction_count?: number }
+          | undefined;
+        if (
+          window.confirm(
+            `${b?.protected_count ?? "Some"} transaction(s) in this batch already have receipts or coding. Delete anyway and remove them?`,
+          )
+        ) {
+          try {
+            const res = await ccApi.deleteUpload(batch.id, true);
+            toast.success(
+              `Deleted batch — ${res.deleted.transactions} transaction(s) removed`,
+            );
+            await loadHistory();
+          } catch (forceErr) {
+            toast.error(
+              forceErr instanceof ApiError ? forceErr.message : "Delete failed",
+            );
+          }
+        }
+        return;
+      }
+      toast.error(err instanceof ApiError ? err.message : "Delete failed");
+    }
+  }
 
   async function pickCapOne(file: File) {
     setPreview(null);
@@ -546,6 +592,7 @@ export default function CcUploadPage() {
                     <th className="px-4 py-2.5 font-medium">Tx</th>
                     <th className="px-4 py-2.5 font-medium">Dupes</th>
                     <th className="px-4 py-2.5 font-medium">Status</th>
+                    {isManager && <th className="px-4 py-2.5 font-medium" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -578,6 +625,22 @@ export default function CcUploadPage() {
                           {b.status}
                         </span>
                       </td>
+                      {isManager && (
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteBatch(b);
+                            }}
+                            title="Delete upload batch"
+                            aria-label="Delete upload batch"
+                            className="rounded-md p-1.5 text-ink-subtle transition-colors hover:bg-danger/10 hover:text-danger"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

@@ -5,6 +5,26 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.4.0] — 2026-06-29
+
+### Added
+- **Delete an upload batch (managers), safely.** You can now remove a wrong import
+  from the Credit Cards → Upload history. The delete is **guarded**: if any
+  transaction in that batch already has a receipt, coding, or is marked in
+  QuickBooks, the app refuses and tells you how many are affected — you can still
+  **"delete anyway"** to confirm. Deleting a batch cleans up after itself
+  (its transactions, receipts, splits, line coding, and stored files), and any
+  dropped receipts that were matched to those transactions are returned to the
+  inbox queue rather than lost.
+- **Bulk actions on the Transactions list (managers).** Select multiple
+  transactions (with a select-all option) and apply one action to all of them:
+  **set receipt status**, **mark in / not in QuickBooks**, **reassign cardholder**
+  (the fast way to fix a whole UNMATCHED batch), **archive**, or **export the
+  selected rows to Excel**.
+
+Both are manager-only and isolated to the Credit Cards module; the invoice
+workflow is unchanged, and there is no database migration in this release.
+
 ## [1.3.9] — 2026-06-29
 
 ### Added

@@ -19,7 +19,7 @@ import { ROLES } from "../../lib/constants";
 import { isCcEnabled, ccReady } from "../../cc/flag";
 import { uuid, nowIso, parseJson } from "../../lib/util";
 import { roundCents } from "../../cc/ccRules";
-import { ccRawUploadKey, ccPut } from "../../cc/ccStorage";
+import { ccRawUploadKey, ccPut, ccDelete } from "../../cc/ccStorage";
 import {
   loadCapOneRegistry,
   normalizeCapOneRow,
@@ -429,4 +429,140 @@ uploads.get("/", async (c) => {
     "SELECT * FROM cc_upload_batches ORDER BY created_at DESC",
   ).all<UploadBatchRow>();
   return c.json({ batches: (rows.results ?? []).map(hydrateBatch) });
+});
+
+// ----- DELETE /uploads/:id (manager only — cascade with safety override) ----
+// Removes an upload batch and all of its transactions + child rows. D1 does NOT
+// cascade FKs here, so children are deleted explicitly (children-first to stay
+// FK-safe). A safety block (option C) refuses to silently destroy work: if any
+// batch tx already has receipts / coding / is in QB, we 409 unless ?force=1.
+// R2 deletes are always best-effort — a missing object must never abort the DB
+// cascade, which is the source of truth.
+uploads.delete("/:id", async (c) => {
+  if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
+  if (!(await ccReady(c.env)))
+    return c.json(
+      { error: "Credit Cards needs a one-time database setup — run the migration." },
+      503,
+    );
+  if (!isManager(c)) return c.json({ error: "Forbidden" }, 403);
+
+  const batchId = c.req.param("id");
+  const batch = await c.env.DB.prepare("SELECT * FROM cc_upload_batches WHERE id = ?")
+    .bind(batchId)
+    .first<UploadBatchRow>();
+  if (!batch) return c.json({ error: "Not found" }, 404);
+
+  const force = !!c.req.query("force");
+
+  // All transactions belonging to this batch.
+  const txRows = await c.env.DB.prepare(
+    "SELECT id, in_qb FROM cc_transactions WHERE upload_batch_id = ?",
+  )
+    .bind(batchId)
+    .all<{ id: string; in_qb: number }>();
+  const txIds = (txRows.results ?? []).map((r) => r.id);
+  const txCount = txIds.length;
+
+  const ph = txIds.map(() => "?").join(",");
+
+  // --- Safety block (option C): count DISTINCT batch tx that are "protected" ---
+  // A tx is protected if it has ANY child receipt / entity split / receipt line,
+  // OR it is already in QB. We union the protected tx-id sets so the reported
+  // count is an accurate distinct-tx count (not a sum of independent rows).
+  let protectedCount = 0;
+  if (txCount > 0) {
+    const protectedIds = new Set<string>();
+    for (const r of txRows.results ?? []) {
+      if (r.in_qb === 1) protectedIds.add(r.id);
+    }
+    for (const table of ["cc_receipts", "cc_entity_splits", "cc_receipt_lines"]) {
+      const res = await c.env.DB.prepare(
+        `SELECT DISTINCT transaction_id FROM ${table} WHERE transaction_id IN (${ph})`,
+      )
+        .bind(...txIds)
+        .all<{ transaction_id: string }>();
+      for (const row of res.results ?? []) protectedIds.add(row.transaction_id);
+    }
+    protectedCount = protectedIds.size;
+  }
+
+  if (protectedCount > 0 && !force) {
+    return c.json(
+      {
+        error: `${protectedCount} transaction(s) in this batch already have receipts or coding. Delete anyway to remove them and their receipts/coding.`,
+        blocked: true,
+        protected_count: protectedCount,
+        transaction_count: txCount,
+      },
+      409,
+    );
+  }
+
+  // --- Cascade delete (children first; allowed when not blocked or when force) ---
+  let receiptsRemoved = 0;
+  if (txCount > 0) {
+    // 1. Receipts: best-effort R2 delete of each object, then drop the rows.
+    const receipts = await c.env.DB.prepare(
+      `SELECT id, r2_key FROM cc_receipts WHERE transaction_id IN (${ph})`,
+    )
+      .bind(...txIds)
+      .all<{ id: string; r2_key: string }>();
+    for (const rcpt of receipts.results ?? []) {
+      if (rcpt.r2_key) {
+        try {
+          await ccDelete(c.env, rcpt.r2_key);
+        } catch (e) {
+          console.error("[cc] batch-delete receipt R2 delete failed:", e);
+        }
+      }
+    }
+    receiptsRemoved = (receipts.results ?? []).length;
+    await c.env.DB.prepare(`DELETE FROM cc_receipts WHERE transaction_id IN (${ph})`)
+      .bind(...txIds)
+      .run();
+
+    // 2-4. Remaining tx-keyed coding children (allocations → lines → splits).
+    await c.env.DB.prepare(`DELETE FROM cc_line_allocations WHERE transaction_id IN (${ph})`)
+      .bind(...txIds)
+      .run();
+    await c.env.DB.prepare(`DELETE FROM cc_receipt_lines WHERE transaction_id IN (${ph})`)
+      .bind(...txIds)
+      .run();
+    await c.env.DB.prepare(`DELETE FROM cc_entity_splits WHERE transaction_id IN (${ph})`)
+      .bind(...txIds)
+      .run();
+
+    // 5. Re-queue matched inbox items: detach the tx/receipt link and set the
+    // queue's awaiting-match status (PENDING_MATCH). We do NOT delete the
+    // cardholder's dropped file (its own r2_key stays) — it returns to triage.
+    await c.env.DB.prepare(
+      `UPDATE cc_receipt_inbox
+          SET matched_transaction_id = NULL, matched_receipt_id = NULL, status = 'PENDING_MATCH'
+        WHERE matched_transaction_id IN (${ph})`,
+    )
+      .bind(...txIds)
+      .run();
+
+    // 6. The transactions themselves.
+    await c.env.DB.prepare("DELETE FROM cc_transactions WHERE upload_batch_id = ?")
+      .bind(batchId)
+      .run();
+  }
+
+  // 7. Batch raw upload file (best-effort R2 delete).
+  if (batch.r2_key) {
+    try {
+      await ccDelete(c.env, batch.r2_key);
+    } catch (e) {
+      console.error("[cc] batch-delete raw-file R2 delete failed:", e);
+    }
+  }
+
+  // 8. The batch row.
+  await c.env.DB.prepare("DELETE FROM cc_upload_batches WHERE id = ?")
+    .bind(batchId)
+    .run();
+
+  return c.json({ ok: true, deleted: { transactions: txCount, receipts: receiptsRemoved } });
 });
