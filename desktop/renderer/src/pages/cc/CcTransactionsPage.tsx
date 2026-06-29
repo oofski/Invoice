@@ -31,10 +31,12 @@ import { CcStatusBadge } from "@/components/cc/CcStatusBadge";
 import { CcReceiptPane } from "@/components/cc/CcReceiptPane";
 import { EntitySplitModal } from "@/components/cc/EntitySplitModal";
 import { LineCodingModal } from "@/components/cc/LineCodingModal";
+import { CcEditTransactionModal } from "@/components/cc/CcEditTransactionModal";
 import {
   ccApi,
   ccEntityLabel,
   notificationTxIds,
+  type Cardholder,
   type CcTransaction,
   type EntitySplit,
   type Receipt,
@@ -79,7 +81,11 @@ export default function CcTransactionsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
   const [splitOpen, setSplitOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [previewReceipt, setPreviewReceipt] = useState<Receipt | null>(null);
+
+  // Active cardholders for the manager reassign Select (loaded once).
+  const [cardholders, setCardholders] = useState<Cardholder[]>([]);
 
   // Line-by-line coding (loaded lazily per detail; empty -> legacy split path).
   const [lines, setLines] = useState<ReceiptLine[]>([]);
@@ -107,6 +113,29 @@ export default function CcTransactionsPage() {
     const t = setTimeout(load, search ? 250 : 0);
     return () => clearTimeout(t);
   }, [load, search]);
+
+  // Managers can reassign the cardholder; load the active list once.
+  useEffect(() => {
+    if (!isManager) return;
+    let cancelled = false;
+    ccApi
+      .listCardholders()
+      .then((res) => {
+        if (!cancelled) setCardholders(res.cardholders ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCardholders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isManager]);
+
+  const activeCardholders = useMemo(
+    () =>
+      cardholders.filter((c) => c.is_active === true || c.is_active === 1),
+    [cardholders],
+  );
 
   const loadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
@@ -159,6 +188,19 @@ export default function CcTransactionsPage() {
       if (detail?.transaction.id === id)
         setDetail((d) => (d ? { ...d, transaction: res.transaction } : d));
       toast.success("Status updated");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Update failed");
+    }
+  }
+
+  async function reassignCardholder(id: string, cardholderId: string) {
+    try {
+      await ccApi.patchTransaction(id, {
+        cardholder_id: cardholderId || null,
+      });
+      toast.success("Cardholder updated");
+      await loadDetail(id);
+      await load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Update failed");
     }
@@ -515,13 +557,25 @@ export default function CcTransactionsPage() {
                 <h2 className="font-display text-sm font-semibold text-ink">
                   Transaction detail
                 </h2>
-                <button
-                  onClick={() => setSelectedId(null)}
-                  className="text-ink-subtle hover:text-ink"
-                  aria-label="Close"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {isManager && detail && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setEditOpen(true)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit details
+                    </Button>
+                  )}
+                  <button
+                    onClick={() => setSelectedId(null)}
+                    className="text-ink-subtle hover:text-ink"
+                    aria-label="Close"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
 
               {detailLoading || !detail ? (
@@ -556,10 +610,45 @@ export default function CcTransactionsPage() {
                     label="Date"
                     value={formatDate(detail.transaction.transaction_date)}
                   />
-                  <DetailRow
-                    label="Cardholder"
-                    value={detail.transaction.cardholder_name}
-                  />
+                  {isManager ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                        Cardholder
+                      </span>
+                      <Select
+                        value={detail.transaction.cardholder_id ?? ""}
+                        onChange={(e) =>
+                          reassignCardholder(
+                            detail.transaction.id,
+                            e.target.value,
+                          )
+                        }
+                        className="w-56"
+                      >
+                        <option value="">— Unassigned —</option>
+                        {/* Keep the current cardholder selectable even if it's
+                            no longer active (so the Select can show it). */}
+                        {detail.transaction.cardholder_id &&
+                          !activeCardholders.some(
+                            (c) => c.id === detail.transaction.cardholder_id,
+                          ) && (
+                            <option value={detail.transaction.cardholder_id}>
+                              {detail.transaction.cardholder_name}
+                            </option>
+                          )}
+                        {activeCardholders.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {cardholderLabel(c)}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  ) : (
+                    <DetailRow
+                      label="Cardholder"
+                      value={detail.transaction.cardholder_name}
+                    />
+                  )}
                   <DetailRow
                     label="Category"
                     value={detail.transaction.category ?? "—"}
@@ -760,6 +849,21 @@ export default function CcTransactionsPage() {
         />
       )}
 
+      {/* Edit details modal (manager-only mis-parse corrections) */}
+      {detail && isManager && (
+        <CcEditTransactionModal
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          transaction={detail.transaction}
+          hasSplits={detail.splits.length > 0}
+          hasLines={lines.length > 0}
+          onSaved={async () => {
+            await loadDetail(detail.transaction.id);
+            await load();
+          }}
+        />
+      )}
+
       {/* Receipt preview modal */}
       <Modal
         open={!!previewReceipt}
@@ -828,6 +932,16 @@ function ccCatShort(gl: string): string {
   if (gl === "Retail / Product Costs") return "Retail";
   if (gl === "Sales/Use Tax") return "Tax";
   return gl;
+}
+
+/**
+ * Cardholder Select option label: "First Last" + the card last-4/5 when known,
+ * matching how cardholders are shown on CcCardholdersPage (`••XXXX`).
+ */
+function cardholderLabel(c: Cardholder): string {
+  const name = `${c.first_name}${c.last_name ? ` ${c.last_name}` : ""}`;
+  const last = c.cap_one_last4 ?? c.amex_last5;
+  return last ? `${name} (••${last})` : name;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {

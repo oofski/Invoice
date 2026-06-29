@@ -5,6 +5,26 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.3.9] — 2026-06-29
+
+### Added
+- **Fix a mis-parsed Credit Card transaction (managers).** A new **Edit details**
+  button on a transaction opens a modal to correct the **vendor, amount,
+  transaction date, and category** when the import read them wrong — plus the
+  **Exp Acct** and **In QB** fields, which previously had no place to edit. Only
+  the fields you change are saved. If you change the amount on a transaction that
+  already has entity splits or line coding, the modal warns you to re-check the
+  coding so it still reconciles.
+- **Reassign a transaction to the right cardholder (managers).** The Cardholder
+  field in a transaction's detail is now an editable dropdown of active
+  cardholders — the fastest way to resolve an **UNMATCHED** charge — with an
+  "Unassigned" option to clear it. (The permission for this already existed; it
+  just had no control until now.)
+
+Editing and reassigning are manager-only; cardholders can still only edit notes
+on their own transactions. Changes are isolated to the Credit Cards module; the
+invoice workflow is unchanged, and there is no database migration in this release.
+
 ## [1.3.8] — 2026-06-29
 
 ### Added

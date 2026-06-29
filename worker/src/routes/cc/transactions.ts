@@ -415,6 +415,10 @@ transactions.patch("/:id", async (c) => {
     exp_acct?: unknown;
     notes?: unknown;
     cardholder_id?: unknown;
+    vendor?: unknown;
+    amount?: unknown;
+    transaction_date?: unknown;
+    category?: unknown;
   };
 
   const sets: string[] = [];
@@ -451,6 +455,35 @@ transactions.patch("/:id", async (c) => {
       return c.json({ error: "notes must be a string or null" }, 400);
     sets.push("notes = ?");
     params.push((v as string | null) ?? null);
+  }
+  // The fields below are manager-only via the onlyNotes guard above (re-parse corrections).
+  if ("vendor" in body && body.vendor !== undefined) {
+    const v = body.vendor;
+    if (typeof v !== "string" || v.trim() === "")
+      return c.json({ error: "vendor must be a non-empty string" }, 400);
+    sets.push("vendor = ?");
+    params.push(v.trim());
+  }
+  if ("amount" in body && body.amount !== undefined) {
+    const v = body.amount;
+    if (typeof v !== "number" || !Number.isFinite(v))
+      return c.json({ error: "amount must be a finite number" }, 400);
+    sets.push("amount = ?");
+    params.push(v);
+  }
+  if ("transaction_date" in body && body.transaction_date !== undefined) {
+    const v = body.transaction_date;
+    if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v))
+      return c.json({ error: "transaction_date must be YYYY-MM-DD" }, 400);
+    sets.push("transaction_date = ?");
+    params.push(v);
+  }
+  if ("category" in body && body.category !== undefined) {
+    const v = body.category;
+    if (v !== null && typeof v !== "string")
+      return c.json({ error: "category must be a string or null" }, 400);
+    sets.push("category = ?");
+    params.push(v && v !== "" ? v : null);
   }
   if ("cardholder_id" in body && body.cardholder_id !== undefined) {
     // cardholder_id reassignment is manager-only (used to resolve UNMATCHED).

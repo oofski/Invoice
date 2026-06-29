@@ -585,6 +585,12 @@ export const ccApi = {
       exp_acct: string;
       notes: string;
       cardholder_id: string | null;
+      // Manager-only mis-parse corrections (all optional; non-empty vendor,
+      // finite amount, 'YYYY-MM-DD' date, nullable category).
+      vendor: string;
+      amount: number;
+      transaction_date: string;
+      category: string | null;
     }>,
   ) => api.patch<{ transaction: CcTransaction }>(`/api/cc/transactions/${id}`, body),
   bulkPatchTransactions: (body: {
