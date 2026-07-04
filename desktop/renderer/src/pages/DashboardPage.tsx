@@ -1,24 +1,33 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Clock,
-  CheckSquare,
   AlertTriangle,
   Download,
-  XCircle,
   FileCheck,
+  FileText,
+  Receipt,
+  Wallet,
   BellRing,
-  Undo2,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
-import { StatCard } from "@/components/StatCard";
 import { Card, Button, Spinner, Input } from "@/components/ui/primitives";
 import { InvoiceTable, type QueueInvoice } from "@/components/InvoiceTable";
 import { RemindApproversModal } from "@/components/RemindApproversModal";
+import {
+  KpiCard,
+  TrendChart,
+  DonutChart,
+  HBarChart,
+  chartColors,
+  formatCompactCurrency,
+  formatFullCurrency,
+  formatCount,
+} from "@/components/charts";
 import { useApi } from "@/hooks/useApi";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, type DashboardAnalytics } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { useProfile } from "@/components/ProfileProvider";
-import { formatCurrency } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import {
   BUSINESS_ENTITIES,
   APPROVERS,
@@ -26,6 +35,60 @@ import {
   ROLES,
 } from "@/lib/constants";
 import type { DashboardStats } from "@/lib/types";
+
+const MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** "YYYY-MM" → "Mon ’YY" (e.g. "2025-07" → "Jul ’25"). */
+function formatMonthLabel(ym: string): string {
+  const [year, month] = ym.split("-");
+  const idx = Number(month) - 1;
+  const name = MONTH_NAMES[idx] ?? month;
+  return `${name} ’${(year ?? "").slice(2)}`;
+}
+
+/** Card with a font-display heading — matches the app's card-section style. */
+function SectionCard({
+  title,
+  className,
+  children,
+}: {
+  title: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card className={cn("p-4", className)}>
+      <h2 className="mb-4 font-display text-base font-semibold text-ink">
+        {title}
+      </h2>
+      {children}
+    </Card>
+  );
+}
+
+/** Pulsing placeholder shown while the analytics response is in flight. */
+function ChartSkeleton({ height = 220 }: { height?: number }) {
+  return (
+    <div
+      className="animate-pulse rounded-lg bg-surface-2"
+      style={{ height }}
+      aria-hidden
+    />
+  );
+}
 
 const STATUS_TABS = [
   { key: "ALL", label: "All" },
@@ -47,6 +110,11 @@ export default function DashboardPage() {
   const { data: stats, refetch: refetchStats } =
     useApi<DashboardStats>("/api/dashboard/stats");
   const {
+    data: analytics,
+    error: analyticsError,
+    refetch: refetchAnalytics,
+  } = useApi<DashboardAnalytics>("/api/dashboard/analytics?months=12");
+  const {
     data: invData,
     loading,
     refetch,
@@ -67,12 +135,48 @@ export default function DashboardPage() {
     const id = setInterval(() => {
       refetch();
       refetchStats();
+      refetchAnalytics();
       refetchOverdue();
     }, 15000);
     return () => clearInterval(id);
-  }, [refetch, refetchStats, refetchOverdue]);
+  }, [refetch, refetchStats, refetchAnalytics, refetchOverdue]);
 
   const invoices = useMemo(() => invData?.invoices ?? [], [invData]);
+
+  // ----- Analytics-derived chart data (real server rollups, archived excluded)
+  const analyticsReady = analytics != null;
+  const trendData = useMemo(
+    () =>
+      (analytics?.monthly ?? []).map((m) => ({
+        month: formatMonthLabel(m.month),
+        spend: m.spend,
+      })),
+    [analytics],
+  );
+  const entityData = useMemo(
+    () =>
+      (analytics?.by_entity ?? []).map((e) => ({
+        name: e.entity,
+        value: e.spend,
+      })),
+    [analytics],
+  );
+  const vendorData = useMemo(
+    () =>
+      (analytics?.top_vendors ?? []).map((v) => ({
+        name: v.vendor,
+        value: v.spend,
+      })),
+    [analytics],
+  );
+  const categoryData = useMemo(
+    () =>
+      (analytics?.by_gl_category ?? []).map((c) => ({
+        name: c.category,
+        value: c.spend,
+      })),
+    [analytics],
+  );
 
   const filtered = useMemo(() => {
     return invoices.filter((i) => {
@@ -136,52 +240,117 @@ export default function DashboardPage() {
       )}
 
       <div className="space-y-6 p-6">
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
-          <StatCard
-            label="Total Pending"
-            value={stats?.totalPending ?? "—"}
-            tone="slate"
+        {/* KPI row — period totals (analytics) + status counters (stats) */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <KpiCard
+            label="Total AP"
+            value={
+              analytics ? formatFullCurrency(analytics.totals.total_spend) : "—"
+            }
+            sublabel="All time"
+            tone="accent"
+            icon={<Wallet className="h-4 w-4" />}
+          />
+          <KpiCard
+            label="Invoices"
+            value={
+              analytics ? formatCount(analytics.totals.invoice_count) : "—"
+            }
+            icon={<FileText className="h-4 w-4" />}
+          />
+          <KpiCard
+            label="Avg Invoice"
+            value={
+              analytics ? formatFullCurrency(analytics.totals.avg_amount) : "—"
+            }
+            icon={<Receipt className="h-4 w-4" />}
+          />
+          <KpiCard
+            label="Awaiting Approval"
+            value={stats ? formatCount(stats.awaitingApproval) : "—"}
+            sublabel={
+              overdue.length > 0
+                ? `${overdue.length} overdue (72h+)`
+                : undefined
+            }
+            tone={stats && stats.awaitingApproval > 0 ? "warning" : "default"}
             icon={<Clock className="h-4 w-4" />}
           />
-          <StatCard
-            label="Awaiting Approval"
-            value={stats?.awaitingApproval ?? "—"}
-            tone="amber"
-            icon={<CheckSquare className="h-4 w-4" />}
-          />
-          <StatCard
-            label="Routing Review"
-            value={stats?.needsRouting ?? "—"}
-            tone="amber"
-            icon={<Undo2 className="h-4 w-4" />}
-          />
-          <StatCard
-            label="Needs Review"
-            value={stats?.needsReview ?? "—"}
-            tone="red"
-            icon={<AlertTriangle className="h-4 w-4" />}
-          />
-          <StatCard
+          <KpiCard
             label="Export Ready"
-            value={stats?.exportReady ?? "—"}
-            tone="emerald"
+            value={stats ? formatCount(stats.exportReady) : "—"}
+            tone="positive"
             icon={<FileCheck className="h-4 w-4" />}
-            href="/export"
           />
-          <StatCard
-            label="Rejected"
-            value={stats?.rejected ?? "—"}
-            tone="red"
-            icon={<XCircle className="h-4 w-4" />}
-          />
-          <StatCard
+          <KpiCard
             label="Exported (Month)"
-            value={stats?.exportedThisMonth ?? "—"}
-            tone="blue"
+            value={stats ? formatCount(stats.exportedThisMonth) : "—"}
             icon={<Download className="h-4 w-4" />}
           />
         </div>
+
+        {/* Analytics charts band */}
+        {analyticsError && !analytics ? (
+          <Card className="border-danger-soft-fg/30 bg-danger-soft-bg/40 p-4">
+            <p className="text-sm text-danger-soft-fg">
+              Couldn’t load analytics: {analyticsError}
+            </p>
+          </Card>
+        ) : (
+          <>
+            <SectionCard title="Accounts payable — past 12 months">
+              {analyticsReady ? (
+                <TrendChart
+                  data={trendData}
+                  xKey="month"
+                  series={[
+                    { key: "spend", name: "AP spend", color: chartColors.info },
+                  ]}
+                  area
+                  valueFormat={formatCompactCurrency}
+                />
+              ) : (
+                <ChartSkeleton height={280} />
+              )}
+            </SectionCard>
+
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+              <SectionCard title="Spend by entity">
+                {analyticsReady ? (
+                  <DonutChart
+                    data={entityData}
+                    valueFormat={formatCompactCurrency}
+                    emptyMessage="No entity spend yet"
+                  />
+                ) : (
+                  <ChartSkeleton />
+                )}
+              </SectionCard>
+              <SectionCard title="Top vendors">
+                {analyticsReady ? (
+                  <HBarChart
+                    data={vendorData}
+                    color={chartColors.info}
+                    valueFormat={formatCompactCurrency}
+                  />
+                ) : (
+                  <ChartSkeleton />
+                )}
+              </SectionCard>
+              <SectionCard title="Spend by category">
+                {analyticsReady ? (
+                  <DonutChart
+                    data={categoryData}
+                    valueFormat={formatCompactCurrency}
+                    emptyMessage="No categorized spend yet"
+                  />
+                ) : (
+                  <ChartSkeleton />
+                )}
+              </SectionCard>
+            </div>
+          </>
+        )}
 
         {/* Overdue section */}
         {overdue.length > 0 && (
@@ -283,26 +452,6 @@ export default function DashboardPage() {
             />
           )}
         </Card>
-
-        {/* Entity totals */}
-        {stats?.byEntity && stats.byEntity.length > 0 && (
-          <Card className="p-4">
-            <h2 className="mb-3 font-display text-sm font-semibold text-ink">
-              Spend by Entity
-            </h2>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              {stats.byEntity.map((e) => (
-                <div key={e.entity} className="rounded-lg bg-surface-2 p-3">
-                  <p className="text-xs text-ink-muted">{e.entity}</p>
-                  <p className="text-lg font-bold text-ink tabular-nums">
-                    {formatCurrency(e.total)}
-                  </p>
-                  <p className="text-xs text-ink-subtle">{e.count} invoices</p>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
       </div>
     </div>
   );

@@ -458,6 +458,62 @@ export interface DashboardSummary {
   recent_activity: DashboardActivityRow[];
 }
 
+// ----- Dashboard analytics (GET /api/cc/dashboard/analytics) ------------
+// Cycle-scoped KPIs + entity/category donuts, plus a trailing-N-months combo
+// series. Universe mirrors /summary (in-cycle, is_payment = 0) so headline
+// numbers reconcile with `dashboardSummary`. See the frozen data contract.
+
+/** KPI counters (cycle-scoped, non-payment). */
+export interface CcAnalyticsKpis {
+  total_transactions: number;
+  in_qb_count: number;
+  not_in_qb_count: number;
+  unmatched_count: number;
+}
+
+/** One trailing-month point: spend bar + receipt-completion% line. */
+export interface CcMonthlyPoint {
+  month: string; // "YYYY-MM"
+  spend: number;
+  tx_count: number;
+  receipts_received: number;
+  receipts_total: number; // == tx_count (every non-payment tx needs a receipt)
+  completion_pct: number; // receipts_received / tx_count * 100 (0 when no tx)
+}
+
+/** Spend-by-entity slice (from cc_entity_splits, cycle-scoped). */
+export interface CcEntitySpend {
+  entity_name: string; // canonical (CC_ENTITIES.canonical)
+  label: string; // CC display label (ccEntityLabel)
+  spend: number;
+}
+
+/** Spend-by-category slice (from cc_transactions.category, cycle-scoped). */
+export interface CcCategorySpend {
+  category: string; // "Uncategorized" when the tx category is null/blank
+  spend: number;
+}
+
+export interface CcDashboardAnalytics {
+  /** The resolved cycle window the KPIs / donuts are scoped to. */
+  cycle_start: string;
+  cycle_end: string;
+  /** The trailing-month count the `monthly` series spans (default 12). */
+  months: number;
+  kpis: CcAnalyticsKpis;
+  /** Exactly `months` points, oldest→newest, gaps zero-filled. */
+  monthly: CcMonthlyPoint[];
+  by_entity: CcEntitySpend[];
+  by_category: CcCategorySpend[];
+}
+
+export interface CcDashboardAnalyticsQuery {
+  cycle_start?: string;
+  cycle_end?: string;
+  /** Trailing-month window for the combo chart (1–24; default 12). */
+  months?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Query param helpers
 // ---------------------------------------------------------------------------
@@ -718,6 +774,8 @@ export const ccApi = {
   // ---- Dashboard ---------------------------------------------------------
   dashboardSummary: (query: DashboardQuery = {}) =>
     api.get<DashboardSummary>(`/api/cc/dashboard/summary${qs(query)}`),
+  dashboardAnalytics: (query: CcDashboardAnalyticsQuery = {}) =>
+    api.get<CcDashboardAnalytics>(`/api/cc/dashboard/analytics${qs(query)}`),
 };
 
 // ---------------------------------------------------------------------------

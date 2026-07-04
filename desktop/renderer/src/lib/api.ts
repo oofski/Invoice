@@ -125,6 +125,83 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+// --------------------------------------------------- dashboard analytics
+// Server-side aggregation contract for GET /api/dashboard/analytics. Declared
+// here (not in lib/types.ts, owned by the dashboard page) so the client method
+// and its response type ship together. Numbers are exact SQL GROUP BY rollups;
+// the entity-donut / status counters that this endpoint does NOT return stay on
+// GET /api/dashboard/stats (DashboardStats.byEntity / byStatus). See the frozen
+// data contract.
+
+export interface DashboardAnalyticsTotals {
+  total_spend: number;
+  invoice_count: number;
+  avg_amount: number; // total_spend / invoice_count (0 when no invoices)
+}
+
+/** One trailing-month AP point (bars = spend, optional line = invoice_count). */
+export interface DashboardMonthlyPoint {
+  month: string; // "YYYY-MM"
+  spend: number;
+  invoice_count: number;
+}
+
+/** Spend-by-entity slice (business; "Unassigned" when null/blank). */
+export interface DashboardEntitySpend {
+  entity: string;
+  spend: number;
+  count: number;
+}
+
+/** Top-vendor bar (ordered by spend desc, capped at vendorLimit). */
+export interface DashboardVendorSpend {
+  vendor: string;
+  spend: number;
+  count: number;
+}
+
+/** Spend-by-GL-category slice (line_items.gl_category; "Uncategorized" fallback). */
+export interface DashboardGlCategorySpend {
+  category: string;
+  spend: number;
+}
+
+export interface DashboardAnalytics {
+  /** Echoes the requested period (null = unbounded on that side). */
+  from: string | null;
+  to: string | null;
+  /** The trailing-month count the `monthly` series spans (default 12). */
+  months: number;
+  totals: DashboardAnalyticsTotals; // scoped to from/to + archived exclusion
+  monthly: DashboardMonthlyPoint[]; // trailing `months`, oldest→newest, zero-filled
+  by_entity: DashboardEntitySpend[]; // scoped to from/to
+  top_vendors: DashboardVendorSpend[]; // scoped to from/to
+  by_gl_category: DashboardGlCategorySpend[]; // scoped to from/to
+}
+
+export interface DashboardAnalyticsQuery {
+  /** Inclusive period bounds as "YYYY-MM-DD" (compared on date(created_at)). */
+  from?: string;
+  to?: string;
+  /** Trailing-month window for the AP trend (1–24; default 12). */
+  months?: number;
+  /** Top-vendor cap (1–50; default 8). */
+  vendorLimit?: number;
+}
+
+/** Serialize a flat query object → "?a=1&b=2" (drops empty/undefined/null). */
+function toQueryString(
+  params: Record<string, string | number | undefined | null> | object,
+): string {
+  const usp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === "") continue;
+    usp.set(k, String(v));
+  }
+  const s = usp.toString();
+  return s ? `?${s}` : "";
+}
+
 // --------------------------------------------------------------- helpers
 export const api = {
   get: <T>(path: string) => request<T>(path),
@@ -189,6 +266,16 @@ export const api = {
     api.get<{ suggestions: VendorSuggestion[] }>(
       `/api/vendors/suggest?vendor=${encodeURIComponent(vendor)}`,
     ),
+
+  // ------------------------------------------------------ dashboard analytics
+  /**
+   * Server-side aggregation rollups for the dashboard charts (period totals,
+   * monthly AP trend, entity / top-vendor / GL-category breakdowns). Pair with
+   * `GET /api/dashboard/stats` for the entity-donut / status counters this
+   * endpoint intentionally omits.
+   */
+  dashboardAnalytics: (query: DashboardAnalyticsQuery = {}) =>
+    api.get<DashboardAnalytics>(`/api/dashboard/analytics${toQueryString(query)}`),
 
   // ------------------------------------------------ archive / audit clear
   /** Archive a single invoice (ADMIN only) — sets `archived_at`. */

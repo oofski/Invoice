@@ -5,6 +5,29 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.5.0] — 2026-07-04
+
+### Added
+- **Redesigned dashboards — clean, QuickBooks-style analytics for both Invoices
+  and Credit Cards.** Each dashboard now opens with a row of KPI stat cards and a
+  set of charts, all driven by your real data:
+  - **Invoice dashboard:** Total AP, invoice count, average invoice, awaiting
+    approval (with overdue count), export-ready, and exported-this-month cards; a
+    12-month accounts-payable trend; and spend-by-entity, top-vendors, and
+    spend-by-GL-category charts — above the existing invoice queue, which is
+    unchanged.
+  - **Credit Card dashboard:** Total spend, transactions, receipts-received %,
+    open receipts, in-QuickBooks, and unmatched cards; a 12-month spend +
+    receipt-completion chart; per-cardholder progress with a quick "Remind" list;
+    and a spend-by-entity breakdown — keeping the cycle date filter.
+- Numbers are computed on the server so they stay accurate at scale and reconcile
+  with the underlying invoice/transaction lists (archived items excluded, same as
+  the lists). Two new read-only analytics endpoints back the charts; the existing
+  summary/stats endpoints are unchanged.
+
+Charts render fully offline (no external services). No database migration is
+required.
+
 ## [1.4.0] — 2026-06-29
 
 ### Added
