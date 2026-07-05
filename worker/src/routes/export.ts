@@ -12,7 +12,7 @@ import {
 } from "../lib/export";
 import { findVendorMapping, loadVendorMappings } from "../lib/rules";
 import { uuid, nowIso } from "../lib/util";
-import { INVOICE_STATUS, AUDIT_ACTION } from "../lib/constants";
+import { INVOICE_STATUS, AUDIT_ACTION, REQUIRES_MANUAL_REVIEW } from "../lib/constants";
 import type {
   InvoiceRow,
   LineItemRow,
@@ -36,6 +36,8 @@ async function assembleExportInvoices(
 > {
   const body = await c.req.json().catch(() => ({}));
   const invoiceIds = (body as { invoiceIds?: string[] }).invoiceIds;
+  const acknowledgeWarnings =
+    (body as { acknowledgeWarnings?: boolean }).acknowledgeWarnings === true;
   if (!Array.isArray(invoiceIds) || invoiceIds.length === 0)
     return { ok: false, response: c.json({ error: "Provide at least one invoiceId" }, 400) };
 
@@ -66,13 +68,57 @@ async function assembleExportInvoices(
       ),
     };
 
-  const reviews = await c.env.DB.prepare(
-    `SELECT invoice_id FROM line_items WHERE requires_review = 1 AND invoice_id IN (${ph})`,
-  ).bind(...invoiceIds).all<{ invoice_id: string }>();
-  if ((reviews.results ?? []).length) {
-    const blocking: Record<string, number> = {};
-    for (const r of reviews.results ?? []) blocking[r.invoice_id] = (blocking[r.invoice_id] ?? 0) + 1;
-    return { ok: false, response: c.json({ error: "Some invoices have unresolved manual-review items", blocking }, 422) };
+  // FIX-11 (v1.6.0): HARD-BLOCK (422) only for the REQUIRES_MANUAL_REVIEW sentinel
+  // category — those lines have no real account number to export. All other review
+  // flags (concrete-category requires_review, ambiguity, reconciliation) only WARN.
+  const blocking = await c.env.DB.prepare(
+    `SELECT invoice_id, COUNT(*) AS c FROM line_items
+       WHERE gl_category = ? AND invoice_id IN (${ph})
+       GROUP BY invoice_id`,
+  ).bind(REQUIRES_MANUAL_REVIEW, ...invoiceIds).all<{ invoice_id: string; c: number }>();
+  if ((blocking.results ?? []).length) {
+    const blockingMap: Record<string, number> = {};
+    for (const r of blocking.results ?? []) blockingMap[r.invoice_id] = r.c;
+    return { ok: false, response: c.json({ error: "Some invoices have unresolved manual-review items", blocking: blockingMap }, 422) };
+  }
+
+  // FIX-11 (v1.6.0): WARN (409 REVIEW_FLAGS) when selected invoices carry
+  // non-blocking review flags — concrete-category requires_review lines, ambiguous
+  // locations, or a reconciliation gap — unless the caller acknowledged them.
+  if (!acknowledgeWarnings) {
+    const flags = await c.env.DB.prepare(
+      `SELECT invoice_id, COUNT(*) AS c FROM line_items
+         WHERE requires_review = 1 AND gl_category != ? AND invoice_id IN (${ph})
+         GROUP BY invoice_id`,
+    ).bind(REQUIRES_MANUAL_REVIEW, ...invoiceIds).all<{ invoice_id: string; c: number }>();
+    const flaggedLines: Record<string, number> = {};
+    for (const r of flags.results ?? []) flaggedLines[r.invoice_id] = r.c;
+
+    const locationAmbiguous: string[] = [];
+    const reconciliation: Record<string, number> = {};
+    for (const inv of invoices) {
+      if (inv.location_ambiguous) locationAmbiguous.push(inv.id);
+      if (inv.reconciliation_delta != null) reconciliation[inv.id] = inv.reconciliation_delta;
+    }
+
+    if (
+      Object.keys(flaggedLines).length ||
+      locationAmbiguous.length ||
+      Object.keys(reconciliation).length
+    ) {
+      return {
+        ok: false,
+        response: c.json(
+          {
+            warning: "REVIEW_FLAGS",
+            flaggedLines,
+            locationAmbiguous,
+            reconciliation,
+          },
+          409,
+        ),
+      };
+    }
   }
 
   const liRows = await c.env.DB.prepare(

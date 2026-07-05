@@ -80,6 +80,13 @@ export const OVERDUE_HOURS = 72;
 /** Dollar threshold that routes an invoice to Susan (Prompt 2, Rule 1). */
 export const SUSAN_THRESHOLD = 10000;
 
+/**
+ * Equipment/fixtures line total (Σ "Equipment & Fixtures" amounts) that escalates
+ * senior routing to Susan regardless of invoice size — capital-aware routing
+ * (v1.6.0, FIX-12).
+ */
+export const CAPITAL_EQUIPMENT_THRESHOLD = 5000;
+
 // ---------------------------------------------------------------------------
 // Business entities & approvers
 // ---------------------------------------------------------------------------

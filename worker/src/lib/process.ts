@@ -16,8 +16,84 @@ import {
   REQUIRES_MANUAL_REVIEW,
   APPROVAL_STATUS,
   CONFIDENCE_LEVEL,
+  isCategoryValidForEntity,
   type BusinessEntity,
 } from "./constants";
+
+/** A stored line_item row snapshot used by reprocess preservation (FIX-10). */
+interface StoredLine {
+  id: string;
+  description: string | null;
+  amount: number | null;
+  business: string | null;
+  class: string | null;
+  gl_category: string | null;
+  item_type: string | null;
+  confidence_level: string | null;
+  logic_path: string | null;
+  requires_review: number | null;
+  manually_overridden: number | null;
+  overridden_by: string | null;
+  split_parent_id: string | null;
+  split_percentage: number | null;
+  sort_order: number | null;
+}
+
+/**
+ * FIX-8 (v1.6.0) — recompute the invoice-level reconciliation guard.
+ *
+ *   expected = round2( Σ amount of persisted LEAF line_items + (sales_tax ?? 0) )
+ *   delta    = round2( total_amount − expected )
+ *   reconciliation_delta = (|delta| > 0.02) ? delta : NULL
+ *
+ * Leaves = rows NOT referenced by any split_parent_id (a split parent's children
+ * replace it in the sum). The synthesized shipping line is a leaf, so shipping is
+ * inside Σ. Positive delta = booked short (money missing); negative = booked over.
+ * Best-effort: a pre-migration DB (no reconciliation_delta column) degrades to a
+ * no-op so the money-changing routes keep working. Returns the persisted delta.
+ */
+export async function recomputeReconciliation(
+  env: Env,
+  invoiceId: string,
+): Promise<number | null> {
+  try {
+    const inv = await env.DB.prepare(
+      "SELECT total_amount, sales_tax FROM invoices WHERE id = ?",
+    )
+      .bind(invoiceId)
+      .first<{ total_amount: number | null; sales_tax: number | null }>();
+    if (!inv) return null;
+
+    const rows =
+      (
+        await env.DB.prepare(
+          "SELECT id, amount, split_parent_id FROM line_items WHERE invoice_id = ?",
+        )
+          .bind(invoiceId)
+          .all<{ id: string; amount: number | null; split_parent_id: string | null }>()
+      ).results ?? [];
+    const parentIds = new Set(
+      rows.map((r) => r.split_parent_id).filter((x): x is string => !!x),
+    );
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const leafSum = rows
+      .filter((r) => !parentIds.has(r.id))
+      .reduce((s, r) => s + (r.amount ?? 0), 0);
+    const expected = round2(leafSum + (inv.sales_tax ?? 0));
+    const delta = round2((inv.total_amount ?? 0) - expected);
+    const reconciliationDelta = Math.abs(delta) > 0.02 ? delta : null;
+
+    await env.DB.prepare(
+      "UPDATE invoices SET reconciliation_delta = ? WHERE id = ?",
+    )
+      .bind(reconciliationDelta, invoiceId)
+      .run();
+    return reconciliationDelta;
+  } catch (e) {
+    console.error("[reconcile] recompute failed:", e);
+    return null;
+  }
+}
 
 /**
  * Runs the OCR/parse step (Reducto) — reusing the stored parse output when
@@ -29,7 +105,15 @@ export async function processInvoiceAI(
   invoiceId: string,
   actorUserId: string | null,
   opts: { rescan?: boolean } = {},
-): Promise<{ status: string; approver: string; lineItemCount: number }> {
+): Promise<{
+  status: string;
+  approver: string;
+  lineItemCount: number;
+  preservedOverrides: number;
+  droppedOverrides: number;
+  preservedSplits: number;
+  droppedSplits: number;
+}> {
   const inv = await getInvoice(env, invoiceId);
   if (!inv) throw new Error("Invoice not found");
 
@@ -69,51 +153,139 @@ export async function processInvoiceAI(
 
   try {
     const result = await runRulesPipeline(env, extracted);
+    const newBusiness = result.prompt1.Business;
 
-    // Preserve manually-added lines across reprocess (v1.1.9). An accountant/admin
-    // may have added a line the extractor missed; reprocess re-runs extraction and
-    // would otherwise drop it. Capture those lines now (before the DELETE below) and
-    // keep only the ones the fresh extraction did NOT already reproduce — matched by
-    // normalized description AND amount (to the cent) — so a now-extracted line isn't
-    // duplicated. They're re-inserted after the AI lines further down.
-    const manualLines =
+    // ---- FIX-10 (v1.6.0): preserve human work across reprocess/rescan ----
+    // Capture every existing line BEFORE the DELETE, then classify:
+    //   1. MANUAL ADD rows (unchanged behavior — re-inserted if not re-extracted)
+    //   2. MANUAL OVERRIDE rows (re-apply the human GL coding onto the fresh line)
+    //   3. Split subtrees (parent + children — re-inserted verbatim in the slot)
+    const existingRows =
       (
         await env.DB.prepare(
-          `SELECT description, amount, gl_category, item_type, confidence_level,
-                  requires_review, overridden_by
-             FROM line_items
-            WHERE invoice_id = ? AND logic_path = 'MANUAL ADD'`,
+          `SELECT id, description, amount, business, class, gl_category, item_type,
+                  confidence_level, logic_path, requires_review, manually_overridden,
+                  overridden_by, split_parent_id, split_percentage, sort_order
+             FROM line_items WHERE invoice_id = ?`,
         )
           .bind(invoiceId)
-          .all<{
-            description: string | null;
-            amount: number | null;
-            gl_category: string | null;
-            item_type: string | null;
-            confidence_level: string | null;
-            requires_review: number | null;
-            overridden_by: string | null;
-          }>()
+          .all<StoredLine>()
       ).results ?? [];
+
     const normDesc = (s: string | null | undefined) =>
       (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
     const cents = (n: number | null | undefined) => Math.round((n ?? 0) * 100);
-    const aiKeys = new Set(
-      result.prompt3.map((li) => {
-        const amt =
-          typeof li.Amount === "number" ? li.Amount : parseAmount(String(li.Amount));
-        return `${normDesc(li.LineItemDescription)}|${cents(amt)}`;
-      }),
+
+    // Split parents = rows referenced by some child's split_parent_id.
+    const childrenByParent = new Map<string, StoredLine[]>();
+    for (const r of existingRows) {
+      if (r.split_parent_id) {
+        const arr = childrenByParent.get(r.split_parent_id) ?? [];
+        arr.push(r);
+        childrenByParent.set(r.split_parent_id, arr);
+      }
+    }
+    const parentIds = new Set(childrenByParent.keys());
+
+    const manualAddRows = existingRows.filter(
+      (r) => r.logic_path === "MANUAL ADD" && !parentIds.has(r.id),
     );
-    const preserved = manualLines.filter(
+    const overrideRows = existingRows.filter(
+      (r) =>
+        r.manually_overridden === 1 &&
+        r.split_parent_id == null &&
+        r.logic_path !== "MANUAL ADD" &&
+        !parentIds.has(r.id),
+    );
+    const splitParentRows = existingRows.filter((r) => parentIds.has(r.id));
+
+    // Fresh AI lines with per-line action bookkeeping. Each fresh line is matched
+    // by at most one preserved artifact (override or split subtree).
+    type FreshAction =
+      | { kind: "ai" }
+      | { kind: "override"; row: StoredLine }
+      | { kind: "override-invalid" }
+      | { kind: "split"; parent: StoredLine; children: StoredLine[] };
+    const fresh = result.prompt3.map((li, idx) => ({
+      idx,
+      li,
+      amount:
+        typeof li.Amount === "number" ? li.Amount : parseAmount(String(li.Amount)),
+      claimed: false,
+      action: { kind: "ai" } as FreshAction,
+    }));
+
+    // Match a stored artifact to an unclaimed fresh line: exact normDesc+cents
+    // first (first unmatched wins), else fallback to a UNIQUE unmatched amount.
+    const matchFresh = (desc: string | null, amount: number | null) => {
+      const key = `${normDesc(desc)}|${cents(amount)}`;
+      const exact = fresh.find(
+        (f) =>
+          !f.claimed &&
+          `${normDesc(f.li.LineItemDescription)}|${cents(f.amount)}` === key,
+      );
+      if (exact) return exact;
+      const amt = fresh.filter((f) => !f.claimed && cents(f.amount) === cents(amount));
+      return amt.length === 1 ? amt[0] : null;
+    };
+
+    // MANUAL ADD de-dupe (unchanged): drop those the fresh extraction reproduced.
+    const aiKeys = new Set(
+      fresh.map((f) => `${normDesc(f.li.LineItemDescription)}|${cents(f.amount)}`),
+    );
+    const preservedManual = manualAddRows.filter(
       (m) => !aiKeys.has(`${normDesc(m.description)}|${cents(m.amount)}`),
     );
 
-    // v1.2.0: the reconciliation guard (the synthetic "⚠ Extraction incomplete"
-    // review line that flagged when lines + tax ≠ invoice total) has been removed
-    // by request — the app no longer nags about totals not adding up. Extraction
-    // runs at highest fidelity (deep_extract + citations) and the accountant can
-    // still add a missed line manually; we just don't auto-flag a mismatch.
+    // Plan split subtrees FIRST (they replace a fresh line wholesale).
+    let preservedSplits = 0;
+    let droppedSplits = 0;
+    const dropAudits: { action: string; note: string }[] = [];
+    for (const parent of splitParentRows) {
+      const match = matchFresh(parent.description, parent.amount);
+      if (match) {
+        match.claimed = true;
+        const kids = (childrenByParent.get(parent.id) ?? [])
+          .slice()
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        match.action = { kind: "split", parent, children: kids };
+        preservedSplits++;
+      } else {
+        droppedSplits++;
+        dropAudits.push({
+          action: AUDIT_ACTION.LINE_ITEM_SPLIT,
+          note: "split dropped by reprocess",
+        });
+      }
+    }
+
+    // Then plan overrides.
+    let preservedOverrides = 0;
+    let droppedOverrides = 0;
+    for (const ov of overrideRows) {
+      const match = matchFresh(ov.description, ov.amount);
+      if (!match) {
+        droppedOverrides++;
+        dropAudits.push({
+          action: AUDIT_ACTION.GL_OVERRIDE,
+          note: `Override on "${ov.description ?? ""}" could not be re-applied after reprocess — line no longer extracted`,
+        });
+        continue;
+      }
+      match.claimed = true;
+      const storedCategory = ov.gl_category ?? "";
+      if (storedCategory && isCategoryValidForEntity(newBusiness, storedCategory)) {
+        match.action = { kind: "override", row: ov };
+        preservedOverrides++;
+      } else {
+        // Entity changed under reprocess — keep the fresh AI coding, flag it.
+        match.action = { kind: "override-invalid" };
+        dropAudits.push({
+          action: AUDIT_ACTION.GL_OVERRIDE,
+          note: `Override on "${ov.description ?? ""}" not re-applied after reprocess — "${storedCategory}" is not valid for ${newBusiness}`,
+        });
+      }
+    }
 
     const subtotal =
       inv.subtotal == null && result.prompt1.Subtotal
@@ -131,7 +303,8 @@ export async function processInvoiceAI(
 
     await env.DB.prepare(
       `UPDATE invoices SET business=?, class=?, approved_by=?, status=?,
-         ai_processed_at=?, subtotal=?, sales_tax=?, inv_date=?, due_date=?
+         ai_processed_at=?, subtotal=?, sales_tax=?, inv_date=?, due_date=?,
+         shipping=?, location_ambiguous=?
        WHERE id=?`,
     )
       .bind(
@@ -144,44 +317,142 @@ export async function processInvoiceAI(
         salesTax ?? 0,
         invDate ?? null,
         dueDate ?? null,
+        extracted.shipping ?? null, // FIX-9: persist header shipping
+        result.locationAmbiguous ? 1 : 0, // FIX-8b: persist location ambiguity
         invoiceId,
       )
       .run();
 
-    // Replace line items (idempotent on reprocess).
+    // Replace line items (idempotent on reprocess). Each fresh line is persisted
+    // per its planned action; split subtrees and overrides are re-applied in slot.
     await env.DB.prepare("DELETE FROM line_items WHERE invoice_id = ?")
       .bind(invoiceId)
       .run();
-    const stmts = result.prompt3.map((li, idx) =>
-      env.DB.prepare(
-        `INSERT INTO line_items (id, invoice_id, description, amount, gl_category,
-           item_type, confidence_level, logic_path, requires_review, sort_order)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      ).bind(
-        uuid(),
-        invoiceId,
-        li.LineItemDescription,
-        typeof li.Amount === "number" ? li.Amount : parseAmount(String(li.Amount)),
-        li.Category,
-        // Auto-tagged Retail/Backbar from L2.5 (v1.1.8 N); null otherwise. This
-        // pre-fills the exec split Type and drives the per-line export tax recompute.
-        li.ItemType ?? null,
-        li.ConfidenceLevel,
-        li.LogicPathUsed,
-        // Flag for review when the category is the manual-review sentinel OR the
-        // line was flagged by light confidence gating (v1.1.8 P).
-        li.Category === REQUIRES_MANUAL_REVIEW || li.RequiresReview ? 1 : 0,
-        idx,
-      ),
-    );
+    const stmts: D1PreparedStatement[] = [];
+    let insertedCount = 0;
+    for (const f of fresh) {
+      const slot = f.idx;
+      const li = f.li;
+      if (f.action.kind === "split") {
+        // Re-insert the stored subtree verbatim (new ids; children re-pointed).
+        const parent = f.action.parent;
+        const newParentId = uuid();
+        stmts.push(
+          env.DB.prepare(
+            `INSERT INTO line_items (id, invoice_id, description, amount, business, class,
+               gl_category, item_type, confidence_level, logic_path, requires_review,
+               manually_overridden, overridden_by, split_percentage, sort_order)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          ).bind(
+            newParentId,
+            invoiceId,
+            parent.description,
+            parent.amount,
+            parent.business,
+            parent.class,
+            parent.gl_category,
+            parent.item_type,
+            parent.confidence_level,
+            parent.logic_path,
+            parent.requires_review ?? 0,
+            parent.manually_overridden ?? 1,
+            parent.overridden_by,
+            parent.split_percentage,
+            slot,
+          ),
+        );
+        insertedCount++;
+        f.action.children.forEach((child, i) => {
+          stmts.push(
+            env.DB.prepare(
+              `INSERT INTO line_items (id, invoice_id, description, amount, business, class,
+                 gl_category, item_type, confidence_level, logic_path, requires_review,
+                 manually_overridden, overridden_by, split_parent_id, split_percentage, sort_order)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            ).bind(
+              uuid(),
+              invoiceId,
+              child.description,
+              child.amount,
+              child.business,
+              child.class,
+              child.gl_category,
+              child.item_type,
+              child.confidence_level,
+              child.logic_path ?? "SPLIT",
+              child.requires_review ?? 0,
+              child.manually_overridden ?? 1,
+              child.overridden_by,
+              newParentId,
+              child.split_percentage,
+              slot + (i + 1) / 100,
+            ),
+          );
+          insertedCount++;
+        });
+      } else if (f.action.kind === "override") {
+        // Re-apply the human GL coding onto the fresh line (desc/amount fresh).
+        const ov = f.action.row;
+        stmts.push(
+          env.DB.prepare(
+            `INSERT INTO line_items (id, invoice_id, description, amount, gl_category,
+               item_type, confidence_level, logic_path, requires_review,
+               manually_overridden, overridden_by, sort_order)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+          ).bind(
+            uuid(),
+            invoiceId,
+            li.LineItemDescription,
+            f.amount,
+            ov.gl_category,
+            ov.item_type,
+            CONFIDENCE_LEVEL.HIGH,
+            "MANUAL OVERRIDE",
+            0,
+            1,
+            ov.overridden_by,
+            slot,
+          ),
+        );
+        insertedCount++;
+      } else {
+        // Fresh AI coding (kind "ai") — or "override-invalid", which keeps the AI
+        // coding but is force-flagged for review (entity changed under reprocess).
+        const forceReview = f.action.kind === "override-invalid";
+        stmts.push(
+          env.DB.prepare(
+            `INSERT INTO line_items (id, invoice_id, description, amount, gl_category,
+               item_type, confidence_level, logic_path, requires_review, sort_order)
+             VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          ).bind(
+            uuid(),
+            invoiceId,
+            li.LineItemDescription,
+            f.amount,
+            li.Category,
+            // Auto-tagged Retail/Backbar from L2.5 (v1.1.8 N); null otherwise.
+            li.ItemType ?? null,
+            li.ConfidenceLevel,
+            li.LogicPathUsed,
+            // Flag for review: manual-review sentinel, LOW/OCR-low (FIX-6), or a
+            // no-longer-valid preserved override.
+            li.Category === REQUIRES_MANUAL_REVIEW || li.RequiresReview || forceReview
+              ? 1
+              : 0,
+            slot,
+          ),
+        );
+        insertedCount++;
+      }
+    }
     if (stmts.length) await env.DB.batch(stmts);
 
-    // Re-insert the preserved manual lines (computed above) after the AI lines.
-    // business/class are forced NULL so the header-coded reprocess output keeps the
-    // export invariant ("all leaves carry business/class, or none do").
-    if (preserved.length) {
+    // Re-insert the preserved MANUAL ADD lines after the AI lines. business/class
+    // are forced NULL so the header-coded reprocess output keeps the export
+    // invariant ("all leaves carry business/class, or none do").
+    if (preservedManual.length) {
       const base = result.prompt3.length;
-      const manualStmts = preserved.map((m, i) =>
+      const manualStmts = preservedManual.map((m, i) =>
         env.DB.prepare(
           `INSERT INTO line_items (id, invoice_id, description, amount, business, class,
              gl_category, item_type, confidence_level, logic_path, requires_review,
@@ -205,6 +476,21 @@ export async function processInvoiceAI(
         ),
       );
       await env.DB.batch(manualStmts);
+      insertedCount += preservedManual.length;
+    }
+
+    // FIX-8: recompute reconciliation now that every line (AI + preserved) is in.
+    await recomputeReconciliation(env, invoiceId);
+
+    // FIX-10: audit every dropped override / split subtree (money-safe: dropped
+    // artifacts are NOT re-inserted, so they can't double-count against FIX-8).
+    for (const a of dropAudits) {
+      await audit(env, {
+        invoiceId,
+        userId: actorUserId,
+        action: a.action,
+        note: a.note,
+      });
     }
 
     // Create/refresh the approval routed to the final approver.
@@ -236,8 +522,12 @@ export async function processInvoiceAI(
         class: result.prompt1.Class,
         approved_by: result.finalApprover,
         prompt1Approver: result.prompt1.ApprovedBy,
-        lineItemCount: result.prompt3.length + preserved.length,
-        preservedManualLines: preserved.length || undefined,
+        lineItemCount: insertedCount,
+        preservedManualLines: preservedManual.length || undefined,
+        preservedOverrides: preservedOverrides || undefined,
+        droppedOverrides: droppedOverrides || undefined,
+        preservedSplits: preservedSplits || undefined,
+        droppedSplits: droppedSplits || undefined,
       },
       note: `AI processing complete. Routed to ${result.finalApprover} (Prompt 2 override of ${result.prompt1.ApprovedBy}).`,
     });
@@ -260,7 +550,11 @@ export async function processInvoiceAI(
     return {
       status: INVOICE_STATUS.PENDING_APPROVAL,
       approver: result.finalApprover,
-      lineItemCount: result.prompt3.length + preserved.length,
+      lineItemCount: insertedCount,
+      preservedOverrides,
+      droppedOverrides,
+      preservedSplits,
+      droppedSplits,
     };
   } catch (err) {
     await audit(env, {
@@ -341,8 +635,9 @@ export async function ingestInvoicePdf(
   try {
     await env.DB.prepare(
       `INSERT INTO invoices (id, vendor, invoice_number, subtotal, sales_tax, total_amount,
-         inv_date, due_date, business, class, status, has_pdf, submitted_by, submission_type, textract_raw)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         inv_date, due_date, business, class, status, has_pdf, submitted_by, submission_type,
+         textract_raw, shipping)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
       .bind(
         id,
@@ -360,6 +655,7 @@ export async function ingestInvoicePdf(
         submittedBy,
         submissionType,
         JSON.stringify(data),
+        data.shipping ?? null, // FIX-9: persist header shipping at ingest
       )
       .run();
   } catch (e) {

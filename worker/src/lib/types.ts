@@ -59,6 +59,12 @@ export interface InvoiceRow {
   export_id: string | null;
   archived_at: string | null;
   created_at: string;
+  /** Header shipping/freight charge (v1.6.0 FIX-9); NULL when absent. */
+  shipping: number | null;
+  /** 1 = location was decided on shared (non-unique) evidence (v1.6.0 FIX-1/8b). */
+  location_ambiguous: number;
+  /** Signed gap total − (leaf lines + tax), 2dp; NULL = reconciled (v1.6.0 FIX-8). */
+  reconciliation_delta: number | null;
 }
 
 export interface LineItemRow {
@@ -183,6 +189,12 @@ export interface PipelineResult {
   prompt2: Prompt2Output;
   prompt3: Prompt3Output;
   finalApprover: Approver;
+  /**
+   * True when the location was decided on shared (non-unique) evidence and no
+   * unique keyword broke the tie (v1.6.0 FIX-1/FIX-2). Persisted to
+   * invoices.location_ambiguous so the reviewer confirms routing before export.
+   */
+  locationAmbiguous: boolean;
 }
 
 /**

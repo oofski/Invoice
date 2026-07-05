@@ -5,6 +5,45 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.6.0] — 2026-07-05
+
+### Fixed / Changed — invoice OCR → GL coding accuracy
+A systematic pass on how invoices are read and coded, from a diagnosis of real
+mis-codings (e.g. a locker invoice billed to Madison that coded to Milwaukee and
+booked steel lockers as "Service Costs").
+
+- **Right location / class.** Coding now weighs *unique* address evidence (city,
+  street, ZIP) above brand names shared by co-located campuses, and normalizes
+  street-suffix variants (Ln↔Lane, St↔Street, …), so an invoice billed to Madison
+  no longer defaults to Milwaukee. When the evidence is genuinely ambiguous it is
+  **flagged for review instead of guessed** (a "Location needs confirmation" chip).
+- **Equipment is no longer "Service Costs."** Lockers, fixtures, furniture, chairs,
+  stations, cabinets, shelving and the like now code to **Equipment & Fixtures**.
+  The "looks like a product" test was tightened (generic words like "color"/"spray"
+  no longer force a product coding), and keyword/model evidence now outranks the
+  generic fallback — while genuine salon/spa products still code as product.
+- **Low confidence actually means something.** Fallback-coded and low-confidence
+  lines are now flagged for review (and the OCR "unsure" signal that was being lost
+  on every invoice is repaired), so weak codings surface in the review queue
+  instead of flowing to approval unnoticed.
+- **Money adds up.** Restored the reconciliation check — if booked lines + tax don't
+  equal the invoice total, the invoice is flagged with the exact gap. **Shipping /
+  freight is now captured as its own coded Freight line** instead of silently
+  vanishing.
+- **Reprocess keeps your work.** Re-running an invoice now preserves manual GL
+  overrides and line splits instead of wiping them.
+- **Smarter approval routing.** Large equipment purchases route to senior approval
+  even under the dollar threshold, and exactly-$10,000 invoices now hit the senior
+  rule.
+- **Export warns instead of blocking.** Export now warns (with a confirm) when an
+  invoice still has review flags, ambiguous location, or a reconciliation gap —
+  and only hard-blocks lines that truly can't be coded.
+
+Verified against the coding-audit corpus with a baseline-vs-after regression gate:
+every behavior change maps to an intended fix, with no unexplained coding
+regressions. Adds three self-applying database columns (shipping, location flag,
+reconciliation delta) — no manual migration step.
+
 ## [1.5.0] — 2026-07-04
 
 ### Added

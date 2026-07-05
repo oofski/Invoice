@@ -51,6 +51,12 @@ export interface ExtractedInvoice {
   sales_tax: number | null;
   total: number | null;
   ship_to_address: string;
+  /**
+   * Header shipping/freight/handling charge from the totals block (v1.6.0 FIX-9);
+   * null/0 when absent or when freight is already an itemized line. The pipeline
+   * synthesizes a coded "Shipping & Handling" Freight line from this.
+   */
+  shipping: number | null;
   line_items: ExtractedLineItem[];
 }
 
@@ -64,6 +70,11 @@ const INVOICE_SCHEMA = {
     subtotal: { type: "number", description: "Subtotal before tax." },
     sales_tax: { type: "number", description: "Sales/use tax amount; 0 if none." },
     total: { type: "number", description: "Grand total amount due." },
+    shipping: {
+      type: "number",
+      description:
+        "Shipping/freight/delivery charge from the totals block; 0 if none. Do NOT include if already itemized as a line item.",
+    },
     ship_to_address: {
       type: "string",
       description: "The ship-to / delivery address. If absent, the bill-to / receiver address.",
@@ -116,7 +127,8 @@ const SYSTEM_PROMPT = `You are an accounts-payable extraction engine for a multi
 Return ONE object per visible line on EVERY page; never merge, summarize, or skip lines. Invoices may span multiple pages and line-item tables can continue across page breaks — extract every row on every page.
 Capture discount, credit, rebate, refund, and adjustment lines as their OWN separate line items. A discount/credit is a NEGATIVE amount — values in parentheses (10.00), with a trailing CR, or a leading minus are negative; never drop or net them into another line.
 For each line item's suggested_category, pick the single best GL category from the allowed enum using these hints: a "sales tax"/"use tax" line => "Sales/Use Tax"; "cleaning" => "Repairs & Maintenance"; "rent" => "Occupancy - Rent"; "freight"/"shipping" => "Freight"; "software"/"IT"/"subscription" => "Computer & IT". If you are not confident, use "${REQUIRES_MANUAL_REVIEW}".
-Money values are numbers. Dates are MM/DD/YYYY. quantity and unit_price are OPTIONAL (capture only when shown). If the invoice has no itemized lines, return one line item whose amount is the total.`;
+Money values are numbers. Dates are MM/DD/YYYY. quantity and unit_price are OPTIONAL (capture only when shown). If the invoice has no itemized lines, return one line item whose amount is the total.
+Capture any shipping/freight/handling charge from the totals block in the \`shipping\` field (0 if none); if freight appears as its own line item, keep it a line item and omit the header field.`;
 
 function num(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -138,22 +150,37 @@ export function normalizeExtract(data: unknown): ExtractedInvoice {
     .map((it) => {
       const o = (it ?? {}) as Record<string, unknown>;
       const amount = num(o.amount);
-      const description = str(o.description);
+      const rawDescription = str(o.description);
+      const quantity = num(o.quantity);
+      const unit_price = num(o.unit_price);
+      // E3 (v1.6.0 FIX-7): a line with an amount but no description is surfaced
+      // as "(no description)" — and flagged so a reviewer notices it.
+      const noDescription = !rawDescription && amount != null;
+      const description = rawDescription || (amount != null ? "(no description)" : "");
+      // E4 (v1.6.0 FIX-7): cross-check qty x unit_price against the extended
+      // amount. Only fires when all three are present; tolerance = the larger of
+      // 5c or 1% of the amount, so trivial rounding never flags.
+      const qtyMismatch =
+        quantity != null &&
+        unit_price != null &&
+        amount != null &&
+        Math.abs(quantity * unit_price - amount) > Math.max(0.05, 0.01 * Math.abs(amount));
       // Light confidence gating (v1.1.8 P): unwrapCitations stamped the per-line
       // min citation confidence. Flag ONLY when a clearly-numeric confidence is
       // present and below threshold; absent confidence => no flag (default).
       const minConf = o[MIN_CONFIDENCE_KEY];
       const lowConfidence =
-        typeof minConf === "number" && minConf < LOW_CONFIDENCE_THRESHOLD;
+        o.lowConfidence === true || // R1 (v1.6.0 FIX-7): respect a flag stored on a normalized line
+        (typeof minConf === "number" && minConf < LOW_CONFIDENCE_THRESHOLD) ||
+        noDescription || // E3
+        qtyMismatch; // E4
       return {
-        // A line with an amount but no description shouldn't stay silently
-        // blank — surface it so a reviewer notices (v1.1.8 robustness).
-        description: description || (amount != null ? "(no description)" : ""),
+        description,
         amount,
         suggested_category: o.suggested_category ? str(o.suggested_category) : undefined,
         tax: num(o.tax),
-        quantity: num(o.quantity),
-        unit_price: num(o.unit_price),
+        quantity,
+        unit_price,
         ...(lowConfidence ? { lowConfidence: true } : {}),
       };
     })
@@ -161,6 +188,8 @@ export function normalizeExtract(data: unknown): ExtractedInvoice {
 
   const total = num(d.total);
   // Fall back to a single line for the total if no itemized lines came back.
+  // E2 (v1.6.0 FIX-7): this synthetic total line is flagged — the whole
+  // tax-and-freight-inclusive amount coded to one account must be reviewed.
   if (line_items.length === 0) {
     line_items.push({
       description: str(d.vendor) || "Invoice total",
@@ -169,6 +198,7 @@ export function normalizeExtract(data: unknown): ExtractedInvoice {
       tax: null,
       quantity: null,
       unit_price: null,
+      lowConfidence: true,
     });
   }
 
@@ -180,6 +210,7 @@ export function normalizeExtract(data: unknown): ExtractedInvoice {
     subtotal: num(d.subtotal),
     sales_tax: num(d.sales_tax) ?? 0,
     total,
+    shipping: num(d.shipping),
     ship_to_address: str(d.ship_to_address),
     line_items,
   };

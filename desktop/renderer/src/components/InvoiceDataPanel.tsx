@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pencil } from "lucide-react";
+import { Pencil, MapPin, AlertTriangle } from "lucide-react";
 import { StatusBadge } from "@/components/ui/Badges";
 import { BusinessClassSelect } from "@/components/BusinessClassSelect";
 import { Button, Select } from "@/components/ui/primitives";
@@ -147,6 +147,14 @@ export function InvoiceDataPanel({
         <StatusBadge status={invoice.status} />
       </div>
 
+      {/* Amber chip: routing decided on shared-only evidence (clears on Edit-routing save). */}
+      {invoice.location_ambiguous && (
+        <div className="inline-flex items-center gap-1.5 rounded-full bg-warning-soft-bg px-2.5 py-0.5 text-xs font-medium text-warning-soft-fg">
+          <MapPin className="h-3.5 w-3.5" />
+          Location needs confirmation
+        </div>
+      )}
+
       <div className="rounded-lg bg-surface-2 p-3 text-center">
         <p className="text-xs uppercase tracking-wide text-ink-muted">
           Total Amount
@@ -155,6 +163,21 @@ export function InvoiceDataPanel({
           {formatCurrency(Number(invoice.total_amount))}
         </p>
       </div>
+
+      {/* Red banner: booked leaves + tax don't foot to the invoice total (FIX-8). */}
+      {invoice.reconciliation_delta != null && (
+        <div className="flex items-start gap-2 rounded-lg border border-danger bg-danger-soft-bg p-3 text-sm text-danger-soft-fg">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Booked lines + tax are{" "}
+            <strong className="tabular-nums">
+              {formatCurrency(Math.abs(invoice.reconciliation_delta))}
+            </strong>{" "}
+            {invoice.reconciliation_delta > 0 ? "short of" : "over"} the invoice
+            total — a line may be missing or misread.
+          </span>
+        </div>
+      )}
 
       <dl className="grid grid-cols-2 gap-3">
         <Field
@@ -165,6 +188,12 @@ export function InvoiceDataPanel({
           label="Sales Tax"
           value={formatCurrency(Number(invoice.sales_tax ?? 0))}
         />
+        {invoice.shipping != null && invoice.shipping > 0 && (
+          <Field
+            label="Shipping"
+            value={formatCurrency(Number(invoice.shipping))}
+          />
+        )}
         <Field label="Invoice Date" value={formatDate(invoice.inv_date)} />
         <Field label="Due Date" value={formatDate(invoice.due_date)} />
         <Field label="Entity" value={invoice.business} />

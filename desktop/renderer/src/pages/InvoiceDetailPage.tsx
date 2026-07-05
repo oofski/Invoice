@@ -25,6 +25,24 @@ interface DetailResponse {
   invoice: InvoiceWithRelations;
 }
 
+/** Reprocess/rescan response — preserved/dropped human-work counts (FIX-10). */
+interface ProcessResponse {
+  preservedOverrides?: number;
+  droppedOverrides?: number;
+  preservedSplits?: number;
+  droppedSplits?: number;
+}
+
+/** " — N override(s) preserved[, M dropped]" suffix, or "" when none preserved. */
+function overridesSuffix(res: ProcessResponse | null | undefined): string {
+  const preserved = res?.preservedOverrides ?? 0;
+  if (preserved <= 0) return "";
+  let s = ` — ${preserved} override${preserved === 1 ? "" : "s"} preserved`;
+  const dropped = res?.droppedOverrides ?? 0;
+  if (dropped > 0) s += `, ${dropped} dropped`;
+  return s;
+}
+
 export default function InvoiceDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -75,8 +93,10 @@ export default function InvoiceDetailPage() {
   async function reprocess() {
     setReprocessing(true);
     try {
-      await api.post("/api/invoices/process", { invoiceId: id });
-      toast.success("Reprocessed with AI");
+      const res = await api.post<ProcessResponse>("/api/invoices/process", {
+        invoiceId: id,
+      });
+      toast.success(`Reprocessed with AI${overridesSuffix(res)}`);
       refetch();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Reprocess failed");
@@ -91,14 +111,17 @@ export default function InvoiceDetailPage() {
   async function rescan() {
     if (
       !window.confirm(
-        "Re-scan re-reads the PDF with the latest extraction and re-codes the invoice. Line items may change; manually-added lines are kept. Continue?",
+        "Re-scan re-reads the PDF with the latest extraction and re-codes the invoice. Line items may change; your GL overrides, splits, and manually-added lines are preserved. Continue?",
       )
     )
       return;
     setRescanning(true);
     try {
-      await api.post("/api/invoices/process", { invoiceId: id, rescan: true });
-      toast.success("Re-scanned with the latest extraction");
+      const res = await api.post<ProcessResponse>("/api/invoices/process", {
+        invoiceId: id,
+        rescan: true,
+      });
+      toast.success(`Re-scanned with the latest extraction${overridesSuffix(res)}`);
       refetch();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Re-scan failed");
@@ -203,7 +226,7 @@ export default function InvoiceDetailPage() {
                 onClick={rescan}
                 loading={rescanning}
                 disabled={reprocessing}
-                title="Re-read the PDF with the latest extraction (use if the original scan missed or misread lines)"
+                title="Re-read the PDF with the latest extraction (use if the original scan missed or misread lines). Your GL overrides, splits, and manually-added lines are preserved."
               >
                 <ScanLine className="h-4 w-4" />
                 Re-scan
@@ -243,8 +266,8 @@ export default function InvoiceDetailPage() {
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>
                 <strong>{reviewCount}</strong> line item
-                {reviewCount === 1 ? "" : "s"} require manual review. Export is
-                blocked until resolved.
+                {reviewCount === 1 ? "" : "s"} are flagged for review. Export
+                will warn until resolved.
               </span>
             </div>
           )}

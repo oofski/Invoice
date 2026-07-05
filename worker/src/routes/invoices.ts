@@ -9,7 +9,7 @@ import {
   resolveApproverUser,
   hydrateInvoice,
 } from "../lib/db";
-import { processInvoiceAI, ingestInvoicePdf } from "../lib/process";
+import { processInvoiceAI, ingestInvoicePdf, recomputeReconciliation } from "../lib/process";
 import { getPdf, deletePdf, getReductoRaw, stampedKey } from "../lib/storage";
 import { getStampedPdf } from "../lib/pdfStamp";
 import {
@@ -68,7 +68,11 @@ function scopeClause(c: import("hono").Context<AppEnv>): {
 
 async function withReviewCounts(c: import("hono").Context<AppEnv>, rows: InvoiceRow[]) {
   const counts = await reviewCounts(c.env, rows.map((r) => r.id));
-  return rows.map((r) => ({ ...hydrateInvoice(r), review_count: counts[r.id] ?? 0 }));
+  return rows.map((r) => ({
+    ...hydrateInvoice(r),
+    review_count: counts[r.id]?.review_count ?? 0,
+    blocking_count: counts[r.id]?.blocking_count ?? 0,
+  }));
 }
 
 // ----- POST /upload ----------------------------------------------------
@@ -344,8 +348,9 @@ invoices.post("/:id/reroute", async (c) => {
 
   const approverUser = await resolveApproverUser(c.env, approvedBy);
 
+  // FIX-8b (v1.6.0): a human confirmed routing here — clear location_ambiguous.
   await c.env.DB.prepare(
-    "UPDATE invoices SET business = ?, class = ?, approved_by = ?, status = ? WHERE id = ?",
+    "UPDATE invoices SET business = ?, class = ?, approved_by = ?, status = ?, location_ambiguous = 0 WHERE id = ?",
   )
     .bind(business, klass, approvedBy, INVOICE_STATUS.PENDING_APPROVAL, id)
     .run();
@@ -701,6 +706,9 @@ invoices.post("/:id/line-items", async (c) => {
     note: `${user(c).name} added line "${description}" (${amount.toFixed(2)}) → ${category}`,
   });
 
+  // FIX-8 (v1.6.0): a new leaf line changes the reconciliation footing.
+  await recomputeReconciliation(c.env, id);
+
   return c.json({ ok: true, id: lineId }, 201);
 });
 
@@ -826,6 +834,9 @@ invoices.patch("/:id", async (c) => {
       prev[k] = (existing as unknown as Record<string, unknown>)[k];
     }
   }
+  // FIX-8b (v1.6.0): setting business/class is a human routing confirmation —
+  // clear the ambiguity flag alongside the edit.
+  if ("business" in body || "class" in body) sets.push("location_ambiguous = 0");
   if (!sets.length) return c.json({ error: "No updatable fields" }, 400);
   params.push(id);
   await c.env.DB.prepare(`UPDATE invoices SET ${sets.join(", ")} WHERE id = ?`)
@@ -838,6 +849,9 @@ invoices.patch("/:id", async (c) => {
     prevValue: prev,
     newValue: body,
   });
+  // FIX-8 (v1.6.0): recompute reconciliation when the money fields changed.
+  if ("subtotal" in body || "sales_tax" in body || "total_amount" in body)
+    await recomputeReconciliation(c.env, id);
   const updated = await getInvoice(c.env, id);
   return c.json({ invoice: updated && hydrateInvoice(updated) });
 });

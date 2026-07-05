@@ -29,6 +29,57 @@ function yyyymmdd(): string {
   return new Date().toISOString().slice(0, 10).replace(/-/g, "");
 }
 
+/**
+ * The 409 body the export/factor routes return when selected invoices carry
+ * review flags and the request omitted `acknowledgeWarnings` (FIX-11).
+ */
+interface ReviewWarning {
+  warning: "REVIEW_FLAGS";
+  flaggedLines: Record<string, number>;
+  locationAmbiguous: string[];
+  reconciliation: Record<string, number>;
+}
+
+/** Narrows a thrown error to the export "review flags" 409 warning. */
+function isReviewWarning(
+  err: unknown,
+): err is ApiError & { body: ReviewWarning } {
+  return (
+    err instanceof ApiError &&
+    err.status === 409 &&
+    typeof err.body === "object" &&
+    err.body !== null &&
+    (err.body as { warning?: string }).warning === "REVIEW_FLAGS"
+  );
+}
+
+/** Human-readable confirm summary of the flags blocking a warned export. */
+function reviewWarningMessage(w: ReviewWarning): string {
+  const lines = ["Some selected invoices have review flags:", ""];
+  const flagged = w.flaggedLines ?? {};
+  const invoiceCount = Object.keys(flagged).length;
+  const lineCount = Object.values(flagged).reduce((a, b) => a + b, 0);
+  if (invoiceCount > 0) {
+    lines.push(
+      `• ${lineCount} flagged line item${lineCount === 1 ? "" : "s"} across ${invoiceCount} invoice${invoiceCount === 1 ? "" : "s"}`,
+    );
+  }
+  const ambiguous = w.locationAmbiguous ?? [];
+  if (ambiguous.length > 0) {
+    lines.push(
+      `• ${ambiguous.length} invoice${ambiguous.length === 1 ? "" : "s"} with an unconfirmed location`,
+    );
+  }
+  const recon = Object.keys(w.reconciliation ?? {}).length;
+  if (recon > 0) {
+    lines.push(
+      `• ${recon} invoice${recon === 1 ? "" : "s"} with a reconciliation gap`,
+    );
+  }
+  lines.push("", "Export anyway?");
+  return lines.join("\n");
+}
+
 export default function ExportPage() {
   const { data, loading, refetch } = useApi<{ invoices: QueueInvoice[] }>(
     `/api/invoices?status=${INVOICE_STATUS.APPROVED}&limit=500`,
@@ -47,8 +98,10 @@ export default function ExportPage() {
   );
 
   const invoices = data?.invoices ?? [];
-  const ready = invoices.filter((i) => (i.review_count ?? 0) === 0);
-  const blocked = invoices.filter((i) => (i.review_count ?? 0) > 0);
+  // v1.6.0: only sentinel (REQUIRES_MANUAL_REVIEW) lines hard-block export.
+  // Flagged-but-coded invoices are selectable (they export with a warning).
+  const ready = invoices.filter((i) => (i.blocking_count ?? 0) === 0);
+  const blocked = invoices.filter((i) => (i.blocking_count ?? 0) > 0);
 
   const allReadySelected =
     ready.length > 0 && ready.every((i) => selected.has(i.id));
@@ -73,29 +126,66 @@ export default function ExportPage() {
     [ready, selected],
   );
 
+  // Fires the CSV export. `acknowledge` threads FIX-11's acknowledgeWarnings
+  // through the existing open request body (no api.ts change needed).
+  async function doExport(ids: string[], acknowledge: boolean) {
+    const res = await api.post<{
+      csv: string;
+      fileName: string;
+      rowCount: number;
+      invoiceCount: number;
+    }>("/api/export", {
+      invoiceIds: ids,
+      ...(acknowledge ? { acknowledgeWarnings: true } : {}),
+    });
+    downloadCsv(res.csv, res.fileName);
+    toast.success(
+      `Exported ${res.invoiceCount} invoices (${res.rowCount} lines)`,
+    );
+    setSelected(new Set());
+    refetch();
+    refetchHistory();
+  }
+
   async function runExport() {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
     setExporting(true);
     try {
-      const res = await api.post<{
-        csv: string;
-        fileName: string;
-        rowCount: number;
-        invoiceCount: number;
-      }>("/api/export", { invoiceIds: ids });
-      downloadCsv(res.csv, res.fileName);
-      toast.success(
-        `Exported ${res.invoiceCount} invoices (${res.rowCount} lines)`,
-      );
-      setSelected(new Set());
-      refetch();
-      refetchHistory();
+      await doExport(ids, false);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Export failed");
+      // 409 REVIEW_FLAGS → confirm, then retry acknowledged.
+      if (isReviewWarning(err)) {
+        if (window.confirm(reviewWarningMessage(err.body))) {
+          try {
+            await doExport(ids, true);
+          } catch (err2) {
+            toast.error(
+              err2 instanceof ApiError ? err2.message : "Export failed",
+            );
+          }
+        }
+      } else {
+        toast.error(err instanceof ApiError ? err.message : "Export failed");
+      }
     } finally {
       setExporting(false);
     }
+  }
+
+  async function doFactor(ids: string[], acknowledge: boolean) {
+    const res = await api.post<FactorResponse>("/api/export/factor", {
+      invoiceIds: ids,
+      ...(acknowledge ? { acknowledgeWarnings: true } : {}),
+    });
+    const blob = buildBillWorkbook(res.entities, res.header);
+    downloadBlob(blob, res.fileName);
+    toast.success(
+      `Factored ${res.invoiceCount} invoices into ${res.entities.length} entity tab(s)`,
+    );
+    setSelected(new Set());
+    refetch();
+    refetchHistory();
   }
 
   async function runFactor() {
@@ -103,19 +193,21 @@ export default function ExportPage() {
     if (ids.length === 0) return;
     setFactoring(true);
     try {
-      const res = await api.post<FactorResponse>("/api/export/factor", {
-        invoiceIds: ids,
-      });
-      const blob = buildBillWorkbook(res.entities, res.header);
-      downloadBlob(blob, res.fileName);
-      toast.success(
-        `Factored ${res.invoiceCount} invoices into ${res.entities.length} entity tab(s)`,
-      );
-      setSelected(new Set());
-      refetch();
-      refetchHistory();
+      await doFactor(ids, false);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Factoring failed");
+      if (isReviewWarning(err)) {
+        if (window.confirm(reviewWarningMessage(err.body))) {
+          try {
+            await doFactor(ids, true);
+          } catch (err2) {
+            toast.error(
+              err2 instanceof ApiError ? err2.message : "Factoring failed",
+            );
+          }
+        }
+      } else {
+        toast.error(err instanceof ApiError ? err.message : "Factoring failed");
+      }
     } finally {
       setFactoring(false);
     }
@@ -241,7 +333,7 @@ export default function ExportPage() {
           ) : ready.length === 0 ? (
             <EmptyState
               title="Nothing ready to export"
-              description="Approved invoices with no manual-review items will appear here."
+              description="Approved invoices appear here. Those with a manual-review sentinel line stay in the Blocked section below."
             />
           ) : (
             <div className="scroll-thin overflow-x-auto">
@@ -266,11 +358,20 @@ export default function ExportPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ready.map((inv) => (
+                  {ready.map((inv) => {
+                    // Selectable but flag it: warns on export until acknowledged.
+                    const flags: string[] = [];
+                    if ((inv.review_count ?? 0) > 0)
+                      flags.push(`${inv.review_count} to review`);
+                    if (inv.location_ambiguous) flags.push("Location?");
+                    if (inv.reconciliation_delta != null) flags.push("Σ≠Total");
+                    const flagged = flags.length > 0;
+                    return (
                     <tr
                       key={inv.id}
                       className={cn(
                         "border-b border-line hover:bg-surface-2",
+                        flagged && "bg-warning-soft-bg/40",
                         selected.has(inv.id) && "bg-selected-bg",
                       )}
                     >
@@ -287,6 +388,12 @@ export default function ExportPage() {
                         <span className="ml-1 text-xs text-ink-subtle">
                           #{inv.invoice_number}
                         </span>
+                        {flagged && (
+                          <span className="ml-2 inline-flex items-center gap-0.5 text-xs font-medium text-warning">
+                            <AlertTriangle className="h-3 w-3" />
+                            {flags.join(" · ")}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-ink-muted">
                         {inv.business}
@@ -301,7 +408,8 @@ export default function ExportPage() {
                         {inv.approved_by}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -326,8 +434,8 @@ export default function ExportPage() {
                   <span className="text-ink-muted">
                     {inv.vendor}{" "}
                     <span className="text-xs text-danger">
-                      ({inv.review_count} item
-                      {inv.review_count === 1 ? "" : "s"} need review)
+                      ({inv.blocking_count} item
+                      {inv.blocking_count === 1 ? "" : "s"} need review)
                     </span>
                   </span>
                   <Link

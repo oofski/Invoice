@@ -51,6 +51,19 @@ const MONTH_NAMES = [
   "Dec",
 ];
 
+/**
+ * v1.6.0 review predicate — an invoice belongs in the Manual Review Queue / the
+ * REVIEW tab when it has flagged lines, an unconfirmed location, or a
+ * reconciliation gap.
+ */
+function needsReview(i: QueueInvoice): boolean {
+  return (
+    (i.review_count ?? 0) > 0 ||
+    !!i.location_ambiguous ||
+    i.reconciliation_delta != null
+  );
+}
+
 /** "YYYY-MM" → "Mon ’YY" (e.g. "2025-07" → "Jul ’25"). */
 function formatMonthLabel(ym: string): string {
   const [year, month] = ym.split("-");
@@ -180,7 +193,7 @@ export default function DashboardPage() {
 
   const filtered = useMemo(() => {
     return invoices.filter((i) => {
-      if (tab === "REVIEW" && (i.review_count ?? 0) === 0) return false;
+      if (tab === "REVIEW" && !needsReview(i)) return false;
       else if (tab !== "ALL" && tab !== "REVIEW" && i.status !== tab)
         return false;
       if (entity && i.business !== entity) return false;
@@ -191,7 +204,7 @@ export default function DashboardPage() {
     });
   }, [invoices, tab, entity, approver, search]);
 
-  const reviewInvoices = invoices.filter((i) => (i.review_count ?? 0) > 0);
+  const reviewInvoices = invoices.filter(needsReview);
   const overdue = overdueData?.invoices ?? [];
 
   async function bulkRemind() {

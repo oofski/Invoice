@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { AlertTriangle, ArchiveRestore } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, MapPin } from "lucide-react";
 import { StatusBadge } from "@/components/ui/Badges";
 import { EmptyState } from "@/components/ui/primitives";
 import { formatCurrency, ageLabel, cn } from "@/lib/utils";
@@ -67,6 +67,17 @@ export function InvoiceTable({
                       <span className="inline-flex items-center gap-0.5 font-medium text-danger">
                         <AlertTriangle className="h-3 w-3" />
                         {inv.review_count} review
+                      </span>
+                    )}
+                    {inv.location_ambiguous && (
+                      <span className="inline-flex items-center gap-0.5 font-medium text-warning">
+                        <MapPin className="h-3 w-3" />
+                        Location?
+                      </span>
+                    )}
+                    {inv.reconciliation_delta != null && (
+                      <span className="inline-flex items-center gap-0.5 font-medium text-danger">
+                        Σ≠Total
                       </span>
                     )}
                   </div>

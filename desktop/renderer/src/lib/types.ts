@@ -53,6 +53,11 @@ export interface InvoiceRow {
   archived_at?: string | null;
   review_count?: number;
   has_pdf?: boolean;
+  // v1.6.0 review/ambiguity/reconciliation/shipping signals (§C4).
+  shipping?: number | null; // header shipping/freight, null/0 when absent
+  location_ambiguous?: boolean; // routing decided on shared-only evidence
+  reconciliation_delta?: number | null; // signed gap total−(lines+tax); null = reconciled
+  blocking_count?: number; // lines with the REQUIRES_MANUAL_REVIEW sentinel
 }
 
 export interface LineItemRow {

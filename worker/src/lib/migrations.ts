@@ -91,10 +91,11 @@ const SEED_VENDOR_ALIASES: { id: string; alias: string; canonical_id: string }[]
 let schemaEnsured = false;
 
 /**
- * Runtime SCHEMA migration (v1.2.9). Applies the additive DDL the archive /
- * audit-clear features (v1.2.8) need — the nullable `invoices.archived_at`
- * column, its index, and the `audit_clear_cutoffs` table — so the database
- * upgrades ITSELF on the first request after deploy, with NO manual
+ * Runtime SCHEMA migration (v1.2.9, extended v1.6.0). Applies the additive DDL the
+ * archive / audit-clear features (v1.2.8) need — the nullable `invoices.archived_at`
+ * column, its index, and the `audit_clear_cutoffs` table — plus the v1.6.0 additive
+ * invoice columns (`shipping`, `location_ambiguous`, `reconciliation_delta`), so the
+ * database upgrades ITSELF on the first request after deploy, with NO manual
  * `wrangler d1 execute` step on anyone's part.
  *
  * SAFETY: purely additive. `ADD COLUMN` only adds a new nullable column (no data
@@ -107,20 +108,40 @@ let schemaEnsured = false;
  * column exists, which we detect and ignore. Runs once per isolate, never throws
  * (a transient failure just logs and retries on the next request).
  */
-export async function ensureSchema(env: Env): Promise<void> {
-  if (schemaEnsured) return;
-  // 1) Add the archive column. Tolerate the expected "duplicate column" error
-  //    when it already exists; bail (without latching) on anything unexpected so
-  //    it's retried next request.
+/**
+ * Additive `ALTER TABLE ... ADD COLUMN` that tolerates the expected "duplicate
+ * column" / "already exists" error (SQLite ADD COLUMN is not idempotent) and
+ * reports any unexpected failure so the caller can bail WITHOUT latching (retried
+ * next request). Returns true when the column is present (added or already
+ * existed), false on an unexpected error.
+ */
+async function addColumnTolerant(
+  env: Env,
+  ddl: string,
+  label: string,
+): Promise<boolean> {
   try {
-    await env.DB.prepare("ALTER TABLE invoices ADD COLUMN archived_at TEXT").run();
+    await env.DB.prepare(ddl).run();
+    return true;
   } catch (e) {
     const msg = String((e as { message?: string })?.message ?? e);
-    if (!/duplicate column|already exists/i.test(msg)) {
-      console.error("[migrations] add archived_at failed (will retry):", e);
-      return;
-    }
+    if (/duplicate column|already exists/i.test(msg)) return true;
+    console.error(`[migrations] ${label} failed (will retry):`, e);
+    return false;
   }
+}
+
+export async function ensureSchema(env: Env): Promise<void> {
+  if (schemaEnsured) return;
+  // 1) Additive invoice columns, each guarded by the same tolerant ALTER pattern:
+  //    tolerate "duplicate column" when it already exists; bail (without latching)
+  //    on anything unexpected so it's retried next request. archived_at (v1.2.8);
+  //    shipping / location_ambiguous / reconciliation_delta (v1.6.0 — header
+  //    shipping capture, location-ambiguity flag, reconciliation guard).
+  if (!(await addColumnTolerant(env, "ALTER TABLE invoices ADD COLUMN archived_at TEXT", "add archived_at"))) return;
+  if (!(await addColumnTolerant(env, "ALTER TABLE invoices ADD COLUMN shipping REAL", "add shipping"))) return;
+  if (!(await addColumnTolerant(env, "ALTER TABLE invoices ADD COLUMN location_ambiguous INTEGER NOT NULL DEFAULT 0", "add location_ambiguous"))) return;
+  if (!(await addColumnTolerant(env, "ALTER TABLE invoices ADD COLUMN reconciliation_delta REAL", "add reconciliation_delta"))) return;
   // 2) Index + cutoff table + vendor_aliases — all naturally idempotent
   //    (CREATE … IF NOT EXISTS). vendor_aliases canonicalizes OCR vendor spelling
   //    variants onto a vendor_mappings row (additive + reversible).

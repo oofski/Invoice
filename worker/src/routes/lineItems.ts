@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "./helpers";
 import { user, canViewInvoice } from "./helpers";
 import { audit, getInvoice } from "../lib/db";
+import { recomputeReconciliation } from "../lib/process";
 import { uuid } from "../lib/util";
 import {
   AUDIT_ACTION,
@@ -136,5 +137,10 @@ lineItems.post("/:id/split", async (c) => {
     newValue: { allocations: resolved },
     note: `${user(c).name} split "${li.description}" into ${resolved.length} allocations`,
   });
+
+  // FIX-8 (v1.6.0): children sum to the parent so this is a no-op in the common
+  // case, but it keeps the reconciliation invariant self-healing after a split.
+  await recomputeReconciliation(c.env, li.invoice_id);
+
   return c.json({ ok: true, parentId: li.id }, 201);
 });

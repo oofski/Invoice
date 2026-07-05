@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS invoices (
   ai_processed_at TEXT,
   exported_at     TEXT,
   export_id       TEXT,
+  shipping             REAL,                       -- v1.6.0: header shipping/freight, NULL when absent
+  location_ambiguous   INTEGER NOT NULL DEFAULT 0, -- v1.6.0: 1 = location decided on shared evidence
+  reconciliation_delta REAL,                       -- v1.6.0: NULL = reconciled; else signed gap total-(lines+tax), 2dp
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   UNIQUE(vendor, invoice_number, total_amount)
 );
@@ -290,3 +293,9 @@ CREATE TABLE IF NOT EXISTS vendor_aliases (
 CREATE INDEX IF NOT EXISTS idx_vendor_aliases_norm ON vendor_aliases(alias_norm);
 -- Seed the reported OCR variant: 'Olivia Garden' -> 'Olive Garden' (ven-olivegarden).
 INSERT OR REPLACE INTO vendor_aliases (id, alias_text, alias_norm, canonical_id) VALUES ('alias-oliviagarden','Olivia Garden','olivia garden','ven-olivegarden');
+-- v1.6.0: additive invoice columns — header shipping capture (FIX-9), the
+-- location-ambiguity flag (FIX-1/8b), and the reconciliation guard (FIX-8).
+-- ADD COLUMN errors if the column already exists — ignore that specific error.
+ALTER TABLE invoices ADD COLUMN shipping REAL;
+ALTER TABLE invoices ADD COLUMN location_ambiguous INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE invoices ADD COLUMN reconciliation_delta REAL;

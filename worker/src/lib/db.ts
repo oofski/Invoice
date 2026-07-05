@@ -6,7 +6,7 @@ import type {
   UserRow,
 } from "./types";
 import { uuid, parseJson } from "./util";
-import { ROLES, glAccountNumber } from "./constants";
+import { ROLES, glAccountNumber, REQUIRES_MANUAL_REVIEW } from "./constants";
 
 /** Writes one audit_log row (Brief §13 — audit every state change). */
 export async function audit(
@@ -69,6 +69,9 @@ export function hydrateInvoice(inv: InvoiceRow) {
   return {
     ...inv,
     has_pdf: !!inv.has_pdf,
+    // C3 (v1.6.0): expose location_ambiguous as a boolean (DB stores 0/1).
+    // shipping and reconciliation_delta pass through as-is via the spread.
+    location_ambiguous: !!inv.location_ambiguous,
     // textract_raw is large; omit from list/detail payloads by default
     textract_raw: undefined as unknown as string | null,
   };
@@ -147,21 +150,33 @@ export async function resolveApproverUser(
     .first<UserRow>();
 }
 
-/** Map of invoiceId -> count of unresolved manual-review line items. */
+/**
+ * Map of invoiceId -> review counts. `review_count` = all requires_review=1 lines
+ * (unchanged semantics); `blocking_count` = lines coded to the REQUIRES_MANUAL_REVIEW
+ * sentinel (v1.6.0 C3) — these still hard-block export (no real account number),
+ * while the rest only warn (FIX-11).
+ */
 export async function reviewCounts(
   env: Env,
   invoiceIds: string[],
-): Promise<Record<string, number>> {
+): Promise<Record<string, { review_count: number; blocking_count: number }>> {
   if (invoiceIds.length === 0) return {};
   const placeholders = invoiceIds.map(() => "?").join(",");
   const rows = await env.DB.prepare(
-    `SELECT invoice_id, COUNT(*) as c FROM line_items
-      WHERE requires_review = 1 AND invoice_id IN (${placeholders})
+    `SELECT invoice_id,
+            SUM(CASE WHEN requires_review = 1 THEN 1 ELSE 0 END) AS review_count,
+            SUM(CASE WHEN gl_category = ? THEN 1 ELSE 0 END) AS blocking_count
+       FROM line_items
+      WHERE invoice_id IN (${placeholders})
       GROUP BY invoice_id`,
   )
-    .bind(...invoiceIds)
-    .all<{ invoice_id: string; c: number }>();
-  const out: Record<string, number> = {};
-  for (const r of rows.results ?? []) out[r.invoice_id] = r.c;
+    .bind(REQUIRES_MANUAL_REVIEW, ...invoiceIds)
+    .all<{ invoice_id: string; review_count: number; blocking_count: number }>();
+  const out: Record<string, { review_count: number; blocking_count: number }> = {};
+  for (const r of rows.results ?? [])
+    out[r.invoice_id] = {
+      review_count: r.review_count ?? 0,
+      blocking_count: r.blocking_count ?? 0,
+    };
   return out;
 }
