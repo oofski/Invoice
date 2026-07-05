@@ -266,7 +266,7 @@ export default function InvoiceDetailPage() {
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>
                 <strong>{reviewCount}</strong> line item
-                {reviewCount === 1 ? "" : "s"} are flagged for review. Export
+                {reviewCount === 1 ? " is" : "s are"} flagged for review. Export
                 will warn until resolved.
               </span>
             </div>

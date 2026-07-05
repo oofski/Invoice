@@ -5,6 +5,12 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.6.1] — 2026-07-05
+
+### Fixed
+- Review banner now reads "1 line item **is** flagged for review" (subject-verb
+  agreement for the single-line case).
+
 ## [1.6.0] — 2026-07-05
 
 ### Fixed / Changed — invoice OCR → GL coding accuracy
