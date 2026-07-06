@@ -279,10 +279,10 @@ export default function CcCardholdersPage() {
                       <td className="px-4 py-3">
                         <span
                           className={cn(
-                            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
                             isActive(c)
-                              ? "bg-success-soft-bg text-success-soft-fg"
-                              : "bg-surface-2 text-ink-muted",
+                              ? "bg-success-soft-bg text-success-soft-fg ring-success-soft-fg/15"
+                              : "bg-surface-2 text-ink-muted ring-line",
                           )}
                         >
                           {isActive(c) ? "Active" : "Inactive"}

@@ -5,6 +5,15 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.6.2] — 2026-07-05
+
+### Changed
+- **Cleaner Credit Cards UI.** The Credit Card section got a visual refresh — a
+  clearer highlighted tab in the sub-navigation, crisper status badges, tidier
+  tables and cards, cleaner receipt drop-zones, and a clear selection indicator
+  in the inbox. Same colors and all the same features — just a more polished,
+  easier-to-scan layout. (Credit Cards only; the rest of the app is unchanged.)
+
 ## [1.6.1] — 2026-07-05
 
 ### Fixed

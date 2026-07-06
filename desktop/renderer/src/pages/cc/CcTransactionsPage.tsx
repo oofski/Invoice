@@ -706,7 +706,7 @@ export default function CcTransactionsPage() {
                         key={t.id}
                         onClick={() => setSelectedId(t.id)}
                         className={cn(
-                          "cursor-pointer border-b border-line hover:bg-surface-2",
+                          "cursor-pointer border-b border-line transition-colors hover:bg-surface-2",
                           selectedId === t.id && "bg-selected-bg",
                           t.archived_at && "opacity-60",
                         )}

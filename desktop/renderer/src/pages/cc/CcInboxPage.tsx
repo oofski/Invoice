@@ -162,10 +162,10 @@ export default function CcInboxPage() {
                 <li
                   key={it.id}
                   className={cn(
-                    "group relative transition-colors",
+                    "group relative border-l-2 transition-colors",
                     it.id === selectedId
-                      ? "bg-selected-bg"
-                      : "hover:bg-surface-2",
+                      ? "border-accent bg-selected-bg"
+                      : "border-transparent hover:bg-surface-2",
                   )}
                 >
                   <button

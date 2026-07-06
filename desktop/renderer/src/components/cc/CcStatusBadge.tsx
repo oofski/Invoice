@@ -11,11 +11,14 @@ import type { ReceiptStatus } from "@/cc/ccApi";
  * Uses the app's soft semantic tokens so it matches the existing badge style.
  */
 const STYLES: Record<ReceiptStatus, string> = {
-  PENDING: "bg-danger-soft-bg text-danger-soft-fg",
-  UPLOADED: "bg-warning-soft-bg text-warning-soft-fg",
-  RECEIVED: "bg-success-soft-bg text-success-soft-fg",
-  NOT_REQUIRED: "bg-surface-2 text-ink-muted",
-  WAIVED: "bg-surface-2 text-ink-muted",
+  PENDING:
+    "bg-danger-soft-bg text-danger-soft-fg ring-1 ring-inset ring-danger-soft-fg/15",
+  UPLOADED:
+    "bg-warning-soft-bg text-warning-soft-fg ring-1 ring-inset ring-warning-soft-fg/15",
+  RECEIVED:
+    "bg-success-soft-bg text-success-soft-fg ring-1 ring-inset ring-success-soft-fg/15",
+  NOT_REQUIRED: "bg-surface-2 text-ink-muted ring-1 ring-inset ring-line",
+  WAIVED: "bg-surface-2 text-ink-muted ring-1 ring-inset ring-line",
 };
 
 const LABELS: Record<ReceiptStatus, string> = {
@@ -37,7 +40,7 @@ export function CcStatusBadge({
     <span
       className={cn(
         "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-        STYLES[status] ?? "bg-surface-2 text-ink-muted",
+        STYLES[status] ?? "bg-surface-2 text-ink-muted ring-1 ring-inset ring-line",
         className,
       )}
     >

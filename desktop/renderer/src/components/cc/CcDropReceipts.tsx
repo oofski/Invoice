@@ -132,8 +132,10 @@ export function CcDropReceipts({ onDropped }: { onDropped?: () => void }) {
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
           className={cn(
-            "rounded-lg border-2 border-dashed p-8 text-center transition-colors",
-            dragging ? "border-accent bg-selected-bg" : "border-line",
+            "rounded-xl border-2 border-dashed p-8 text-center transition-colors",
+            dragging
+              ? "border-accent bg-selected-bg"
+              : "border-line hover:border-accent/40",
           )}
         >
           <Upload className="mx-auto h-6 w-6 text-ink-subtle" />

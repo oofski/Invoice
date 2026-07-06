@@ -16,10 +16,11 @@ import {
 } from "@/cc/ccApi";
 
 const DELIVERY_STYLE: Record<NotificationDelivery, string> = {
-  SENT: "bg-success-soft-bg text-success-soft-fg",
-  MAILTO: "bg-info-soft-bg text-info-soft-fg",
-  NOT_CONFIGURED: "bg-warning-soft-bg text-warning-soft-fg",
-  FAILED: "bg-danger-soft-bg text-danger-soft-fg",
+  SENT: "bg-success-soft-bg text-success-soft-fg ring-1 ring-inset ring-success-soft-fg/15",
+  MAILTO: "bg-info-soft-bg text-info-soft-fg ring-1 ring-inset ring-info-soft-fg/15",
+  NOT_CONFIGURED:
+    "bg-warning-soft-bg text-warning-soft-fg ring-1 ring-inset ring-warning-soft-fg/15",
+  FAILED: "bg-danger-soft-bg text-danger-soft-fg ring-1 ring-inset ring-danger-soft-fg/15",
 };
 
 const DELIVERY_LABEL: Record<NotificationDelivery, string> = {
@@ -146,7 +147,7 @@ export default function CcNotificationsPage() {
                   {notifications.map((n) => (
                     <tr
                       key={n.id}
-                      className="cursor-pointer border-b border-line hover:bg-surface-2"
+                      className="cursor-pointer border-b border-line transition-colors hover:bg-surface-2"
                       onClick={() => openDetail(n)}
                     >
                       <td className="px-4 py-3 text-ink-muted">
@@ -171,7 +172,7 @@ export default function CcNotificationsPage() {
                           className={cn(
                             "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
                             DELIVERY_STYLE[n.delivery] ??
-                              "bg-surface-2 text-ink-muted",
+                              "bg-surface-2 text-ink-muted ring-1 ring-inset ring-line",
                           )}
                         >
                           {DELIVERY_LABEL[n.delivery] ?? n.delivery}

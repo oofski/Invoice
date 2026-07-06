@@ -272,7 +272,7 @@ export default function CcReceiptTrackerPage() {
       <tr
         key={t.id}
         className={cn(
-          "border-b border-line hover:bg-surface-2",
+          "border-b border-line transition-colors hover:bg-surface-2",
           selected.has(t.id) && "bg-selected-bg",
         )}
       >

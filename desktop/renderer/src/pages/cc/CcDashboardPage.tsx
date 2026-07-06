@@ -313,6 +313,7 @@ export default function CcDashboardPage() {
             label="Total Spend"
             value={formatCompactCurrency(totalSpend)}
             sublabel="Non-payment charges"
+            tone="accent"
             icon={<DollarSign className="h-5 w-5" />}
           />
           <KpiCard

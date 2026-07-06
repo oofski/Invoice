@@ -69,7 +69,7 @@ export function CcSubNav() {
   // cardholder sees only "My Receipts".
   const tabs = isManager ? [...MANAGER_TABS, ...CARDHOLDER_TABS] : CARDHOLDER_TABS;
   return (
-    <div className="scroll-thin flex gap-1 overflow-x-auto border-b border-line bg-surface px-4 py-2">
+    <nav className="scroll-thin flex gap-1.5 overflow-x-auto border-b border-line bg-surface px-4 py-2.5">
       {tabs.map((t) => {
         const Icon = t.icon;
         const showBadge = t.badge === "inbox" && pendingInbox > 0;
@@ -79,23 +79,34 @@ export function CcSubNav() {
             to={t.to}
             className={({ isActive }) =>
               cn(
-                "inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+                "inline-flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors",
                 isActive
-                  ? "bg-selected-bg text-accent"
+                  ? "bg-accent text-accent-fg shadow-sm"
                   : "text-ink-muted hover:bg-surface-2 hover:text-ink",
               )
             }
           >
-            <Icon className="h-4 w-4" />
-            {t.label}
-            {showBadge && (
-              <span className="ml-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-fg">
-                {pendingInbox}
-              </span>
+            {({ isActive }) => (
+              <>
+                <Icon className="h-4 w-4" />
+                {t.label}
+                {showBadge && (
+                  <span
+                    className={cn(
+                      "ml-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+                      isActive
+                        ? "bg-accent-fg/25 text-accent-fg"
+                        : "bg-accent text-accent-fg",
+                    )}
+                  >
+                    {pendingInbox}
+                  </span>
+                )}
+              </>
             )}
           </NavLink>
         );
       })}
-    </div>
+    </nav>
   );
 }

@@ -177,7 +177,9 @@ function DropZone({
     <div
       className={cn(
         "flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-surface p-8 text-center transition-colors",
-        dragging ? "border-accent bg-selected-bg" : "border-line",
+        dragging
+          ? "border-accent bg-selected-bg"
+          : "border-line hover:border-accent/40",
       )}
       onDragOver={(e) => {
         e.preventDefault();
@@ -614,12 +616,12 @@ export default function CcUploadPage() {
                       <td className="px-4 py-3">
                         <span
                           className={cn(
-                            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
                             b.status === "COMPLETE"
-                              ? "bg-success-soft-bg text-success-soft-fg"
+                              ? "bg-success-soft-bg text-success-soft-fg ring-success-soft-fg/15"
                               : b.status === "ERROR"
-                                ? "bg-danger-soft-bg text-danger-soft-fg"
-                                : "bg-surface-2 text-ink-muted",
+                                ? "bg-danger-soft-bg text-danger-soft-fg ring-danger-soft-fg/15"
+                                : "bg-surface-2 text-ink-muted ring-line",
                           )}
                         >
                           {b.status}

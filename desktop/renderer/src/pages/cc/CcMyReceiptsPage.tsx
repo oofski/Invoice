@@ -370,8 +370,10 @@ export default function CcMyReceiptsPage() {
 
             <div
               className={cn(
-                "rounded-lg border-2 border-dashed p-6 text-center",
-                pickedFile ? "border-accent bg-selected-bg" : "border-line",
+                "rounded-xl border-2 border-dashed p-6 text-center transition-colors",
+                pickedFile
+                  ? "border-accent bg-selected-bg"
+                  : "border-line hover:border-accent/40",
               )}
             >
               {pickedFile ? (
