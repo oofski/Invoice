@@ -458,6 +458,21 @@ const UTILITY_EXPENSE_RE =
   /\b(water\s*(volume|service|usage|consumption|meter|base|readiness|distribution|charge)|sewer\w*|sewage|storm\s*water|septic|utilit\w*|electric\w*|natural\s*gas|energy\s*(charge|fee)|power\s*(charge|usage)|kwh|therm|waste\s*(water|management|disposal|collection)|\btrash\b|\bgarbage\b|\brefuse\b|recycl\w*|public\s*fire|fire\s*(fee|protection|line|service)|assessment|readiness\s*to\s*serve)/i;
 
 /**
+ * Utility / water-service VENDOR + line keyword rule (L3, v1.7.0). Owner ask: "use
+ * keywords, read the vendor name". Word-bounded MULTI-word phrases (plus the vendor
+ * token "culligan") — NEVER bare "water" alone, which would catch product names
+ * ("Micellar Water", "Rose Water Toner", "Cucumber Water Spray"). These phrases are
+ * specific enough that a legitimate retail product won't misfire.
+ *
+ * Matched against BOTH the line description AND the (normalized) VENDOR NAME, because
+ * on a water-service statement — Culligan / "Total Water Treatment Systems" — the
+ * water signal lives in the VENDOR name while the line reads e.g. "Staff Breakroom".
+ * A description-only check would miss it. Drives the L3 "Utilities" category.
+ */
+const UTILITY_KEYWORD_RE =
+  /\b(water\s+treatment|water\s+service|water\s+softener|water\s+filtration|drinking\s+water|bottled\s+water|water\s+delivery|culligan)\b/i;
+
+/**
  * Service / repair / labor / trade lines (v1.2.6). A salon line describing a
  * repair, installation, plumbing/electrical/HVAC trade, inspection, or labor is
  * NOT a product and NOT backbar — it is Repairs & Maintenance. Word-bounded; NO
@@ -764,8 +779,13 @@ export function codeLineItem(opts: {
     const ov = vendorMapping.gl_override;
     const ovIsProduct =
       ov === "Retail / Product Costs" || ov === "Service Costs";
-    if (ov && GL_CATEGORIES_FLAT.includes(ov) && !ovIsProduct)
-      return { category: ov, confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 2" };
+    if (ov && GL_CATEGORIES_FLAT.includes(ov) && !ovIsProduct) {
+      // Entity-gate the override (v1.6.3): if the mapped account isn't valid for
+      // this entity (e.g. a salon-only account on the Admin/Nala catch-all), fall
+      // through to manual review rather than export a bare, unmapped account name.
+      const r = gated(ov, CONFIDENCE_LEVEL.HIGH, "LEVEL 2");
+      if (r) return r;
+    }
     if (ovIsProduct || vendorMapping.is_inventory) {
       // v1.2.7 ROOT-CAUSE FIX: a product vendor still bills NON-product lines —
       // freight, tariffs/fees, utilities, repairs. Previously this branch ran the
@@ -822,6 +842,22 @@ export function codeLineItem(opts: {
   const kw = keywordCategory(desc);
   if (kw && !softKeywordShouldDeferToProduct(desc, business)) {
     const r = gated(kw, CONFIDENCE_LEVEL.MEDIUM, "LEVEL 3");
+    if (r) return r;
+  }
+
+  // L3 (UTILITY KEYWORD) — water-service / utility signal read from the VENDOR NAME
+  // as well as the line description (owner's "read the vendor name" ask). On a
+  // Culligan / "Total Water Treatment Systems" statement the water signal is in the
+  // vendor name while the line reads e.g. "Staff Breakroom", so a description-only
+  // check misses it. Word-bounded multi-word phrases (never bare "water") keep retail
+  // product names from misfiring. Sits AFTER the vendor-mapping L2 (a stronger EXACT
+  // vendor mapping — e.g. the managed Culligan/Total-Water rows — has already returned
+  // Utilities HIGH) and after the description keyword rules, but BEFORE the L2.5/L4
+  // defaults, so an UNMAPPED water vendor codes to Utilities instead of the entity
+  // default (e.g. Student Expenses). Entity-gated: Utilities is invalid for Nala/Admin
+  // → falls through (never exports a blank account).
+  if (UTILITY_KEYWORD_RE.test(desc) || UTILITY_KEYWORD_RE.test(normalizeVendor(vendor))) {
+    const r = gated("Utilities", CONFIDENCE_LEVEL.MEDIUM, "L3 UTILITY KEYWORD");
     if (r) return r;
   }
 

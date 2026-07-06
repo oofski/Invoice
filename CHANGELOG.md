@@ -5,6 +5,31 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.6.3] — 2026-07-06
+
+### Added / Changed — vendor coding
+- **~30 common vendors now code themselves.** Added a managed vendor list
+  (Culligan, Cintas, CTC Supplies, Wella, OPI, Marlo, Concordance, Ultraceuticals,
+  Cohere, FROMM, UKG, TOGO, Gordon Flesch, Global Sight, STAMM, Salescomm, Delta
+  Dental, CSC, Colectivo, Imaginal, Brixmor, West Place, WASH, Adelman, Avellas,
+  Beautiful Clean, Guthrie & Frey, Fish Window Cleaning, Pivot Point, and more) so
+  their invoices auto-code to the correct GL category. Each mapping sets the
+  **category only** — the entity, location, and approver are still decided per
+  invoice by the address and routing rules (nothing hard-coded to a vendor).
+- **Water / utility invoices recognized by keyword.** Invoices from water vendors
+  (e.g. Culligan / "Total Water Treatment Systems") now code to **Utilities** even
+  when the vendor isn't on the mapped list — the keyword is read from the vendor
+  name, so a breakroom-water statement no longer falls into a generic bucket.
+- **Untangled "Olive Garden" vs "Olivia Garden."** The beauty-tools brand
+  (Olivia Garden) codes to Retail / Product Costs; the restaurant (a stray test
+  line) codes to Guest Relations. Removed the old alias that conflated them.
+- **Soundness fix:** a mapped vendor whose account doesn't exist for an unusual
+  entity now falls through to review instead of exporting a blank account number.
+
+Verified against the coding-audit corpus with the regression gate — every change
+maps to an intended vendor/keyword/category rule, with no unexplained coding
+regressions. The vendor mappings auto-seed on deploy (no manual step).
+
 ## [1.6.2] — 2026-07-05
 
 ### Changed

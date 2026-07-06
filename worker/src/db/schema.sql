@@ -299,3 +299,52 @@ INSERT OR REPLACE INTO vendor_aliases (id, alias_text, alias_norm, canonical_id)
 ALTER TABLE invoices ADD COLUMN shipping REAL;
 ALTER TABLE invoices ADD COLUMN location_ambiguous INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE invoices ADD COLUMN reconciliation_delta REAL;
+-- v1.7.0: system-managed vendor → GL-category mappings (SEED_MANAGED_VENDORS in
+-- migrations.ts; keep the two in sync). CATEGORY-ONLY — every row leaves
+-- business_entity / class / default_approver NULL so the invoice's ship-to +
+-- routing rules decide entity / class / approver per invoice (never the vendor).
+-- Fixed-id INSERT OR REPLACE (idempotent; admin-created rows use other ids and are
+-- untouched). Supersedes the v1.1.7/v1.2.0 inventory seeds above (AbbVie/OPI/Wella
+-- re-stated; Olive Garden REPURPOSED below). gl_override values are real account
+-- NAMES from constants.ts (GL_CATEGORIES_FLAT / ENTITY_COA).
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-abbvie','AbbVie',NULL,NULL,NULL,1,'Retail / Product Costs');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-opi','OPI',NULL,NULL,NULL,1,'Retail / Product Costs');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-wella','Wella',NULL,NULL,NULL,1,'Retail / Product Costs');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-marlo','Marlo Beauty Supply',NULL,NULL,NULL,1,'Retail / Product Costs');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-ultraceuticals','Ultraceuticals',NULL,NULL,NULL,1,'Retail / Product Costs');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-concordance','Concordance',NULL,NULL,NULL,1,'Retail / Product Costs');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-cohere','Cohere Beauty',NULL,NULL,NULL,1,'Retail / Product Costs');
+-- FROMM inventory row — does NOT override VENDOR_CATEGORY["Fromm International"]=Kit
+-- Costs (that L2 VENDOR rule runs first; Kit Costs wins on IBW/Chicago).
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-fromm','Fromm International',NULL,NULL,NULL,1,'Retail / Product Costs');
+-- §D: Olivia Garden = professional beauty-tools brand → its OWN inventory row.
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-oliviagarden','Olivia Garden',NULL,NULL,NULL,1,'Retail / Product Costs');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-adelman','Adelman',NULL,NULL,NULL,0,'Repairs & Maintenance');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-avellas','Avellas',NULL,NULL,NULL,0,'Repairs & Maintenance');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-beautifulclean','Beautiful Clean',NULL,NULL,NULL,0,'Repairs & Maintenance');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-guthriefrey','Guthrie & Frey',NULL,NULL,NULL,0,'Repairs & Maintenance');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-fish','Fish Window Cleaning',NULL,NULL,NULL,0,'Repairs & Maintenance');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-culligan','Culligan',NULL,NULL,NULL,0,'Utilities');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-totalwater','Total Water Treatment Systems',NULL,NULL,NULL,0,'Utilities');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-brixmor','Brixmor',NULL,NULL,NULL,0,'Occupancy - Rent');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-westplace','West Place',NULL,NULL,NULL,0,'Occupancy - Rent');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-imaginal','Imaginal',NULL,NULL,NULL,0,'Marketing');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-salescomm','Salescomm',NULL,NULL,NULL,0,'Telephone');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-stamm','Stamm Technologies',NULL,NULL,NULL,0,'Computer & IT');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-globalsight','Global Sight',NULL,NULL,NULL,0,'Computer & IT');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-gordonflesch','Gordon Flesch',NULL,NULL,NULL,0,'Computer & IT');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-togo','TOGO',NULL,NULL,NULL,0,'Computer & IT');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-ukg','UKG',NULL,NULL,NULL,0,'Computer & IT');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-deltadental','Delta Dental',NULL,NULL,NULL,0,'Insurance - Health');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-ctcsupplies','CTC Supplies',NULL,NULL,NULL,0,'Supplies');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-cintas','Cintas',NULL,NULL,NULL,0,'Supplies');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-csc','CSC',NULL,NULL,NULL,0,'Professional / Outside Services');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-colectivo','Colectivo',NULL,NULL,NULL,0,'Guest Relations');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-pivotpoint','Pivot Point',NULL,NULL,NULL,1,'Kit Costs');
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-wash','WASH Multifamily Laundry',NULL,NULL,NULL,0,'Equipment Lease');
+-- §D: Olive Garden = the RESTAURANT (staff refreshments) → Guest Relations, NOT
+-- inventory. Repurposes the v1.1.7 inventory seed above.
+INSERT OR REPLACE INTO vendor_mappings (id, vendor_name, business_entity, class, default_approver, is_inventory, gl_override) VALUES ('ven-olivegarden','Olive Garden',NULL,NULL,NULL,0,'Guest Relations');
+-- §D: remove the stale v1.3.6 'Olivia Garden' -> ven-olivegarden alias (Olivia
+-- Garden is now its own vendor, not an OCR variant of the restaurant).
+DELETE FROM vendor_aliases WHERE id = 'alias-oliviagarden';
