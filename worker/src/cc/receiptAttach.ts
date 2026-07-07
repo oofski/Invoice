@@ -21,7 +21,12 @@ import { ROLES } from "../lib/constants";
 import { uuid, nowIso } from "../lib/util";
 import { ccEntityLabel } from "./ccConstants";
 import { roundCents, validateSplits } from "./ccRules";
-import { persistReceiptLines } from "./ccLines";
+import {
+  persistReceiptLines,
+  validateLineCoding,
+  replaceLines,
+  deriveEntitySplits,
+} from "./ccLines";
 import { sendCcManagerAlert } from "./ccEmail";
 import type {
   CcSource,
@@ -30,6 +35,7 @@ import type {
   MatchResult,
   NormalizedReceipt,
   Receipt,
+  ReceiptLine,
   ReceiptOcrData,
   ReceiptRow,
   Tx,
@@ -343,6 +349,53 @@ export async function applyPendingSplits(
     return true;
   } catch (e) {
     console.error("[cc] applyPendingSplits failed (leaving tx unsplit):", e);
+    return false;
+  }
+}
+
+/**
+ * Applies a carried LINE-CODING payload (entity × location × gl_category) to a
+ * transaction using the EXACT same validated write path as
+ * `PUT /transactions/:id/lines` (lines.ts): `validateLineCoding` (exact-to-cent
+ * per-line + whole-tx sums vs `tx.amount`, entity ∈ CC_ENTITIES, location ∈
+ * locationsFor(entity), gl in the allowed set) then replace-all `replaceLines`
+ * and `deriveEntitySplits` (which rolls the allocations up into
+ * `cc_entity_splits`, keeping the ledger + legacy entity split correct for free).
+ *
+ * The rich counterpart to `applyPendingSplits`: used by the Exec Mobile Receipt
+ * drop (apply-at-match) and the manager assign (apply-on-later-match) when the
+ * carried payload is the new `{ lines }` shape. Reuses `validateLineCoding` /
+ * `replaceLines` / `deriveEntitySplits` READ-ONLY.
+ *
+ * Best-effort: returns whether it applied. On validation failure (e.g. the exec's
+ * total ≠ the imported charge amount, or an unknown location) it skips silently —
+ * leaving the tx uncoded for the accountant to refine on desktop — and it NEVER
+ * throws into the caller (so a coding failure can never block the receipt attach).
+ */
+export async function applyPendingLines(
+  env: Env,
+  transactionId: string,
+  lines: ReceiptLine[],
+): Promise<boolean> {
+  try {
+    if (!Array.isArray(lines) || lines.length === 0) return false;
+    const tx = await fetchTx(env, transactionId);
+    if (!tx) return false;
+
+    const valid = validateLineCoding(tx.amount, lines);
+    if (!valid.ok) return false; // amount / entity / location / gl mismatch → leave for manager
+
+    // Replace-all under one `at` timestamp: rewrite lines + allocations, then
+    // re-derive cc_entity_splits from the same lines (ledger stays correct).
+    const at = nowIso();
+    await replaceLines(env, transactionId, lines, at);
+    await deriveEntitySplits(env, transactionId, lines, at);
+    await env.DB.prepare("UPDATE cc_transactions SET updated_at = ? WHERE id = ?")
+      .bind(at, transactionId)
+      .run();
+    return true;
+  } catch (e) {
+    console.error("[cc] applyPendingLines failed (leaving tx uncoded):", e);
     return false;
   }
 }

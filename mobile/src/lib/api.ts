@@ -13,7 +13,7 @@
  * multipart boundary.
  */
 
-import type { EntitySplitInput } from "./cc";
+import type { ReceiptLine } from "./cc";
 
 const TOKEN_KEY = "iq_token";
 
@@ -173,6 +173,15 @@ export interface DropResponse {
   results: PerFileResult[];
 }
 
+/** GET/PUT `/transactions/:id/lines` response payload (worker LinesResponse). */
+export interface LinesResponse {
+  lines: ReceiptLine[];
+  transaction_amount: number;
+  allocated_total: number;
+  remaining: number;
+  reconciled: boolean;
+}
+
 // ----------------------------------------------------------------- methods
 export const api = {
   // -- auth ---------------------------------------------------------------
@@ -209,17 +218,17 @@ export const api = {
   // -- receipt drop + splits ----------------------------------------------
   /**
    * POST /api/cc/receipts/inbox (multipart) — drop + OCR + auto-match.
-   * Always pins `upload_method=INVOICE_IQ_APP`. When `pendingSplits` is
-   * provided it is sent as the `pending_splits` JSON field (§C.4/§C.6): the
-   * server applies it now if the receipt matched, else stashes it to apply
-   * automatically on a later match.
+   * Always pins `upload_method=INVOICE_IQ_APP`. When `pendingLines` is provided
+   * it is sent as the `pending_splits` JSON field in the richer lines shape
+   * `{ lines: [...] }`: the server applies it now if the receipt matched, else
+   * stashes it to apply automatically on a later match (fallback submit path).
    */
-  dropReceipt: (file: File, pendingSplits?: EntitySplitInput[]) => {
+  dropReceipt: (file: File, pendingLines?: ReceiptLine[]) => {
     const form = new FormData();
     form.append("file", file, file.name || "receipt.jpg");
     form.append("upload_method", "INVOICE_IQ_APP");
-    if (pendingSplits && pendingSplits.length > 0) {
-      form.append("pending_splits", JSON.stringify(pendingSplits));
+    if (pendingLines && pendingLines.length > 0) {
+      form.append("pending_splits", JSON.stringify({ lines: pendingLines }));
     }
     return request<DropResponse>("/api/cc/receipts/inbox", {
       method: "POST",
@@ -228,25 +237,28 @@ export const api = {
   },
 
   /**
-   * PUT /api/cc/transactions/:id/splits — persist (replace-all) the split on a
-   * MATCHED transaction. Server re-validates exact-to-cent. Safe to retry.
+   * PUT /api/cc/transactions/:id/lines — persist (replace-all) the line coding
+   * on a MATCHED transaction. Server re-validates exact-to-cent via
+   * `validateLineCoding` and re-derives `cc_entity_splits` (the ledger stays
+   * correct for free). Safe to retry.
    */
-  putSplits: (transactionId: string, splits: EntitySplitInput[]) =>
-    request<{ splits: EntitySplitInput[] }>(
-      `/api/cc/transactions/${encodeURIComponent(transactionId)}/splits`,
-      { method: "PUT", body: JSON.stringify({ splits }) },
+  putLines: (transactionId: string, lines: ReceiptLine[]) =>
+    request<LinesResponse>(
+      `/api/cc/transactions/${encodeURIComponent(transactionId)}/lines`,
+      { method: "PUT", body: JSON.stringify({ lines }) },
     ),
 
   /**
-   * PATCH /api/cc/receipts/inbox/:id/pending_splits — attach the exec's entity
-   * split to the EXISTING preview-drop row (the row created at /review). Used for
-   * the PENDING_MATCH submit so we don't re-drop the photo (which would create a
-   * duplicate inbox row). Server stashes the split to apply automatically on a
-   * later match, or applies it now if the row has since matched (`applied:true`).
+   * PATCH /api/cc/receipts/inbox/:id/pending_splits — attach the exec's line
+   * coding to the EXISTING preview-drop row (the row created at /review). Used
+   * for the PENDING_MATCH submit so we don't re-drop the photo (which would
+   * create a duplicate inbox row). Sends the richer lines shape `{ lines }`;
+   * the server stashes it to apply automatically on a later match, or applies
+   * it now if the row has since matched (`applied:true`).
    */
-  attachPendingSplits: (inboxId: string, splits: EntitySplitInput[]) =>
+  attachPendingLines: (inboxId: string, lines: ReceiptLine[]) =>
     request<{ applied: boolean; pending: boolean }>(
       `/api/cc/receipts/inbox/${encodeURIComponent(inboxId)}/pending_splits`,
-      { method: "PATCH", body: JSON.stringify({ splits }) },
+      { method: "PATCH", body: JSON.stringify({ lines }) },
     ),
 };

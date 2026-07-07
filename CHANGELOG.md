@@ -5,6 +5,37 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.8.0] — 2026-07-07
+
+### Added — Executive Mobile Receipt Site
+- **Split by location (institution), not just business.** On the phone split
+  screen, tapping a multi-campus business (Neroli, Skn Bar Rx, Institute) opens a
+  location picker so the exec chooses the exact campus — Neroli → Mequon /
+  Downtown / Eastside / North Shore / Brookfield; Skn Bar Rx → Shorewood /
+  Pewaukee; Institute → Milwaukee / Madison; the single-location businesses
+  (Nala, Admin, Institute Chicago, Urban Ayurveda) select automatically. The
+  location map is the **same one the desktop invoice splitting uses**.
+- **Optional line-by-line split.** A "Line by line" mode lets the exec assign
+  each scanned line item — and the sales tax — to its own business **and**
+  location, with a live per-line + whole-receipt reconcile. "Quick split"
+  (whole receipt across businesses/locations) remains the default.
+- **Reskinned to match the desktop app.** The mobile site now uses the invoice
+  app's warm cream/charcoal/mauve palette and typography (Hanken Grotesk,
+  Cormorant Garamond, Marcellus) instead of the earlier dark theme.
+
+### Under the hood
+- The exec's split now flows through the existing entity × location × GL
+  line-coding model, so a mobile receipt codes the same way the accountant codes
+  on desktop, and still rolls up to the accountant ledger automatically. The
+  pending-match carry-through was upgraded to carry the richer coding and apply
+  it when the charge matches — fully backward compatible with the previous
+  entity-only split.
+
+### Note
+- As with 1.7.0, the **desktop app is unchanged** in this release — 1.8.0
+  upgrades the server-served mobile receipt site. The version bump keeps the
+  product on one version line.
+
 ## [1.7.0] — 2026-07-07
 
 ### Added

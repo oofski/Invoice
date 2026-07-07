@@ -16,9 +16,12 @@ import {
   type ReactNode,
 } from "react";
 import type { ReceiptOcr, PerFileResult } from "./api";
-import type { EntitySplitInput } from "./cc";
+import type { ReceiptLine } from "./cc";
 
 export type DropStatus = "MATCHED" | "PENDING_MATCH" | "ERROR";
+
+/** Which split UI the exec used: quick (whole total) or line-by-line. */
+export type SplitMode = "quick" | "line";
 
 export interface FlowState {
   /** The captured photo. */
@@ -34,8 +37,10 @@ export interface FlowState {
   inboxId: string | null;
   matchedTransactionId: string | null;
   candidateIds: string[];
-  /** The balanced split rows built on the split screen. */
-  splits: EntitySplitInput[];
+  /** The balanced line-coding payload built on the split screen. */
+  lines: ReceiptLine[];
+  /** Which split UI produced `lines` (for confirm-screen wording). */
+  mode: SplitMode;
   /** Whether the server reported it applied the split at drop time. */
   splitApplied: boolean;
 }
@@ -44,7 +49,7 @@ interface FlowApi extends FlowState {
   setFile: (file: File | null) => void;
   applyDropResult: (result: PerFileResult) => void;
   setTotal: (total: number) => void;
-  setSplits: (splits: EntitySplitInput[]) => void;
+  setLines: (lines: ReceiptLine[], mode: SplitMode) => void;
   setSplitApplied: (applied: boolean) => void;
   reset: () => void;
 }
@@ -58,7 +63,8 @@ const emptyState: FlowState = {
   inboxId: null,
   matchedTransactionId: null,
   candidateIds: [],
-  splits: [],
+  lines: [],
+  mode: "quick",
   splitApplied: false,
 };
 
@@ -111,8 +117,9 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     (total: number) => setState((prev) => ({ ...prev, total })),
     [],
   );
-  const setSplits = useCallback(
-    (splits: EntitySplitInput[]) => setState((prev) => ({ ...prev, splits })),
+  const setLines = useCallback(
+    (lines: ReceiptLine[], mode: SplitMode) =>
+      setState((prev) => ({ ...prev, lines, mode })),
     [],
   );
   const setSplitApplied = useCallback(
@@ -132,11 +139,11 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       setFile,
       applyDropResult,
       setTotal,
-      setSplits,
+      setLines,
       setSplitApplied,
       reset,
     }),
-    [state, setFile, applyDropResult, setTotal, setSplits, setSplitApplied, reset],
+    [state, setFile, applyDropResult, setTotal, setLines, setSplitApplied, reset],
   );
 
   return <FlowContext.Provider value={value}>{children}</FlowContext.Provider>;

@@ -36,7 +36,11 @@ import {
 } from "../../cc/ccStorage";
 import { extractReceiptBytes, normalizeReceipt } from "../../cc/receiptExtract";
 import { matchReceiptToTransaction } from "../../cc/receiptMatch";
-import { attachReceiptToTx, applyPendingSplits } from "../../cc/receiptAttach";
+import {
+  attachReceiptToTx,
+  applyPendingSplits,
+  applyPendingLines,
+} from "../../cc/receiptAttach";
 import { isCcEntity } from "../../cc/ccConstants";
 import type {
   CandidateTx,
@@ -47,9 +51,11 @@ import type {
   InboxItem,
   InboxRow,
   InboxStatus,
+  LineAllocation,
   MatchResult,
   NormalizedReceipt,
   PerFileResult,
+  ReceiptLine,
   ReceiptOcrData,
   TxRow,
 } from "../../cc/ccTypes";
@@ -90,6 +96,129 @@ function parsePendingSplits(raw: unknown): EntitySplitInput[] | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Defensively parses the NEW rich lines payload — the `lines` array of a
+ * `{ lines: ReceiptLine[] }` stash/submit (per-line entity × location ×
+ * gl_category coding). Returns the lines when every line is well-formed enough to
+ * hand to `validateLineCoding` at apply time (each line an object with a finite
+ * `amount` and an `allocations` array whose rows carry a CC entity, a non-empty
+ * location string, a non-empty gl_category string, and a finite amount), or null
+ * when absent/empty/malformed. Deliberately LOOSE: the authoritative
+ * reconcile/location/gl check is `validateLineCoding(tx.amount, …)` inside
+ * `applyPendingLines` (the tx amount isn't known here). Never throws — a bad
+ * payload is ignored, it must NOT break the drop.
+ */
+function parsePendingLines(raw: unknown): ReceiptLine[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out: ReceiptLine[] = [];
+  for (const l of raw) {
+    if (!l || typeof l !== "object") return null;
+    const line = l as {
+      kind?: unknown;
+      description?: unknown;
+      amount?: unknown;
+      line_index?: unknown;
+      quantity?: unknown;
+      unit_price?: unknown;
+      receipt_id?: unknown;
+      is_coded?: unknown;
+      allocations?: unknown;
+    };
+    const amount = typeof line.amount === "number" ? line.amount : Number(line.amount);
+    if (!Number.isFinite(amount)) return null;
+
+    const allocsRaw = Array.isArray(line.allocations) ? line.allocations : [];
+    const allocations: LineAllocation[] = [];
+    for (const a of allocsRaw) {
+      const alloc = (a ?? {}) as {
+        entity_name?: unknown;
+        location?: unknown;
+        gl_category?: unknown;
+        amount?: unknown;
+        is_tax?: unknown;
+      };
+      const name = typeof alloc.entity_name === "string" ? alloc.entity_name : "";
+      if (!isCcEntity(name)) return null; // malformed row → ignore the whole payload
+      if (typeof alloc.location !== "string" || alloc.location.trim() === "") return null;
+      if (typeof alloc.gl_category !== "string" || alloc.gl_category.trim() === "") return null;
+      const amt = typeof alloc.amount === "number" ? alloc.amount : Number(alloc.amount);
+      if (!Number.isFinite(amt)) return null;
+      allocations.push({
+        entity_name: name,
+        location: alloc.location,
+        gl_category: alloc.gl_category,
+        amount: amt,
+        is_tax: alloc.is_tax === true,
+      });
+    }
+
+    out.push({
+      kind: line.kind === "TAX" ? "TAX" : "ITEM",
+      description: typeof line.description === "string" ? line.description : "",
+      amount,
+      line_index: typeof line.line_index === "number" ? line.line_index : undefined,
+      quantity: typeof line.quantity === "number" ? line.quantity : null,
+      unit_price: typeof line.unit_price === "number" ? line.unit_price : null,
+      receipt_id: typeof line.receipt_id === "string" ? line.receipt_id : null,
+      is_coded: line.is_coded === true,
+      allocations,
+    });
+  }
+  return out.length ? out : null;
+}
+
+/** A shape-detected carried split: the NEW rich lines shape, or the legacy one. */
+type PendingPayload =
+  | { kind: "lines"; lines: ReceiptLine[] }
+  | { kind: "splits"; rows: EntitySplitInput[] };
+
+/**
+ * Shape-detecting parse for the carried exec split — the multipart drop field,
+ * the stashed `pending_splits` TEXT column, or a PATCH body slice. Two shapes:
+ *   - NEW rich lines `{ lines: ReceiptLine[] }` (entity × location × gl_category)
+ *     → applied via `applyPendingLines` (replaceLines + deriveEntitySplits).
+ *   - LEGACY entity-only `[{entity_name, amount}]` (a bare array) → applied via
+ *     `applyPendingSplits` (cc_entity_splits only), the pre-v2 behavior.
+ * `raw` may be a JSON string (the field / the column) or an already-parsed value
+ * (a PATCH body value). Absent/malformed → null; never throws — a bad payload
+ * must NOT break the drop. Entity/location/gl are checked loosely here; the
+ * authoritative reconcile is `validateLineCoding` at apply time.
+ */
+function parsePendingPayload(raw: unknown): PendingPayload | null {
+  // Normalize a JSON string to a parsed value; keep an already-parsed value as-is.
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    if (raw.trim() === "") return null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (parsed == null) return null;
+
+  // NEW shape: an object carrying a `lines` array.
+  if (!Array.isArray(parsed) && typeof parsed === "object") {
+    const lines = parsePendingLines((parsed as { lines?: unknown }).lines);
+    return lines ? { kind: "lines", lines } : null;
+  }
+
+  // LEGACY shape: a bare entity-split array. Re-serialize so parsePendingSplits
+  // (which takes the JSON string) can validate it unchanged.
+  const rows = parsePendingSplits(JSON.stringify(parsed));
+  return rows ? { kind: "splits", rows } : null;
+}
+
+/**
+ * Serializes a shape-detected payload back to a canonical JSON string for the
+ * `pending_splits` TEXT column: `{ lines: [...] }` for the rich shape, a bare
+ * `[{entity_name, amount}]` array for the legacy shape — so a later
+ * `parsePendingPayload` round-trips it to the same shape.
+ */
+function serializePendingPayload(p: PendingPayload): string {
+  return JSON.stringify(p.kind === "lines" ? { lines: p.lines } : p.rows);
 }
 
 export const inbox = new Hono<AppEnv>();
@@ -283,9 +412,11 @@ inbox.post("/", async (c) => {
 
   if (files.length === 0) return c.json({ error: "No file provided" }, 400);
 
-  // NEW (additive): the exec's entity split, sent by the mobile submit. Absent for
-  // every desktop/manager drop → null → the branches below behave exactly as today.
-  const pendingSplits = parsePendingSplits(form.get("pending_splits"));
+  // NEW (additive): the exec's carried split, sent by the mobile submit. May be the
+  // rich `{ lines }` shape (entity × location × gl) OR the legacy `[{entity_name,
+  // amount}]` array; shape-detected here. Absent for every desktop/manager drop →
+  // null → the branches below behave exactly as today.
+  const pendingPayload = parsePendingPayload(form.get("pending_splits"));
 
   const u = user(c);
   const managerActing = isManager(c);
@@ -403,19 +534,20 @@ inbox.post("/", async (c) => {
         };
         // Apply-at-match (C.6b): the drop auto-matched, so apply the carried split
         // immediately via the shared helper (never stashed — it's applied here).
-        // `applyPendingSplits` validates sum-vs-amount and never throws.
-        if (pendingSplits) {
-          matchedResult.split_applied = await applyPendingSplits(
-            c.env,
-            outcome.transactionId,
-            pendingSplits,
-          );
+        // Rich lines → applyPendingLines (replaceLines + deriveEntitySplits); legacy
+        // → applyPendingSplits. Both validate vs tx.amount and never throw.
+        if (pendingPayload) {
+          matchedResult.split_applied =
+            pendingPayload.kind === "lines"
+              ? await applyPendingLines(c.env, outcome.transactionId, pendingPayload.lines)
+              : await applyPendingSplits(c.env, outcome.transactionId, pendingPayload.rows);
         }
         results.push(matchedResult);
       } else {
         // Queue: PENDING_MATCH with candidates. No cc_receipts row; tx untouched.
         // NEW (additive): stash the carried exec split (if any) on `pending_splits`
-        // to apply on later match; null for every drop that didn't send it.
+        // to apply on later match; null for every drop that didn't send it. The
+        // stash is canonical JSON (either shape) — a later match re-detects it.
         await c.env.DB.prepare(
           `INSERT INTO cc_receipt_inbox
              (id, uploaded_by, cardholder_id, source_guess, r2_key, file_name, file_type,
@@ -435,7 +567,7 @@ inbox.post("/", async (c) => {
             JSON.stringify(ocr),
             "PENDING_MATCH",
             JSON.stringify(outcome.candidateIds),
-            pendingSplits ? JSON.stringify(pendingSplits) : null,
+            pendingPayload ? serializePendingPayload(pendingPayload) : null,
             at,
             at,
           )
@@ -604,11 +736,15 @@ inbox.post("/:id/assign", async (c) => {
   });
 
   // Apply-on-later-match (C.6c): if this queued row carried an exec split, apply it
-  // to the just-attached tx now. No-op when the column is null/absent.
-  // `applyPendingSplits` validates sum-vs-`tx.amount` and never throws, so a
-  // mismatch/failure leaves the tx unsplit for the manager and never blocks attach.
-  const carriedSplits = parsePendingSplits((row as InboxRowWithSplits).pending_splits);
-  if (carriedSplits) await applyPendingSplits(c.env, txId, carriedSplits);
+  // to the just-attached tx now. Shape-detected: rich lines → applyPendingLines
+  // (replaceLines + deriveEntitySplits); legacy → applyPendingSplits. No-op when
+  // the column is null/absent. Both validate vs `tx.amount` and never throw, so a
+  // mismatch/failure leaves the tx uncoded for the manager and never blocks attach.
+  const carried = parsePendingPayload((row as InboxRowWithSplits).pending_splits);
+  if (carried) {
+    if (carried.kind === "lines") await applyPendingLines(c.env, txId, carried.lines);
+    else await applyPendingSplits(c.env, txId, carried.rows);
+  }
 
   const at = nowIso();
   const u = user(c);
@@ -682,24 +818,31 @@ inbox.patch("/:id/pending_splits", async (c) => {
   // The dropper who owns this row, or any manager, may attach the split.
   if (!isManager(c) && !ownsInbox(c, row)) return c.json({ error: "Forbidden" }, 403);
 
-  // Accept `{ splits: [...] }` (mirrors PUT /splits) or `{ pending_splits: ... }`.
-  // parsePendingSplits validates entity∈CC_ENTITIES + finite amounts; a JSON
-  // string or an already-parsed array both round-trip through JSON.stringify.
+  // Accept the NEW rich `{ lines: [...] }` shape, the legacy `{ splits: [...] }`
+  // array (mirrors PUT /splits), or a raw `{ pending_splits: ... }` slice (either
+  // shape). parsePendingPayload shape-detects and loosely validates; a JSON string
+  // or an already-parsed value both round-trip.
   const body = (await c.req.json().catch(() => ({}))) as {
+    lines?: unknown;
     splits?: unknown;
     pending_splits?: unknown;
   };
-  const raw = body.splits ?? body.pending_splits;
-  const rows = parsePendingSplits(typeof raw === "string" ? raw : JSON.stringify(raw ?? null));
-  if (!rows) return c.json({ error: "Invalid or empty splits" }, 400);
+  const candidate =
+    body.lines !== undefined ? { lines: body.lines } : (body.splits ?? body.pending_splits);
+  const payload = parsePendingPayload(candidate);
+  if (!payload) return c.json({ error: "Invalid or empty splits" }, 400);
 
   const at = nowIso();
 
   // Already attached to a tx (auto-matched at the preview drop, or manager-assigned
   // in between): apply immediately via the shared validated write path, then clear
-  // the stash. `applyPendingSplits` validates sum-vs-amount and never throws.
+  // the stash. Rich lines → applyPendingLines; legacy → applyPendingSplits. Both
+  // validate vs tx.amount and never throw.
   if (row.matched_transaction_id) {
-    const applied = await applyPendingSplits(c.env, row.matched_transaction_id, rows);
+    const applied =
+      payload.kind === "lines"
+        ? await applyPendingLines(c.env, row.matched_transaction_id, payload.lines)
+        : await applyPendingSplits(c.env, row.matched_transaction_id, payload.rows);
     await c.env.DB.prepare(
       "UPDATE cc_receipt_inbox SET pending_splits = NULL, updated_at = ? WHERE id = ?",
     )
@@ -708,12 +851,12 @@ inbox.patch("/:id/pending_splits", async (c) => {
     return c.json({ applied, pending: false });
   }
 
-  // Not yet matched: stash the split to apply automatically on a later match
-  // (POST /:id/assign and the auto-match drop both consume `pending_splits`).
+  // Not yet matched: stash the (canonical) split to apply automatically on a later
+  // match (POST /:id/assign and the auto-match drop both consume `pending_splits`).
   await c.env.DB.prepare(
     "UPDATE cc_receipt_inbox SET pending_splits = ?, updated_at = ? WHERE id = ?",
   )
-    .bind(JSON.stringify(rows), at, id)
+    .bind(serializePendingPayload(payload), at, id)
     .run();
   return c.json({ applied: false, pending: true });
 });

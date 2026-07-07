@@ -107,3 +107,253 @@ export function validateSplits(
   }
   return { ok: true };
 }
+
+// ===========================================================================
+// LINE-CODING MODEL (entity × location × GL) — mobile mirror of the server
+// model in worker/src/cc/ccLines.ts + ccTypes.ts. STANDALONE COPY (no imports
+// from worker/ or desktop/). This unifies the mobile split onto the existing
+// `cc_line_allocations` model so one payload serves both the quick split and
+// the line-by-line split, and rolls up to the ledger for free.
+// ===========================================================================
+
+/**
+ * Entity → locations/campuses map. Copied VERBATIM from
+ * worker/src/lib/constants.ts:151 `BUSINESS_CLASSES`. Location strings are exact
+ * (note "North Shore" with a space). Entities NOT present here (UrbanAyurveda)
+ * fall back to `[entity]` via `locationsFor`.
+ */
+export const BUSINESS_CLASSES: Record<string, string[]> = {
+  Neroli: ["Mequon", "Downtown", "Eastside", "North Shore", "Brookfield"],
+  SKNBar: ["Shorewood", "Pewaukee"],
+  IBW: ["Milwaukee", "Madison"],
+  Chicago: ["Chicago"],
+  Admin: ["Admin"],
+  Nala: ["Nala"],
+};
+
+/**
+ * The campuses/locations for a CC entity — `BUSINESS_CLASSES[entity]` when
+ * present, else `[entity]` (UrbanAyurveda). Mirrors ccLines.ts `locationsFor`.
+ */
+export function locationsFor(entity: string): string[] {
+  const classes = BUSINESS_CLASSES[entity];
+  return classes && classes.length ? classes : [entity];
+}
+
+/** O(1) check that `location` is a valid campus for `entity`. */
+export function isLocationFor(entity: string, location: string): boolean {
+  return locationsFor(entity).includes(location);
+}
+
+/**
+ * CC entity display order (worker/src/cc/ccConstants.ts CC_ENTITY_ORDER). The
+ * mobile `CC_ENTITIES` array is already declared in this exact order, so this is
+ * just its canonical-name projection for callers that want the plain list.
+ */
+export const CC_ENTITY_ORDER: string[] = CC_ENTITIES.map((e) => e.canonical);
+
+/** The three GL-category labels an allocation may carry (§3.5). ONLY these. */
+export const SERVICE_COSTS = "Service Costs";
+export const RETAIL_COSTS = "Retail / Product Costs";
+export const SALES_USE_TAX = "Sales/Use Tax";
+export const ALLOWED_GL_CATEGORIES: ReadonlySet<string> = new Set([
+  SERVICE_COSTS,
+  RETAIL_COSTS,
+  SALES_USE_TAX,
+]);
+
+/** A synthetic line_index for the (single) TAX line so it sorts last. */
+export const TAX_LINE_INDEX = 99;
+
+/** A line's kind: a normal item line, or the single per-receipt sales-tax line. */
+export type CcLineKind = "ITEM" | "TAX";
+
+/**
+ * One per-line allocation slice (entity × location × GL). Mirrors the server DTO
+ * `LineAllocation` in worker/src/cc/ccTypes.ts:338.
+ */
+export interface LineAllocation {
+  id?: string;
+  entity_name: string;
+  location: string;
+  gl_category: string;
+  amount: number;
+  is_tax?: boolean;
+}
+
+/**
+ * A receipt line with its allocations. Mirrors the server DTO `ReceiptLine` in
+ * worker/src/cc/ccTypes.ts:348 (the PUT /transactions/:id/lines body shape).
+ */
+export interface ReceiptLine {
+  id?: string;
+  client_id?: string;
+  receipt_id?: string | null;
+  line_index?: number;
+  kind: CcLineKind;
+  description: string;
+  quantity?: number | null;
+  unit_price?: number | null;
+  amount: number;
+  is_coded?: boolean;
+  allocations: LineAllocation[];
+}
+
+function toNum(v: unknown): number {
+  return typeof v === "number" ? v : Number(v);
+}
+
+export interface LineCodingValidation {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Client-side mirror of the server `validateLineCoding` (worker/src/cc/ccLines.ts:155),
+ * exact-to-cent like `validateSplits`:
+ *   - every allocation's `entity_name` ∈ CC_ENTITIES; `location` ∈ locationsFor(entity);
+ *     `gl_category` ∈ the allowed set; amount finite & ≥ 0;
+ *   - per line: roundCents(Σ alloc.amount) === roundCents(line.amount);
+ *   - whole tx: roundCents(Σ all alloc.amount) === roundCents(txAmount).
+ * Never throws. The mobile Submit button is locked until this returns ok.
+ */
+export function validateLineCoding(
+  txAmount: number,
+  lines: ReceiptLine[],
+): LineCodingValidation {
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return { ok: false, error: "At least one line is required." };
+  }
+
+  let txSum = 0;
+  for (const line of lines) {
+    if (!line || typeof line !== "object") {
+      return { ok: false, error: "Invalid line entry." };
+    }
+    const lineAmt = toNum(line.amount);
+    if (!Number.isFinite(lineAmt)) {
+      return { ok: false, error: `Invalid amount for line "${line.description ?? ""}"` };
+    }
+    const allocs = Array.isArray(line.allocations) ? line.allocations : [];
+    let lineSum = 0;
+    for (const a of allocs) {
+      if (!a || typeof a.entity_name !== "string" || !isCcEntity(a.entity_name)) {
+        return { ok: false, error: `Unknown entity: ${a?.entity_name ?? "(missing)"}` };
+      }
+      if (typeof a.location !== "string" || !isLocationFor(a.entity_name, a.location)) {
+        return {
+          ok: false,
+          error: `Pick a location for ${ccEntityLabel(a.entity_name)}.`,
+        };
+      }
+      if (typeof a.gl_category !== "string" || !ALLOWED_GL_CATEGORIES.has(a.gl_category)) {
+        return { ok: false, error: `Invalid category: ${a?.gl_category ?? "(missing)"}` };
+      }
+      const amt = toNum(a.amount);
+      if (!Number.isFinite(amt)) {
+        return { ok: false, error: `Invalid amount for ${a.entity_name} / ${a.location}` };
+      }
+      if (roundCents(amt) < 0) {
+        return { ok: false, error: `Amounts cannot be negative (${a.entity_name})` };
+      }
+      lineSum += amt;
+    }
+    if (roundCents(lineSum) !== roundCents(lineAmt)) {
+      return {
+        ok: false,
+        error: `Each line's allocations must sum to the line amount.`,
+      };
+    }
+    txSum += lineAmt;
+  }
+
+  if (roundCents(txSum) !== roundCents(txAmount)) {
+    return { ok: false, error: "Lines must sum to the transaction amount." };
+  }
+  return { ok: true };
+}
+
+/**
+ * Quick-split builder: represents the WHOLE receipt total as ONE synthetic ITEM
+ * line carrying the per-(entity,location) allocations. `gl_category` defaults to
+ * "Service Costs" (the accountant refines GL on desktop). $0 allocations dropped.
+ */
+export function buildQuickLines(
+  total: number,
+  allocations: LineAllocation[],
+): ReceiptLine[] {
+  const cleaned = allocations
+    .map((a) => ({
+      entity_name: a.entity_name,
+      location: a.location,
+      gl_category: a.gl_category || SERVICE_COSTS,
+      amount: roundCents(toNum(a.amount)),
+      is_tax: a.is_tax ?? false,
+    }))
+    .filter((a) => a.amount !== 0);
+  return [
+    {
+      line_index: 0,
+      kind: "ITEM",
+      description: "Receipt total",
+      amount: roundCents(total),
+      allocations: cleaned,
+    },
+  ];
+}
+
+/** A minimal line descriptor for the line-by-line builder (OCR or edited). */
+export interface LineDescriptor {
+  description?: string;
+  quantity?: number | null;
+  unit_price?: number | null;
+  amount?: number | null;
+}
+
+/**
+ * Line-by-line builder: one ITEM line per OCR/edited line descriptor (carrying
+ * its own allocations from `perLineAllocations[i]`), plus one TAX line
+ * (kind:'TAX', gl "Sales/Use Tax") when `tax` is present and > $0.
+ */
+export function buildLineByLine(
+  ocrLines: LineDescriptor[],
+  perLineAllocations: LineAllocation[][],
+  tax?: { amount: number; allocations: LineAllocation[] } | null,
+): ReceiptLine[] {
+  const lines: ReceiptLine[] = ocrLines.map((li, i) => ({
+    line_index: i,
+    kind: "ITEM" as const,
+    description: li.description || `Item ${i + 1}`,
+    quantity: li.quantity ?? null,
+    unit_price: li.unit_price ?? null,
+    amount: roundCents(typeof li.amount === "number" ? li.amount : 0),
+    allocations: (perLineAllocations[i] ?? [])
+      .map((a) => ({
+        entity_name: a.entity_name,
+        location: a.location,
+        gl_category: a.gl_category || SERVICE_COSTS,
+        amount: roundCents(toNum(a.amount)),
+        is_tax: a.is_tax ?? false,
+      }))
+      .filter((a) => a.amount !== 0),
+  }));
+
+  if (tax && roundCents(tax.amount) > 0) {
+    lines.push({
+      line_index: TAX_LINE_INDEX,
+      kind: "TAX",
+      description: "Sales Tax",
+      amount: roundCents(tax.amount),
+      allocations: (tax.allocations ?? [])
+        .map((a) => ({
+          entity_name: a.entity_name,
+          location: a.location,
+          gl_category: a.gl_category || SALES_USE_TAX,
+          amount: roundCents(toNum(a.amount)),
+          is_tax: true,
+        }))
+        .filter((a) => a.amount !== 0),
+    });
+  }
+  return lines;
+}

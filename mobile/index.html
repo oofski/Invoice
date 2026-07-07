@@ -6,11 +6,21 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#0b1220" />
+    <meta name="theme-color" content="#F6F4F1" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="format-detection" content="telephone=no" />
     <title>InvoiceIQ Receipts</title>
+    <!-- Match the desktop invoice app's typography: Hanken Grotesk (body),
+         Cormorant Garamond (display), Marcellus (wordmark). Loaded from Google
+         Fonts on the user's device; robust system fallbacks in styles.css so the
+         app still reads well if the fonts are slow/unavailable. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Cormorant+Garamond:wght@500;600;700&family=Marcellus&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <div id="root"></div>
