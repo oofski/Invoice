@@ -5,6 +5,19 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.8.1] — 2026-07-07
+
+### Added — Executive Mobile Receipt Site
+- **Split one business across multiple locations.** On the phone quick-split, a
+  multi-campus business (Neroli, Skn Bar Rx, Institute) now has a **"📍 Locations"**
+  picker that lets you select **more than one** location at once — each chosen
+  location gets its own amount row (e.g. Neroli → Downtown $40, Eastside $40,
+  Mequon $40). Previously each business was limited to a single location. Single-
+  location businesses (Nala, Admin, Institute Chicago, Urban Ayurveda) are
+  unchanged. Everything still balances exact-to-cent and rolls up to the
+  accountant's ledger; no backend or data-model change (the entity × location ×
+  GL model already supported it — this unlocks it in the UI).
+
 ## [1.8.0] — 2026-07-07
 
 ### Added — Executive Mobile Receipt Site

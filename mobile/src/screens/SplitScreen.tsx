@@ -26,9 +26,11 @@ import { Button } from "../components/Button";
  * line-coding model (entity × location × GL) so it matches the desktop and rolls
  * up to the accountant ledger for free. Two modes:
  *
- *   - QUICK (default): split the whole receipt total across the 7 CC entities;
- *     tapping a multi-campus entity (Neroli / SKNBarRx / Institute) opens a
- *     LOCATION sheet to pick the campus. Single-campus entities need no popup.
+ *   - QUICK (default): split the whole receipt total across the 7 CC entities.
+ *     A multi-campus entity (Neroli / SKNBarRx / Institute) can be split across
+ *     MULTIPLE locations at once — its location button opens a multi-select sheet;
+ *     each chosen campus becomes its own amount row. Single-campus entities need
+ *     no popup.
  *   - LINE BY LINE: assign each scanned line (+ a tax line) to an entity/location.
  *
  * Submit is LOCKED until it balances exact-to-cent (mirrors the server
@@ -40,7 +42,8 @@ import { Button } from "../components/Button";
 
 type Mode = "quick" | "line";
 
-/** Quick-mode per-entity row: the chosen campus + the dollar string. */
+/** Quick-mode allocation row: one chosen campus + the dollar string. An entity
+ *  may now hold SEVERAL of these (multi-location). */
 interface QuickRow {
   location: string;
   amount: string;
@@ -55,16 +58,20 @@ interface LineRow {
   kind: "ITEM" | "TAX";
 }
 
-/** Bottom-sheet for picking a campus for one entity (quick mode). */
+/**
+ * Bottom-sheet for picking one OR MORE campuses for an entity (quick mode).
+ * Multi-select: tap to toggle each location; "Done" closes. Every selected
+ * location gets its own amount row on the split screen.
+ */
 function LocationSheet({
   entity,
-  current,
-  onPick,
+  selected,
+  onToggle,
   onClose,
 }: {
   entity: string;
-  current: string;
-  onPick: (location: string) => void;
+  selected: string[];
+  onToggle: (location: string) => void;
   onClose: () => void;
 }) {
   const locations = locationsFor(entity);
@@ -73,23 +80,28 @@ function LocationSheet({
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-grip" />
         <h2 className="sheet-title">{ccEntityLabel(entity)}</h2>
-        <p className="sheet-sub">Which location?</p>
+        <p className="sheet-sub">Pick one or more locations</p>
         <ul className="sheet-list">
-          {locations.map((loc) => (
-            <li key={loc}>
-              <button
-                type="button"
-                className={`sheet-opt${loc === current ? " selected" : ""}`}
-                onClick={() => onPick(loc)}
-              >
-                <span>{loc}</span>
-                {loc === current && <span className="sheet-opt-check">✓</span>}
-              </button>
-            </li>
-          ))}
+          {locations.map((loc) => {
+            const on = selected.includes(loc);
+            return (
+              <li key={loc}>
+                <button
+                  type="button"
+                  className={`sheet-opt${on ? " selected" : ""}`}
+                  onClick={() => onToggle(loc)}
+                  role="checkbox"
+                  aria-checked={on}
+                >
+                  <span>{loc}</span>
+                  {on && <span className="sheet-opt-check">✓</span>}
+                </button>
+              </li>
+            );
+          })}
         </ul>
-        <button type="button" className="sheet-cancel" onClick={onClose}>
-          Cancel
+        <button type="button" className="sheet-done" onClick={onClose}>
+          Done
         </button>
       </div>
     </div>
@@ -105,8 +117,8 @@ export function SplitScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Quick mode: one row per entity, keyed by canonical name.
-  const [quick, setQuick] = useState<Record<string, QuickRow>>({});
+  // Quick mode: an ARRAY of {location, amount} rows per entity (multi-location).
+  const [quick, setQuick] = useState<Record<string, QuickRow[]>>({});
   // Which entity's location sheet is open (quick mode), or null.
   const [sheetEntity, setSheetEntity] = useState<string | null>(null);
 
@@ -122,15 +134,15 @@ export function SplitScreen() {
     else if (!(total > 0)) navigate("/review", { replace: true });
   }, [file, total, navigate]);
 
-  // Seed quick mode once: default each entity to its first campus, and put the
-  // full total on the first entity (Remaining starts at $0 — the common
+  // Seed quick mode once: each entity starts with its first campus, and the full
+  // total lands on the first entity (Remaining starts at $0 — the common
   // single-entity receipt is one tap; the exec reallocates from there).
   useEffect(() => {
-    const seed: Record<string, QuickRow> = {};
+    const seed: Record<string, QuickRow[]> = {};
     for (const e of CC_ENTITIES) {
-      seed[e.canonical] = { location: locationsFor(e.canonical)[0], amount: "" };
+      seed[e.canonical] = [{ location: locationsFor(e.canonical)[0], amount: "" }];
     }
-    if (total > 0) seed[CC_ENTITIES[0].canonical].amount = roundCents(total).toFixed(2);
+    if (total > 0) seed[CC_ENTITIES[0].canonical][0].amount = roundCents(total).toFixed(2);
     setQuick(seed);
   }, [total]);
 
@@ -158,19 +170,24 @@ export function SplitScreen() {
   }, [mode, lineRows.length, ocrItems, ocr]);
 
   // ---- quick-mode derived state ----
-  const quickParsed = useMemo(() => {
-    const out: Record<string, number> = {};
+  // Flatten every entity's location rows into (entity, location, amount).
+  const quickFlat = useMemo(() => {
+    const rows: { entity: string; location: string; amount: number }[] = [];
     for (const e of CC_ENTITIES) {
-      const n = parseFloat(quick[e.canonical]?.amount ?? "");
-      out[e.canonical] = Number.isFinite(n) ? n : 0;
+      for (const r of quick[e.canonical] ?? []) {
+        const n = parseFloat(r.amount);
+        rows.push({
+          entity: e.canonical,
+          location: r.location,
+          amount: Number.isFinite(n) ? n : 0,
+        });
+      }
     }
-    return out;
+    return rows;
   }, [quick]);
-  const quickAllocated = roundCents(
-    Object.values(quickParsed).reduce((a, b) => a + b, 0),
-  );
+  const quickAllocated = roundCents(quickFlat.reduce((a, r) => a + r.amount, 0));
   const quickRemaining = roundCents(roundCents(total) - quickAllocated);
-  const quickNegative = Object.values(quickParsed).some((n) => n < 0);
+  const quickNegative = quickFlat.some((r) => r.amount < 0);
   const quickBalanced = quickRemaining === 0 && !quickNegative && quickAllocated > 0;
 
   // ---- line-mode derived state ----
@@ -188,8 +205,7 @@ export function SplitScreen() {
   const allLineAssigned =
     lineRows.length > 0 &&
     lineRows.every((r, i) => r.entity && r.location && lineParsed[i] > 0);
-  const lineBalanced =
-    lineRemaining === 0 && !lineNegative && allLineAssigned;
+  const lineBalanced = lineRemaining === 0 && !lineNegative && allLineAssigned;
 
   const balanced = mode === "quick" ? quickBalanced : lineBalanced;
   const remaining = mode === "quick" ? quickRemaining : lineRemaining;
@@ -197,43 +213,88 @@ export function SplitScreen() {
   const hasNegative = mode === "quick" ? quickNegative : lineNegative;
 
   // ---- quick-mode actions ----
-  function setQuickAmount(entity: string, value: string) {
+  function setQuickAmount(entity: string, idx: number, value: string) {
     if (value !== "" && !/^-?\d*\.?\d{0,2}$/.test(value)) return;
-    setQuick((prev) => ({ ...prev, [entity]: { ...prev[entity], amount: value } }));
+    setQuick((prev) => ({
+      ...prev,
+      [entity]: (prev[entity] ?? []).map((r, i) =>
+        i === idx ? { ...r, amount: value } : r,
+      ),
+    }));
   }
-  function setQuickLocation(entity: string, location: string) {
-    setQuick((prev) => ({ ...prev, [entity]: { ...prev[entity], location } }));
-    setSheetEntity(null);
+  /** Toggle a location for an entity: add a row (amount "") or remove it. Rows
+   *  are kept in the entity's canonical location order. */
+  function toggleLocation(entity: string, location: string) {
+    setQuick((prev) => {
+      const rows = prev[entity] ?? [];
+      const has = rows.some((r) => r.location === location);
+      let next: QuickRow[];
+      if (has) {
+        next = rows.filter((r) => r.location !== location);
+      } else {
+        const order = locationsFor(entity);
+        next = [...rows, { location, amount: "" }].sort(
+          (a, b) => order.indexOf(a.location) - order.indexOf(b.location),
+        );
+      }
+      return { ...prev, [entity]: next };
+    });
   }
+  /** Put the full total on this entity (its first row), zeroing everything else. */
   function allOn(entity: string) {
     setQuick((prev) => {
-      const next: Record<string, QuickRow> = {};
-      for (const e of CC_ENTITIES) next[e.canonical] = { ...prev[e.canonical], amount: "" };
-      next[entity] = { ...prev[entity], amount: roundCents(total).toFixed(2) };
+      const next: Record<string, QuickRow[]> = {};
+      for (const e of CC_ENTITIES) {
+        next[e.canonical] = (prev[e.canonical] ?? []).map((r) => ({ ...r, amount: "" }));
+      }
+      const rows = next[entity];
+      if (rows.length === 0) {
+        next[entity] = [{ location: locationsFor(entity)[0], amount: roundCents(total).toFixed(2) }];
+      } else {
+        next[entity] = rows.map((r, i) =>
+          i === 0 ? { ...r, amount: roundCents(total).toFixed(2) } : r,
+        );
+      }
       return next;
     });
   }
+  /** Even split across EVERY currently-shown location row. */
   function splitEvenly() {
+    const flatKeys: { entity: string; idx: number }[] = [];
+    for (const e of CC_ENTITIES) {
+      (quick[e.canonical] ?? []).forEach((_, idx) => flatKeys.push({ entity: e.canonical, idx }));
+    }
+    const n = flatKeys.length;
+    if (n === 0) return;
     const cents = Math.round(roundCents(total) * 100);
-    const per = Math.floor(cents / CC_ENTITIES.length);
-    let rem = cents - per * CC_ENTITIES.length;
+    const per = Math.floor(cents / n);
+    let rem = cents - per * n;
+    const amountByKey = new Map<string, string>();
+    for (const k of flatKeys) {
+      let c = per;
+      if (rem > 0) {
+        c += 1;
+        rem -= 1;
+      }
+      amountByKey.set(`${k.entity}#${k.idx}`, (c / 100).toFixed(2));
+    }
     setQuick((prev) => {
-      const next: Record<string, QuickRow> = {};
+      const next: Record<string, QuickRow[]> = {};
       for (const e of CC_ENTITIES) {
-        let c = per;
-        if (rem > 0) {
-          c += 1;
-          rem -= 1;
-        }
-        next[e.canonical] = { ...prev[e.canonical], amount: (c / 100).toFixed(2) };
+        next[e.canonical] = (prev[e.canonical] ?? []).map((r, idx) => ({
+          ...r,
+          amount: amountByKey.get(`${e.canonical}#${idx}`) ?? "",
+        }));
       }
       return next;
     });
   }
   function clearQuick() {
     setQuick((prev) => {
-      const next: Record<string, QuickRow> = {};
-      for (const e of CC_ENTITIES) next[e.canonical] = { ...prev[e.canonical], amount: "" };
+      const next: Record<string, QuickRow[]> = {};
+      for (const e of CC_ENTITIES) {
+        next[e.canonical] = (prev[e.canonical] ?? []).map((r) => ({ ...r, amount: "" }));
+      }
       return next;
     });
   }
@@ -256,12 +317,14 @@ export function SplitScreen() {
   // ---- build the line-coding payload for submit ----
   function buildLines(): ReceiptLine[] {
     if (mode === "quick") {
-      const allocations: LineAllocation[] = CC_ENTITIES.map((e) => ({
-        entity_name: e.canonical,
-        location: quick[e.canonical]?.location ?? locationsFor(e.canonical)[0],
-        gl_category: SERVICE_COSTS,
-        amount: roundCents(quickParsed[e.canonical]),
-      })).filter((a) => a.amount !== 0);
+      const allocations: LineAllocation[] = quickFlat
+        .map((r) => ({
+          entity_name: r.entity,
+          location: r.location,
+          gl_category: SERVICE_COSTS,
+          amount: roundCents(r.amount),
+        }))
+        .filter((a) => a.amount !== 0);
       return buildQuickLines(total, allocations);
     }
     // line-by-line
@@ -401,46 +464,63 @@ export function SplitScreen() {
             {CC_ENTITIES.map((e) => {
               const locs = locationsFor(e.canonical);
               const multi = locs.length > 1;
-              const row = quick[e.canonical] ?? { location: locs[0], amount: "" };
+              const rows = quick[e.canonical] ?? [];
               return (
                 <li key={e.canonical} className="alloc">
                   <div className="alloc-top">
                     <span className="alloc-entity">{e.label}</span>
-                    <button
-                      type="button"
-                      className="chip chip-mini"
-                      onClick={() => allOn(e.canonical)}
-                      aria-label={`Put the full total on ${e.label}`}
-                    >
-                      All
-                    </button>
-                  </div>
-                  <div className="alloc-bottom">
-                    {multi ? (
+                    <div className="alloc-top-actions">
+                      {multi && (
+                        <button
+                          type="button"
+                          className="chip chip-mini"
+                          onClick={() => setSheetEntity(e.canonical)}
+                        >
+                          📍 Locations{rows.length > 1 ? ` (${rows.length})` : ""}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        className="loc-btn"
-                        onClick={() => setSheetEntity(e.canonical)}
+                        className="chip chip-mini"
+                        onClick={() => allOn(e.canonical)}
+                        aria-label={`Put the full total on ${e.label}`}
                       >
-                        <span className="loc-name">📍 {row.location}</span>
-                        <span className="loc-caret">▾</span>
+                        All
                       </button>
-                    ) : (
-                      <span className="loc-static">
-                        {row.location === e.canonical ? "" : row.location}
-                      </span>
-                    )}
-                    <div className="money-input money-input-sm">
-                      <span className="money-prefix">$</span>
-                      <input
-                        inputMode="decimal"
-                        value={row.amount}
-                        onChange={(ev) => setQuickAmount(e.canonical, ev.target.value)}
-                        placeholder="0.00"
-                        aria-label={`Amount for ${e.label}`}
-                      />
                     </div>
                   </div>
+
+                  {rows.length === 0 && multi ? (
+                    <button
+                      type="button"
+                      className="add-loc"
+                      onClick={() => setSheetEntity(e.canonical)}
+                    >
+                      + Add a location
+                    </button>
+                  ) : (
+                    rows.map((r, idx) => (
+                      <div className="alloc-bottom" key={r.location}>
+                        {multi ? (
+                          <span className="loc-static">📍 {r.location}</span>
+                        ) : (
+                          <span className="loc-static">
+                            {r.location === e.canonical ? "" : r.location}
+                          </span>
+                        )}
+                        <div className="money-input money-input-sm">
+                          <span className="money-prefix">$</span>
+                          <input
+                            inputMode="decimal"
+                            value={r.amount}
+                            onChange={(ev) => setQuickAmount(e.canonical, idx, ev.target.value)}
+                            placeholder="0.00"
+                            aria-label={`Amount for ${e.label}${multi ? ` ${r.location}` : ""}`}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </li>
               );
             })}
@@ -537,8 +617,8 @@ export function SplitScreen() {
       {sheetEntity && (
         <LocationSheet
           entity={sheetEntity}
-          current={quick[sheetEntity]?.location ?? locationsFor(sheetEntity)[0]}
-          onPick={(loc) => setQuickLocation(sheetEntity, loc)}
+          selected={(quick[sheetEntity] ?? []).map((r) => r.location)}
+          onToggle={(loc) => toggleLocation(sheetEntity, loc)}
           onClose={() => setSheetEntity(null)}
         />
       )}

@@ -689,6 +689,27 @@ main {
   justify-content: space-between;
   gap: 10px;
 }
+.alloc-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+/* "+ Add a location" affordance for a multi-campus entity with no rows yet. */
+.add-loc {
+  width: 100%;
+  min-height: 44px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.add-loc:active {
+  background: var(--selected-bg);
+}
 .alloc-entity {
   font-weight: 600;
   font-size: 15px;
@@ -947,6 +968,22 @@ main {
   font-weight: 600;
   font-size: 15px;
   cursor: pointer;
+}
+/* Multi-select "Done" — the primary action to close the location sheet. */
+.sheet-done {
+  width: 100%;
+  min-height: var(--tap);
+  margin-top: 8px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 650;
+  font-size: 16px;
+  cursor: pointer;
+}
+.sheet-done:active {
+  background: var(--accent-press);
 }
 
 /* ---------------------------------------------------------------- confirm */
