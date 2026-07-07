@@ -37,6 +37,9 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/", (c) => c.json({ name: "InvoiceIQ API", status: "ok" }));
+// Additive health probe: bare `/` now serves the mobile SPA index at the edge (a
+// static asset), so this worker-side probe is never shadowed by the SPA fallback.
+app.get("/healthz", (c) => c.json({ name: "InvoiceIQ API", status: "ok" }));
 
 // Public auth endpoints.
 app.route("/api/auth", authPublic);
@@ -66,6 +69,22 @@ app.route("/api/audit", audit);
 app.route("/api/dashboard", dashboard);
 app.route("/api/users", users);
 app.route("/api/cc", cc);
+
+// Additive: serve the Executive Mobile Receipt SPA (mobile/dist via the ASSETS
+// binding) for any non-API GET. Declared LAST so it can never shadow an existing
+// route. The installed wrangler (3.114.17) lacks `run_worker_first`'s array form,
+// so THIS catch-all — not wrangler.toml — is what keeps every API path on the
+// worker: /api/* & /ingest/* are handled above and are explicitly excluded here so
+// unknown paths under them keep the worker's native 404 (never the SPA index). For
+// everything else, `env.ASSETS.fetch` returns the hashed asset, or — via
+// `not_found_handling = "single-page-application"` — index.html for SPA deep links.
+app.get("*", (c) => {
+  const path = new URL(c.req.url).pathname;
+  if (path.startsWith("/api/") || path === "/ingest" || path.startsWith("/ingest/")) {
+    return c.notFound();
+  }
+  return (c.env as unknown as { ASSETS: Fetcher }).ASSETS.fetch(c.req.raw);
+});
 
 // Surface real error messages to the client (and the Worker logs) instead of a
 // bare 500, so failures like a misconfigured Reducto key or an unexpected

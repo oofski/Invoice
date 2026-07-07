@@ -36,12 +36,14 @@ import {
 } from "../../cc/ccStorage";
 import { extractReceiptBytes, normalizeReceipt } from "../../cc/receiptExtract";
 import { matchReceiptToTransaction } from "../../cc/receiptMatch";
-import { attachReceiptToTx } from "../../cc/receiptAttach";
+import { attachReceiptToTx, applyPendingSplits } from "../../cc/receiptAttach";
+import { isCcEntity } from "../../cc/ccConstants";
 import type {
   CandidateTx,
   CcReceiptStatus,
   CcSource,
   CcUploadMethod,
+  EntitySplitInput,
   InboxItem,
   InboxRow,
   InboxStatus,
@@ -51,6 +53,44 @@ import type {
   ReceiptOcrData,
   TxRow,
 } from "../../cc/ccTypes";
+
+/**
+ * Additive local extensions (keeps `ccTypes.ts` untouched — both fields are
+ * optional/additive). `pending_splits` is the new nullable inbox column; a queued
+ * drop stashes an exec's entity split there until the receipt matches a tx.
+ */
+type PerFileResultOut = PerFileResult & { split_applied?: boolean };
+type InboxRowWithSplits = InboxRow & { pending_splits: string | null };
+
+/**
+ * Defensively parses the optional `pending_splits` drop field — a JSON string of
+ * `[{entity_name, amount}]` (the exec's entity split from the mobile submit).
+ * Returns validated rows (every `entity_name ∈ CC_ENTITIES`, every `amount`
+ * finite) or null when absent/empty/malformed. A bad payload is ignored, never
+ * throws — it must NOT break the drop. (Sum-vs-amount is checked later by
+ * `validateSplits` inside `applyPendingSplits`, once a tx amount is known.)
+ */
+function parsePendingSplits(raw: unknown): EntitySplitInput[] | null {
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const rows: EntitySplitInput[] = [];
+    for (const r of parsed) {
+      const nameRaw = (r as { entity_name?: unknown })?.entity_name;
+      const name = typeof nameRaw === "string" ? nameRaw : "";
+      const amtRaw = (r as { amount?: unknown })?.amount;
+      const amount = typeof amtRaw === "number" ? amtRaw : Number(amtRaw);
+      if (!isCcEntity(name) || !Number.isFinite(amount)) {
+        return null; // malformed row → ignore the whole payload (no partial split)
+      }
+      rows.push({ entity_name: name, amount });
+    }
+    return rows.length ? rows : null;
+  } catch {
+    return null;
+  }
+}
 
 export const inbox = new Hono<AppEnv>();
 
@@ -243,9 +283,13 @@ inbox.post("/", async (c) => {
 
   if (files.length === 0) return c.json({ error: "No file provided" }, 400);
 
+  // NEW (additive): the exec's entity split, sent by the mobile submit. Absent for
+  // every desktop/manager drop → null → the branches below behave exactly as today.
+  const pendingSplits = parsePendingSplits(form.get("pending_splits"));
+
   const u = user(c);
   const managerActing = isManager(c);
-  const results: PerFileResult[] = [];
+  const results: PerFileResultOut[] = [];
 
   // Sequential loop: keeps Reducto / D1 load bounded; one bad file → ERROR result,
   // the rest proceed.
@@ -350,21 +394,34 @@ inbox.post("/", async (c) => {
           )
           .run();
 
-        results.push({
+        const matchedResult: PerFileResultOut = {
           file_name: fileName,
           status: "MATCHED",
           inbox_id: inboxId,
           matched_transaction_id: outcome.transactionId,
           ocr: { ...normalized, match: outcome.match.match, confidence: outcome.match.confidence },
-        });
+        };
+        // Apply-at-match (C.6b): the drop auto-matched, so apply the carried split
+        // immediately via the shared helper (never stashed — it's applied here).
+        // `applyPendingSplits` validates sum-vs-amount and never throws.
+        if (pendingSplits) {
+          matchedResult.split_applied = await applyPendingSplits(
+            c.env,
+            outcome.transactionId,
+            pendingSplits,
+          );
+        }
+        results.push(matchedResult);
       } else {
         // Queue: PENDING_MATCH with candidates. No cc_receipts row; tx untouched.
+        // NEW (additive): stash the carried exec split (if any) on `pending_splits`
+        // to apply on later match; null for every drop that didn't send it.
         await c.env.DB.prepare(
           `INSERT INTO cc_receipt_inbox
              (id, uploaded_by, cardholder_id, source_guess, r2_key, file_name, file_type,
               file_size_bytes, ocr_extracted_data, status, candidate_transaction_ids,
-              created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+              pending_splits, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
           .bind(
             inboxId,
@@ -378,6 +435,7 @@ inbox.post("/", async (c) => {
             JSON.stringify(ocr),
             "PENDING_MATCH",
             JSON.stringify(outcome.candidateIds),
+            pendingSplits ? JSON.stringify(pendingSplits) : null,
             at,
             at,
           )
@@ -545,12 +603,21 @@ inbox.post("/:id/assign", async (c) => {
     fireAlert: false,
   });
 
+  // Apply-on-later-match (C.6c): if this queued row carried an exec split, apply it
+  // to the just-attached tx now. No-op when the column is null/absent.
+  // `applyPendingSplits` validates sum-vs-`tx.amount` and never throws, so a
+  // mismatch/failure leaves the tx unsplit for the manager and never blocks attach.
+  const carriedSplits = parsePendingSplits((row as InboxRowWithSplits).pending_splits);
+  if (carriedSplits) await applyPendingSplits(c.env, txId, carriedSplits);
+
   const at = nowIso();
   const u = user(c);
+  // `pending_splits = NULL` clears the carried split now that it's had its one shot
+  // (no-op when the row never carried one).
   await c.env.DB.prepare(
     `UPDATE cc_receipt_inbox
         SET status = 'MATCHED', matched_transaction_id = ?, matched_receipt_id = ?,
-            resolved_by = ?, updated_at = ?
+            resolved_by = ?, pending_splits = NULL, updated_at = ?
       WHERE id = ?`,
   )
     .bind(txId, attached.receiptId, u.id, at, id)
@@ -594,6 +661,61 @@ inbox.post("/:id/return", async (c) => {
 
   const updated = await fetchInbox(c.env, id);
   return c.json({ item: updated ? await hydrateInbox(c.env, updated) : null });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /receipts/inbox/:id/pending_splits — attach the exec's entity split to
+// an EXISTING drop row (owner-dropper OR manager). This is the single-row path
+// used by the mobile submit: the photo was already dropped once (at /review, to
+// get OCR), so instead of re-dropping (which would create a duplicate inbox row)
+// the split is attached to that same row here.
+//   - Row already matched to a tx → apply the split now (validated) + clear it.
+//   - Still PENDING_MATCH/RETURNED → stash on `pending_splits` to apply on match.
+// ---------------------------------------------------------------------------
+inbox.patch("/:id/pending_splits", async (c) => {
+  if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
+  if (!(await ccReady(c.env))) return c.json(NOT_READY, 503);
+
+  const id = c.req.param("id");
+  const row = await fetchInbox(c.env, id);
+  if (!row) return c.json({ error: "Not found" }, 404);
+  // The dropper who owns this row, or any manager, may attach the split.
+  if (!isManager(c) && !ownsInbox(c, row)) return c.json({ error: "Forbidden" }, 403);
+
+  // Accept `{ splits: [...] }` (mirrors PUT /splits) or `{ pending_splits: ... }`.
+  // parsePendingSplits validates entity∈CC_ENTITIES + finite amounts; a JSON
+  // string or an already-parsed array both round-trip through JSON.stringify.
+  const body = (await c.req.json().catch(() => ({}))) as {
+    splits?: unknown;
+    pending_splits?: unknown;
+  };
+  const raw = body.splits ?? body.pending_splits;
+  const rows = parsePendingSplits(typeof raw === "string" ? raw : JSON.stringify(raw ?? null));
+  if (!rows) return c.json({ error: "Invalid or empty splits" }, 400);
+
+  const at = nowIso();
+
+  // Already attached to a tx (auto-matched at the preview drop, or manager-assigned
+  // in between): apply immediately via the shared validated write path, then clear
+  // the stash. `applyPendingSplits` validates sum-vs-amount and never throws.
+  if (row.matched_transaction_id) {
+    const applied = await applyPendingSplits(c.env, row.matched_transaction_id, rows);
+    await c.env.DB.prepare(
+      "UPDATE cc_receipt_inbox SET pending_splits = NULL, updated_at = ? WHERE id = ?",
+    )
+      .bind(at, id)
+      .run();
+    return c.json({ applied, pending: false });
+  }
+
+  // Not yet matched: stash the split to apply automatically on a later match
+  // (POST /:id/assign and the auto-match drop both consume `pending_splits`).
+  await c.env.DB.prepare(
+    "UPDATE cc_receipt_inbox SET pending_splits = ?, updated_at = ? WHERE id = ?",
+  )
+    .bind(JSON.stringify(rows), at, id)
+    .run();
+  return c.json({ applied: false, pending: true });
 });
 
 // ---------------------------------------------------------------------------

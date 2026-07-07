@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "build:mobile": "npm --prefix ../mobile install && npm --prefix ../mobile run build",
+    "predeploy": "npm run build:mobile",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "db:init": "wrangler d1 execute invoiceiq --file=./src/db/schema.sql",

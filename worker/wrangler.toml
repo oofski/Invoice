@@ -17,6 +17,23 @@ database_id = "3091c97d-d3f3-4deb-a5c5-f7521dbe1a3d"
 binding = "PDFS"
 bucket_name = "invoiceiq-pdfs"
 
+# --- Static Assets: the Executive Mobile Receipt SPA (mobile/dist), same origin ---
+# The worker serves the built mobile SPA for all non-API paths; the mobile build is
+# wired into `predeploy` (package.json) so `mobile/dist` exists before deploy.
+#
+# NOTE: the installed wrangler (3.114.17) does NOT support the `run_worker_first`
+# ARRAY form — it errors "Expected assets.run_worker_first to be of type boolean".
+# So we bind ASSETS (no run_worker_first) and route API-vs-SPA with a trailing
+# catch-all in src/index.ts, registered AFTER every /api/* and /ingest/* route.
+# With `main` set, any request that does NOT match a static asset invokes the
+# worker, so /api/* & /ingest/* always run the unchanged Hono handlers; only
+# non-API paths fall through to the SPA. `not_found_handling` makes ASSETS.fetch
+# return index.html for unmatched client routes (SPA deep-link/refresh).
+[assets]
+directory = "../mobile/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
 # --- Secrets (dashboard: Settings -> Variables and Secrets; or `wrangler secret put`) ---
 # REDUCTO_API_KEY           (REQUIRED — Reducto parse + /extract; reducto.ai)
 # INGEST_TOKEN              (optional — shared secret for SharePoint/Power Automate ingestion)

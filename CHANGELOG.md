@@ -5,6 +5,27 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [Unreleased]
+
+### Added
+- **Executive Mobile Receipt Site.** A lightweight mobile web app (no install —
+  executives just open a link and stay signed in) that lets a cardholder snap a
+  store receipt on their phone, review the OCR-scanned line items and total, do
+  the **same entity split as the desktop app** (the identical 7 entities and
+  exact-to-cent balancing), and submit — it flows straight to the Credit Card
+  Accountant for approval, auto-matching to the card charge when the statement is
+  already imported. It reuses the existing server: same login, same OCR + match,
+  same split validation, same inbox. Served same-origin by the InvoiceIQ worker
+  as static assets, so there is no second server to run.
+  - When the charge is already on the statement, the split is applied on submit.
+  - When the charge hasn't imported yet, the receipt is filed to the accountant
+    and the split is **saved to apply automatically** the moment the charge
+    matches — the exec never has to come back.
+  - **Additive only:** the desktop app, the invoice flow, and every existing
+    Credit Card screen are untouched. The worker still serves every `/api/*` and
+    `/ingest/*` route exactly as before (verified: API paths are never shadowed by
+    the mobile site; only non-API paths serve the app).
+
 ## [1.6.4] — 2026-07-07
 
 ### Added

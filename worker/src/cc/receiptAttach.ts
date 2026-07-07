@@ -20,12 +20,13 @@ import type { Env } from "../lib/types";
 import { ROLES } from "../lib/constants";
 import { uuid, nowIso } from "../lib/util";
 import { ccEntityLabel } from "./ccConstants";
-import { roundCents } from "./ccRules";
+import { roundCents, validateSplits } from "./ccRules";
 import { persistReceiptLines } from "./ccLines";
 import { sendCcManagerAlert } from "./ccEmail";
 import type {
   CcSource,
   CcUploadMethod,
+  EntitySplitInput,
   MatchResult,
   NormalizedReceipt,
   Receipt,
@@ -294,4 +295,54 @@ export async function attachReceiptToTx(
     transaction: updatedTx ? await hydrateTx(env, updatedTx) : null,
     receiptId,
   };
+}
+
+/**
+ * Applies a carried entity split to a transaction using the EXACT same validated
+ * write path as `PUT /transactions/:id/splits` (splits.ts): `validateSplits`
+ * (exact-to-cent sum vs `tx.amount`, known entities, non-negative) then replace-all
+ * `DELETE FROM cc_entity_splits` + INSERT each non-zero `roundCents` row.
+ *
+ * Used by the Exec Mobile Receipt drop (apply-at-match) and the manager assign
+ * (apply-on-later-match). Reuses `validateSplits`/`roundCents` READ-ONLY.
+ *
+ * Best-effort: returns whether it applied. On validation failure (e.g. the exec's
+ * total ≠ the imported charge amount) it skips silently — leaving the tx unsplit
+ * for the manager — and it NEVER throws into the caller (so a split failure can
+ * never block the receipt attach).
+ */
+export async function applyPendingSplits(
+  env: Env,
+  transactionId: string,
+  rows: EntitySplitInput[],
+): Promise<boolean> {
+  try {
+    if (!Array.isArray(rows) || rows.length === 0) return false;
+    const tx = await fetchTx(env, transactionId);
+    if (!tx) return false;
+
+    const valid = validateSplits(tx.amount, rows);
+    if (!valid.ok) return false; // amount mismatch / bad entity → leave for manager
+
+    const at = nowIso();
+    await env.DB.prepare("DELETE FROM cc_entity_splits WHERE transaction_id = ?")
+      .bind(transactionId)
+      .run();
+    for (const s of rows) {
+      const amount = roundCents(typeof s.amount === "number" ? s.amount : Number(s.amount));
+      if (amount === 0) continue;
+      await env.DB.prepare(
+        "INSERT INTO cc_entity_splits (id, transaction_id, entity_name, amount, created_at) VALUES (?,?,?,?,?)",
+      )
+        .bind(uuid(), transactionId, s.entity_name, amount, at)
+        .run();
+    }
+    await env.DB.prepare("UPDATE cc_transactions SET updated_at = ? WHERE id = ?")
+      .bind(at, transactionId)
+      .run();
+    return true;
+  } catch (e) {
+    console.error("[cc] applyPendingSplits failed (leaving tx unsplit):", e);
+    return false;
+  }
 }

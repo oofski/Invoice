@@ -177,6 +177,7 @@ const CC_DDL: string[] = [
      matched_transaction_id    TEXT,
      matched_receipt_id        TEXT,
      candidate_transaction_ids TEXT,
+     pending_splits            TEXT,
      return_note               TEXT,
      returned_by               TEXT,
      resolved_by               TEXT,
@@ -214,6 +215,13 @@ const CC_ADD_COLUMNS: { table: string; column: string; ddl: string }[] = [
     table: "cc_transactions",
     column: "archived_at",
     ddl: "ALTER TABLE cc_transactions ADD COLUMN archived_at TEXT",
+  },
+  {
+    // Exec Mobile Receipt Site: carries an executive's entity split on a queued
+    // drop until the receipt matches a transaction (raw JSON [{entity_name,amount}]).
+    table: "cc_receipt_inbox",
+    column: "pending_splits",
+    ddl: "ALTER TABLE cc_receipt_inbox ADD COLUMN pending_splits TEXT",
   },
 ];
 
