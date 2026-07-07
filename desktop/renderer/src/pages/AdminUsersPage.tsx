@@ -13,7 +13,7 @@ import { useApi } from "@/hooks/useApi";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { useProfile } from "@/components/ProfileProvider";
-import { ALL_ROLES, APPROVERS, BUSINESS_ENTITIES, type Role } from "@/lib/constants";
+import { ALL_ROLES, APPROVERS, BUSINESS_ENTITIES, roleLabel, type Role } from "@/lib/constants";
 import type { UserRow, AuthUser } from "@/lib/types";
 
 export default function AdminUsersPage() {
@@ -222,7 +222,7 @@ export default function AdminUsersPage() {
                         >
                           {ALL_ROLES.map((r) => (
                             <option key={r} value={r}>
-                              {r}
+                              {roleLabel(r)}
                             </option>
                           ))}
                         </Select>
@@ -368,7 +368,7 @@ export default function AdminUsersPage() {
               >
                 {ALL_ROLES.map((r) => (
                   <option key={r} value={r}>
-                    {r}
+                    {roleLabel(r)}
                   </option>
                 ))}
               </Select>
@@ -507,7 +507,7 @@ export default function AdminUsersPage() {
               >
                 {ALL_ROLES.map((r) => (
                   <option key={r} value={r}>
-                    {r}
+                    {roleLabel(r)}
                   </option>
                 ))}
               </Select>

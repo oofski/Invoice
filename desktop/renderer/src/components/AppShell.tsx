@@ -17,7 +17,7 @@ import {
   CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ROLES, type Role } from "@/lib/constants";
+import { ROLES, roleLabel, type Role } from "@/lib/constants";
 import { useAuth, useProfile } from "@/components/ProfileProvider";
 import { useCcEnabled } from "@/cc/useCcEnabled";
 
@@ -152,8 +152,8 @@ export function AppShell() {
           <p className="truncate text-sm font-medium text-white">
             {profile.name}
           </p>
-          <p className="truncate text-xs capitalize text-[#9FA6A6]">
-            {profile.role}
+          <p className="truncate text-xs text-[#9FA6A6]">
+            {roleLabel(profile.role)}
           </p>
         </div>
         <button

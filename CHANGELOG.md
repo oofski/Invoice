@@ -5,6 +5,27 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.6.4] — 2026-07-07
+
+### Added
+- **Credit Card Accountant "Ledger."** A new **Ledger** tab in the Credit Cards
+  module reproduces the per-cardholder accounting workbook automatically: one
+  section per cardholder with the exact columns — Receipt · In QB · Date · Vendor
+  · Charge · one column per business entity (Nala Beauty Brands, Urban Ayurveda,
+  Skn Bar Rx, Admin, Institute, Institute Chicago, Neroli) · Total · Difference ·
+  Notes — populated from each transaction's entity splits ("after splits are
+  done"). Fully-split charges reconcile to a blank Difference; unsplit or credit
+  rows are flagged so nothing slips through. Totals row per cardholder, and a
+  cycle date filter.
+- **One-click Excel export** of the ledger that matches the workbook: one sheet
+  per cardholder (named "Name last4") plus a Summary sheet.
+- **Credit Card Accountant is now a selectable role when onboarding a user** — it
+  grants access to the Credit Cards module and this ledger.
+
+### Changed
+- Role names now display cleanly everywhere (sidebar + user management) — e.g.
+  "Credit Card Accountant" instead of the raw value.
+
 ## [1.6.3] — 2026-07-06
 
 ### Added / Changed — vendor coding

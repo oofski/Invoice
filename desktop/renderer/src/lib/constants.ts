@@ -18,6 +18,10 @@ export const ROLES = {
   EXECUTIVE: "executive",
   STAFF: "staff",
   ADMIN: "admin",
+  // Credit Card Accountant — gates the CC module + the per-cardholder Ledger.
+  // Value MUST match the worker's ROLES.CREDIT_CARD_ACCOUNTANT ("credit_card_accountant")
+  // so useCcManager()/hasRole() and the user create/update routes agree.
+  CREDIT_CARD_ACCOUNTANT: "credit_card_accountant",
 } as const;
 
 export type Role = (typeof ROLES)[keyof typeof ROLES];
@@ -27,7 +31,25 @@ export const ALL_ROLES: Role[] = [
   ROLES.EXECUTIVE,
   ROLES.STAFF,
   ROLES.ADMIN,
+  ROLES.CREDIT_CARD_ACCOUNTANT,
 ];
+
+/** Human-readable role names for display (sidebar, user-management Selects). */
+export const ROLE_LABEL: Record<string, string> = {
+  [ROLES.ACCOUNTANT]: "Accountant",
+  [ROLES.EXECUTIVE]: "Executive",
+  [ROLES.STAFF]: "Staff",
+  [ROLES.ADMIN]: "Admin",
+  [ROLES.CREDIT_CARD_ACCOUNTANT]: "Credit Card Accountant",
+};
+
+/** Pretty role label with a title-cased fallback for any unmapped value. */
+export function roleLabel(role: string): string {
+  return (
+    ROLE_LABEL[role] ??
+    role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  );
+}
 
 /** Invoice lifecycle statuses. */
 export const INVOICE_STATUS = {

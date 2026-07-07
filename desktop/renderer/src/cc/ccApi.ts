@@ -514,6 +514,83 @@ export interface CcDashboardAnalyticsQuery {
   months?: number;
 }
 
+// ----- Accountant ledger (GET /api/cc/ledger) ---------------------------
+// Per-cardholder split-matrix ledger for one statement cycle. Universe mirrors
+// the dashboard (in-cycle, is_payment = 0, credits + archived kept) so ledger
+// totals reconcile with the dashboard KPIs. Each row pivots the tx's
+// `cc_entity_splits` into `entities` (canonical entity_name → amount, blanks
+// omitted); Total = Σ entities, Difference = charge − Total (0 when fully
+// split). Redeclared locally from the frozen contract (NOT imported from the
+// worker), like the rest of this file.
+
+/** One entity column (canonical order = CC_ENTITY_ORDER). */
+export interface CcLedgerEntityColumn {
+  entity_name: string; // canonical (CC_ENTITIES.canonical)
+  label: string; // CC display label (ccEntityLabel)
+}
+
+/** One ledger row = one in-cycle transaction pivoted across entities. */
+export interface CcLedgerRow {
+  transaction_id: string;
+  have_receipt: boolean; // receipt_status IN ('RECEIVED','UPLOADED')
+  in_qb: boolean;
+  date: string; // transaction_date (YYYY-MM-DD)
+  vendor: string;
+  charge: number; // tx amount (negatives = credits)
+  /** Per-entity allocation; blank entities omitted (absent key = blank cell). */
+  entities: Record<string, number>;
+  total: number; // roundCents(Σ entities)
+  difference: number; // roundCents(charge − total); 0 = fully split
+  notes: string | null;
+}
+
+/** One cardholder section (UNMATCHED trailing section has cardholder_id null). */
+export interface CcLedgerCardholder {
+  cardholder_id: string | null;
+  name: string;
+  card: string; // cardLabel() e.g. "CapOne ••5113"
+  tab_name: string; // "<name> <last4>" — the xlsx sheet name
+  rows: CcLedgerRow[];
+  totals: {
+    /** Per-entity column sums; blank entities omitted. */
+    per_entity: Record<string, number>;
+    total: number; // roundCents(Σ per_entity)
+    difference: number; // roundCents(Σ charge − total)
+  };
+}
+
+/** One row of the cross-cardholder Summary rollup. */
+export interface CcLedgerSummaryCardholder {
+  cardholder_id: string | null;
+  name: string;
+  card: string;
+  total: number;
+  difference: number;
+}
+
+/** Cross-cardholder rollup backing the Summary sheet. */
+export interface CcLedgerSummary {
+  per_cardholder: CcLedgerSummaryCardholder[];
+  per_entity_totals: Record<string, number>; // blank entities omitted
+  grand_total: number;
+  grand_difference: number;
+}
+
+export interface CcLedgerResponse {
+  /** The resolved cycle window the ledger is scoped to. */
+  cycle_start: string;
+  cycle_end: string;
+  /** Authoritative column list (canonical order); the client never guesses order. */
+  entity_columns: CcLedgerEntityColumn[];
+  cardholders: CcLedgerCardholder[];
+  summary: CcLedgerSummary;
+}
+
+export interface CcLedgerQuery {
+  cycle_start?: string;
+  cycle_end?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Query param helpers
 // ---------------------------------------------------------------------------
@@ -776,6 +853,11 @@ export const ccApi = {
     api.get<DashboardSummary>(`/api/cc/dashboard/summary${qs(query)}`),
   dashboardAnalytics: (query: CcDashboardAnalyticsQuery = {}) =>
     api.get<CcDashboardAnalytics>(`/api/cc/dashboard/analytics${qs(query)}`),
+
+  // ---- Ledger ------------------------------------------------------------
+  /** Per-cardholder split-matrix ledger for one statement cycle. */
+  ledger: (query: CcLedgerQuery = {}) =>
+    api.get<CcLedgerResponse>(`/api/cc/ledger${qs(query)}`),
 };
 
 // ---------------------------------------------------------------------------

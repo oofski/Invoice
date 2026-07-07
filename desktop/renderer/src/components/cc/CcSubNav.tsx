@@ -9,6 +9,7 @@ import {
   Users,
   UserCircle,
   Inbox,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCcManager } from "@/cc/useCcEnabled";
@@ -33,6 +34,7 @@ type CcTab = {
 
 const MANAGER_TABS: CcTab[] = [
   { to: "/credit-cards/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/credit-cards/ledger", label: "Ledger", icon: BookOpen },
   { to: "/credit-cards/receipts", label: "Receipt Tracker", icon: ListChecks },
   { to: "/credit-cards/transactions", label: "Transactions", icon: ReceiptText },
   { to: "/credit-cards/inbox", label: "Inbox", icon: Inbox, badge: "inbox" },

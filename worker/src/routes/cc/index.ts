@@ -47,6 +47,7 @@ import { cardholders } from "./cardholders";
 import { transactions } from "./transactions";
 import { notifications } from "./notifications";
 import { dashboard } from "./dashboard";
+import { ledger } from "./ledger";
 
 export const cc = new Hono<AppEnv>();
 
@@ -80,3 +81,6 @@ cc.route("/notifications", notifications);
 
 // Dashboard (A3): /api/cc/dashboard/summary
 cc.route("/dashboard", dashboard);
+
+// Ledger: /api/cc/ledger — per-cardholder split-matrix ledger for one cycle.
+cc.route("/ledger", ledger);

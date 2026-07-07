@@ -20,6 +20,7 @@ import SettingsPage from "@/pages/SettingsPage";
 // Credit-Card Receipt Management (CCRMS) — role-gated by useCcEnabled()/useCcManager().
 import { useCcEnabled, useCcManager } from "@/cc/useCcEnabled";
 import CcDashboardPage from "@/pages/cc/CcDashboardPage";
+import CcLedgerPage from "@/pages/cc/CcLedgerPage";
 import CcUploadPage from "@/pages/cc/CcUploadPage";
 import CcTransactionsPage from "@/pages/cc/CcTransactionsPage";
 import CcReceiptTrackerPage from "@/pages/cc/CcReceiptTrackerPage";
@@ -112,6 +113,16 @@ export default function App() {
               <CcGate>
                 <CcManagerGate>
                   <CcDashboardPage />
+                </CcManagerGate>
+              </CcGate>
+            }
+          />
+          <Route
+            path="/credit-cards/ledger"
+            element={
+              <CcGate>
+                <CcManagerGate>
+                  <CcLedgerPage />
                 </CcManagerGate>
               </CcGate>
             }
