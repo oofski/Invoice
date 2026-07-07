@@ -5,7 +5,7 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
-## [Unreleased]
+## [1.7.0] — 2026-07-07
 
 ### Added
 - **Executive Mobile Receipt Site.** A lightweight mobile web app (no install —
@@ -25,6 +25,11 @@ installer on the GitHub Releases page.
     Credit Card screen are untouched. The worker still serves every `/api/*` and
     `/ingest/*` route exactly as before (verified: API paths are never shadowed by
     the mobile site; only non-API paths serve the app).
+
+### Note
+- The **desktop app is unchanged from 1.6.4** in this release — 1.7.0 adds the
+  server-side mobile receipt site. The version bump keeps the product on a single
+  version line; there's nothing new to click in the desktop app itself.
 
 ## [1.6.4] — 2026-07-07
 
