@@ -3,6 +3,18 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
+# --- Pre-deploy build: build the mobile SPA into ../mobile/dist ---
+# `wrangler deploy` runs this command BEFORE it uploads the `[assets]` directory,
+# so the Executive Mobile Receipt site is built in the same step. This is what
+# makes Cloudflare Workers Builds work: its deploy runs `wrangler deploy`
+# directly (NOT `npm run deploy`), so the npm `predeploy` hook never fires — the
+# mobile build has to be wired into wrangler itself. `../mobile/dist` is
+# gitignored (never committed), so without this the deploy fails with
+# "assets.directory does not exist". Runs with cwd = this file's directory
+# (worker/), so `../mobile` resolves to the sibling mobile/ package.
+[build]
+command = "npm --prefix ../mobile install && npm --prefix ../mobile run build"
+
 # --- D1 database binding (Brief data store, now on Cloudflare D1) ---
 # Create the DB once with:  wrangler d1 create invoiceiq
 # then paste the returned database_id below.
@@ -18,8 +30,9 @@ binding = "PDFS"
 bucket_name = "invoiceiq-pdfs"
 
 # --- Static Assets: the Executive Mobile Receipt SPA (mobile/dist), same origin ---
-# The worker serves the built mobile SPA for all non-API paths; the mobile build is
-# wired into `predeploy` (package.json) so `mobile/dist` exists before deploy.
+# The worker serves the built mobile SPA for all non-API paths. The `[build]`
+# command above builds `mobile/dist` as part of `wrangler deploy`, so it exists
+# before these assets are uploaded (in CI and locally alike).
 #
 # NOTE: the installed wrangler (3.114.17) does NOT support the `run_worker_first`
 # ARRAY form — it errors "Expected assets.run_worker_first to be of type boolean".
