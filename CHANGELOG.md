@@ -5,6 +5,39 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.8.9] — 2026-07-09
+
+### Fixed / Changed
+- **Sidebar footer stays visible on every page.** "Check for invoices" and
+  "Sign out" (bottom-left) are now pinned to the screen, so they no longer
+  scroll away on long lists (Invoices, Transactions, etc.).
+- **Deleted invoices and finished reviews now update the list and dashboard
+  right away.** The dashboard's KPI counters were still counting archived
+  ("Cleared") invoices; they now exclude them (matching the charts and the
+  list). The Invoices list also refreshes on its own (and when you return to
+  the window), so a change made elsewhere shows up without leaving the page.
+- **Split invoices export correctly across entities and locations.**
+  - The invoice's **actual sales tax is split per location** (e.g. $15 tax
+    across five Neroli locations → $3 on each), instead of a recomputed
+    per-location estimate — so a split bill's total always **reconciles to the
+    invoice total** (a $400 bill coded $200 IBW / $200 Nala exports as exactly
+    $200 + $200).
+  - **Uncoded lines can no longer vanish silently.** If a per-line split leaves
+    some lines uncoded, the export now **warns** with the exact count and dollar
+    amount that would be left out — and because it checks the actual dropped
+    lines (not the OCR'd total), a line OCR simply missed can't trigger a false
+    alarm.
+
+### Added
+- **Download by entity on the Export tab.** After "Factor invoices for bill
+  import" (which still downloads the combined all-tabs workbook), one-click
+  buttons let you download each entity's sheet on its own — Neroli, SKNBar,
+  IBW, and so on.
+
+The export/reconciliation changes are **server-side (worker)** and stay entirely
+in the export layer — invoice routing, approvals, and credit-card matching are
+untouched. The sidebar and Export-tab changes ship in the desktop app.
+
 ## [1.8.8] — 2026-07-09
 
 ### Added

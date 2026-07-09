@@ -38,6 +38,8 @@ interface ReviewWarning {
   flaggedLines: Record<string, number>;
   locationAmbiguous: string[];
   reconciliation: Record<string, number>;
+  /** Per-line splits that would silently drop uncoded lines (v1.8.9). */
+  droppedLines?: Record<string, { count: number; amount: number }>;
 }
 
 /** Narrows a thrown error to the export "review flags" 409 warning. */
@@ -74,6 +76,15 @@ function reviewWarningMessage(w: ReviewWarning): string {
   if (recon > 0) {
     lines.push(
       `• ${recon} invoice${recon === 1 ? "" : "s"} with a reconciliation gap`,
+    );
+  }
+  const dropped = w.droppedLines ?? {};
+  const droppedInvoices = Object.keys(dropped).length;
+  if (droppedInvoices > 0) {
+    const totalLines = Object.values(dropped).reduce((a, b) => a + b.count, 0);
+    const totalAmt = Object.values(dropped).reduce((a, b) => a + b.amount, 0);
+    lines.push(
+      `• ${totalLines} uncoded line${totalLines === 1 ? "" : "s"} (${formatCurrency(totalAmt)}) across ${droppedInvoices} split invoice${droppedInvoices === 1 ? "" : "s"} would be LEFT OUT of the export — code those lines to include them`,
     );
   }
   lines.push("", "Export anyway?");

@@ -12,7 +12,6 @@ import {
   ENTITY_LABEL,
   ENTITY_CODE,
   glAccountNumber,
-  locationTaxRate,
 } from "./constants";
 
 /**
@@ -69,30 +68,125 @@ export function leaves(lineItems: LineItemRow[]): LineItemRow[] {
     .filter((li) => !parentIds.has(li.id));
 }
 
+const round2 = (n: number): number => Math.round((n || 0) * 100) / 100;
+
 /**
- * Recomputes purchase sales/use tax for one PER_LINE entity bucket (v1.1.6
- * Feature 2). Each taxable line — everything except Retail; untyped lines
- * contribute 0 — is taxed at its OWN location's rate (locationTaxRate(business,
- * class)) and summed, then rounded to cents. Retail is exempt. Returns 0 for an
- * all-retail / all-untyped / empty bucket. This REPLACES the vendor's invoice
- * sales_tax for PER_LINE splits in the QBO export only.
+ * The taxable BASE of a PER_LINE entity bucket: the summed amount of its typed,
+ * non-Retail, non-Discounts, non-negative lines. Retail is exempt and negatives
+ * / discounts are never taxed (v1.1.8 H). Used as the weight when apportioning
+ * the invoice's real sales tax across split buckets.
  */
-function recomputedBucketTax(
-  lines: Pick<LineItemRow, "amount" | "item_type" | "business" | "class" | "gl_category">[],
+function bucketTaxableBase(
+  lines: Pick<LineItemRow, "amount" | "item_type" | "gl_category">[],
 ): number {
-  let t = 0;
+  let b = 0;
   for (const li of lines) {
-    // Taxable: a typed line that isn't Retail, isn't a Discounts line, and
-    // isn't a negative-amount (discount/credit) line (v1.1.8 H). Negatives and
-    // discounts are NEVER taxed; they already reduce totals via toFixed.
     const taxable =
       !!li.item_type &&
       li.item_type !== "Retail" &&
       li.gl_category !== "Discounts" &&
       (li.amount ?? 0) >= 0;
-    if (taxable) t += (li.amount ?? 0) * locationTaxRate(li.business, li.class);
+    if (taxable) b += li.amount ?? 0;
   }
-  return Math.round(t * 100) / 100;
+  return b;
+}
+
+/**
+ * Apportions the invoice's ACTUAL sales tax across the PER_LINE entity buckets
+ * (v1.8.9) so the exported bills reconcile to the invoice total — instead of
+ * recomputing tax from each location's rate (which could drift from the real
+ * total). Weight = each bucket's taxable base (falling back to its coded amount
+ * when no line is strictly taxable); the LAST bucket absorbs the rounding
+ * remainder so the parts sum to `invoiceTax` EXACTLY. Returns a business->tax
+ * map (0 for every bucket when the invoice has no tax). The caller skips this
+ * entirely when tax is already itemized as its own coded line (no double-tax).
+ */
+function apportionInvoiceTax(
+  buckets: [string, LineItemRow[]][],
+  invoiceTax: number,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [b] of buckets) out.set(b, 0);
+  const tax = round2(invoiceTax);
+  if (tax <= 0 || buckets.length === 0) return out;
+  let weights = buckets.map(([, lines]) => bucketTaxableBase(lines));
+  let total = weights.reduce((a, b) => a + b, 0);
+  if (total <= 0) {
+    // No strictly-taxable line (e.g. all-retail): weight by coded amount so the
+    // tax still lands somewhere and the totals reconcile.
+    weights = buckets.map(([, lines]) =>
+      Math.max(0, lines.reduce((s, li) => s + (li.amount ?? 0), 0)),
+    );
+    total = weights.reduce((a, b) => a + b, 0);
+  }
+  if (total <= 0) return out;
+  let allocated = 0;
+  buckets.forEach(([b], i) => {
+    const t =
+      i === buckets.length - 1
+        ? round2(tax - allocated)
+        : round2(tax * (weights[i] / total));
+    if (i < buckets.length - 1) allocated = round2(allocated + t);
+    out.set(b, t);
+  });
+  return out;
+}
+
+/**
+ * Splits the invoice's ACTUAL sales tax across the (entity, location) buckets of
+ * a PER_LINE split (v1.8.9) — so each location carries its own share and the
+ * parts sum to the real tax EXACTLY (last bucket absorbs the rounding cent).
+ * Your example: $15 tax across five Neroli locations → $3 on each location.
+ * Returns one entry per taxed (business, class), in first-appearance order.
+ * Empty when the invoice has no tax OR tax is itemized as its own coded line
+ * (then it is already in the base rows — apportioning again would double it).
+ */
+export function splitTaxByLocation(
+  coded: LineItemRow[],
+  invoiceTax: number,
+): { business: string; cls: string; tax: number }[] {
+  if (coded.some((li) => li.gl_category === "Sales/Use Tax")) return [];
+  const buckets = new Map<string, LineItemRow[]>();
+  const meta = new Map<string, { business: string; cls: string }>();
+  for (const li of coded) {
+    const key = JSON.stringify([li.business, li.class]);
+    const arr = buckets.get(key) ?? [];
+    arr.push(li);
+    buckets.set(key, arr);
+    if (!meta.has(key))
+      meta.set(key, { business: li.business as string, cls: li.class as string });
+  }
+  const taxByKey = apportionInvoiceTax([...buckets.entries()], invoiceTax);
+  const out: { business: string; cls: string; tax: number }[] = [];
+  for (const key of buckets.keys()) {
+    const t = taxByKey.get(key) ?? 0;
+    const m = meta.get(key);
+    if (t > 0 && m) out.push({ business: m.business, cls: m.cls, tax: t });
+  }
+  return out;
+}
+
+/**
+ * Uncoded leaf lines that would be silently DROPPED from a PER_LINE split
+ * export (v1.8.9): a leaf with a non-zero amount but no entity/location coding,
+ * present when OTHER leaves ARE coded (which is what flips the invoice into the
+ * per-line export path). This is a precise signal — it never compares against
+ * the OCR'd invoice total — so a line OCR simply missed can't false-positive.
+ */
+export function droppedSplitLines(lineItems: LineItemRow[]): {
+  count: number;
+  amount: number;
+} {
+  const all = leaves(lineItems);
+  const coded = all.filter((li) => li.business && li.class);
+  if (coded.length === 0) return { count: 0, amount: 0 };
+  const dropped = all.filter(
+    (li) => !(li.business && li.class) && round2(li.amount ?? 0) !== 0,
+  );
+  return {
+    count: dropped.length,
+    amount: round2(dropped.reduce((s, li) => s + (li.amount ?? 0), 0)),
+  };
 }
 
 export function generateQboBillsCsv(invoices: ExportInvoice[]): {
@@ -131,9 +225,7 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
     // ---- PER_LINE: any line item carries a business/class --------------
     const coded = leaves(lineItems).filter((li) => li.business && li.class);
     if (coded.length > 0) {
-      // Group coded leaves into per-entity buckets so each bucket carries its
-      // OWN recomputed purchase tax (v1.1.6 Feature 2). Preserve line order
-      // within a bucket.
+      // Group coded leaves into per-entity buckets, preserving line order.
       const byBusiness = new Map<string, LineItemRow[]>();
       for (const li of coded) {
         const business = li.business as string;
@@ -141,7 +233,13 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
         arr.push(li);
         byBusiness.set(business, arr);
       }
-      for (const [business, bucket] of byBusiness) {
+      const bucketList = [...byBusiness.entries()];
+      // Tax (v1.8.9): apportion the invoice's ACTUAL sales tax across each
+      // (entity, location) so it splits per location and the parts sum to the
+      // real tax exactly — instead of recomputing it from location rates (which
+      // could drift from the invoice total).
+      const perLocTax = splitTaxByLocation(coded, invoice.sales_tax ?? 0);
+      for (const [business, bucket] of bucketList) {
         for (const li of bucket) {
           // When the exec set a per-line Type (item_type), the line's own GL
           // category is authoritative — use it directly so a vendor gl_override
@@ -165,15 +263,10 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
             memo(invoice),
           ]);
         }
-        // Recomputed purchase tax for this bucket. Suppress when the bucket
-        // already has an explicitly-coded Sales/Use Tax line (no double tax),
-        // and omit entirely when the recomputed tax is 0 (all-retail / untyped).
-        const hasTaxLine = bucket.some((li) => li.gl_category === "Sales/Use Tax");
-        const tax = recomputedBucketTax(bucket);
-        if (tax > 0 && !hasTaxLine) {
-          const taxClassLine =
-            bucket.find((li) => !!li.item_type && li.item_type !== "Retail") ??
-            bucket[0];
+        // One Sales/Use Tax row per location in THIS entity (its share of the
+        // invoice's real tax).
+        for (const t of perLocTax) {
+          if (t.business !== business) continue;
           pushRow([
             invoice.invoice_number,
             invoice.vendor,
@@ -181,11 +274,9 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
             toQboDate(invoice.due_date),
             "Net 30",
             formatCategoryAccount(business, "Sales/Use Tax"),
-            "Sales/Use Tax (recomputed)",
-            tax.toFixed(2),
-            taxClassLine.class && taxClassLine.class !== "None"
-              ? `${business}:${taxClassLine.class}`
-              : business,
+            "Sales/Use Tax (split)",
+            t.tax.toFixed(2),
+            t.cls && t.cls !== "None" ? `${business}:${t.cls}` : business,
             memo(invoice),
           ]);
         }
@@ -448,24 +539,19 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
         src.push(li);
         codedByBusiness.set(business, src);
       }
+      // Tax (v1.8.9): apportion the invoice's ACTUAL sales tax across each
+      // (entity, location) so it splits per location and reconciles to the
+      // invoice total (was: recomputed per-location rate, which could drift).
+      const perLocTax = splitTaxByLocation(coded, invoice.sales_tax ?? 0);
       for (const [business, lines] of byBusiness) {
-        // Recomputed purchase tax for THIS bucket from its own coded lines
-        // (per-line location rate, summed). Replaces invoice.sales_tax for
-        // PER_LINE. Suppress when the bucket already carries an explicitly-
-        // coded Sales/Use Tax line; omit when recomputed tax is 0.
-        const bucket = codedByBusiness.get(business) ?? [];
-        const hasTaxLine = bucket.some((li) => li.gl_category === "Sales/Use Tax");
-        const tax = recomputedBucketTax(bucket);
-        if (tax > 0 && !hasTaxLine) {
-          const taxClassLine =
-            bucket.find((li) => !!li.item_type && li.item_type !== "Retail") ??
-            bucket[0];
+        for (const t of perLocTax) {
+          if (t.business !== business) continue;
           lines.push({
             account: "Sales/Use Tax",
-            amount: tax,
-            description: "Sales/Use Tax (recomputed)",
+            amount: t.tax,
+            description: "Sales/Use Tax (split)",
             business,
-            cls: taxClassLine.class,
+            cls: t.cls,
           });
         }
         bills.push({

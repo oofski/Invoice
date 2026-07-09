@@ -8,6 +8,7 @@ import {
   generateQboBillFactor,
   buildExportFilename,
   buildFactorFilename,
+  droppedSplitLines,
   type ExportInvoice,
 } from "../lib/export";
 import { findVendorMapping, loadVendorMappings } from "../lib/rules";
@@ -94,6 +95,21 @@ async function assembleExportInvoices(
     return { ok: false, response: c.json({ error: "Some invoices have unresolved manual-review items", blocking: blockingMap }, 422) };
   }
 
+  // Load each invoice's line items once — used both by the split-drop guard
+  // below and the final export assembly.
+  const byInvoice = new Map<string, LineItemRow[]>();
+  for (const batch of chunk(invoiceIds)) {
+    const ph = batch.map(() => "?").join(",");
+    const liRows = await c.env.DB.prepare(
+      `SELECT * FROM line_items WHERE invoice_id IN (${ph})`,
+    ).bind(...batch).all<LineItemRow>();
+    for (const li of liRows.results ?? []) {
+      const arr = byInvoice.get(li.invoice_id) ?? [];
+      arr.push(li);
+      byInvoice.set(li.invoice_id, arr);
+    }
+  }
+
   // FIX-11 (v1.6.0): WARN (409 REVIEW_FLAGS) when selected invoices carry
   // non-blocking review flags — concrete-category requires_review lines, ambiguous
   // locations, or a reconciliation gap — unless the caller acknowledged them.
@@ -118,10 +134,21 @@ async function assembleExportInvoices(
       if (inv.reconciliation_delta != null) reconciliation[inv.id] = inv.reconciliation_delta;
     }
 
+    // Split-drop guard (v1.8.9): a per-line split silently omits any leaf that
+    // was left uncoded (no entity/location). This is a PRECISE check on the
+    // actual dropped lines — it never compares to the OCR'd invoice total, so a
+    // line OCR simply missed cannot false-positive. Warn with the count + $.
+    const droppedLines: Record<string, { count: number; amount: number }> = {};
+    for (const inv of invoices) {
+      const d = droppedSplitLines(byInvoice.get(inv.id) ?? []);
+      if (d.count > 0) droppedLines[inv.id] = d;
+    }
+
     if (
       Object.keys(flaggedLines).length ||
       locationAmbiguous.length ||
-      Object.keys(reconciliation).length
+      Object.keys(reconciliation).length ||
+      Object.keys(droppedLines).length
     ) {
       return {
         ok: false,
@@ -131,6 +158,7 @@ async function assembleExportInvoices(
             flaggedLines,
             locationAmbiguous,
             reconciliation,
+            droppedLines,
           },
           409,
         ),
@@ -138,18 +166,7 @@ async function assembleExportInvoices(
     }
   }
 
-  const byInvoice = new Map<string, LineItemRow[]>();
-  for (const batch of chunk(invoiceIds)) {
-    const ph = batch.map(() => "?").join(",");
-    const liRows = await c.env.DB.prepare(
-      `SELECT * FROM line_items WHERE invoice_id IN (${ph})`,
-    ).bind(...batch).all<LineItemRow>();
-    for (const li of liRows.results ?? []) {
-      const arr = byInvoice.get(li.invoice_id) ?? [];
-      arr.push(li);
-      byInvoice.set(li.invoice_id, arr);
-    }
-  }
+  // (line items were loaded into `byInvoice` above, before the split-drop guard)
 
   // Tolerate a pre-migration DB (no invoice_allocations table yet): treat as
   // "no allocations" so export keeps working until the migration is applied.
