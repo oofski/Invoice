@@ -5,12 +5,20 @@ import { Button } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/Toast";
 import { cn, formatCurrency } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
+import { GLCategorySelect } from "@/components/GLCategorySelect";
+import { ENTITY_COA, ENTITY_COA_ALIAS, glAccountNumber } from "@/lib/constants";
 import {
   CC_ENTITIES,
   ccApi,
   roundCents,
   type EntitySplit,
 } from "@/cc/ccApi";
+
+/** Whether an entity has its own Chart of Accounts (UrbanAyurveda does not). */
+function hasCoa(entity: string): boolean {
+  const key = ENTITY_COA_ALIAS[entity] ?? entity;
+  return !!ENTITY_COA[key];
+}
 
 /**
  * Entity-split editor (§4). Renders the 7 CC entities in template order with a
@@ -33,6 +41,8 @@ export function EntitySplitModal({
   amount,
   vendor,
   existingSplits,
+  showGlCategory = false,
+  glCategory,
   onSaved,
   onSubmit,
   saving: savingProp,
@@ -43,6 +53,14 @@ export function EntitySplitModal({
   amount: number;
   vendor: string;
   existingSplits?: EntitySplit[] | { entity_name: string; amount: number }[];
+  /**
+   * v1.9.0: when set (self-managed path only), render an "Overall GL category"
+   * picker (like invoicing) below the split. Saved via patchTransaction alongside
+   * the split. Left off for the parent-managed (mobile/exec) flows.
+   */
+  showGlCategory?: boolean;
+  /** The transaction's current overall GL category (COA name) to seed the picker. */
+  glCategory?: string | null;
   /** Called after a successful self-managed save with the persisted rows. */
   onSaved?: (splits: EntitySplit[]) => void;
   /** Parent-managed save. Receives the validated rows; resolve to close. */
@@ -55,6 +73,8 @@ export function EntitySplitModal({
   // amounts keyed by canonical entity_name; "" means empty input (treated as 0).
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [savingSelf, setSavingSelf] = useState(false);
+  // v1.9.0 overall GL category (COA name); "" = unset.
+  const [glCat, setGlCat] = useState<string>("");
 
   const saving = savingProp || savingSelf;
 
@@ -69,6 +89,7 @@ export function EntitySplitModal({
       }
     }
     setAmounts(seed);
+    setGlCat(glCategory ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, transactionId]);
 
@@ -90,6 +111,25 @@ export function EntitySplitModal({
   const balanced = remaining === 0;
   const hasNegative = Object.values(parsed).some((n) => n < 0);
   const canSave = balanced && !hasNegative && !saving;
+
+  // The entity carrying the largest allocation scopes the GL category picker to
+  // its Chart of Accounts (mirrors invoicing). Falls back to the full list when
+  // that entity has no COA (UrbanAyurveda) or nothing is allocated yet.
+  const primaryEntity = useMemo(() => {
+    let best = "";
+    let bestAmt = 0;
+    for (const e of CC_ENTITIES) {
+      const amt = parsed[e.canonical] ?? 0;
+      if (amt > bestAmt) {
+        bestAmt = amt;
+        best = e.canonical;
+      }
+    }
+    return best;
+  }, [parsed]);
+  const glEntity = primaryEntity && hasCoa(primaryEntity) ? primaryEntity : null;
+  const glAccount = glEntity && glCat ? glAccountNumber(glEntity, glCat) : "";
+  const showGl = showGlCategory && !!transactionId && !onSubmit;
 
   function setEntity(canonical: string, value: string) {
     // allow only a money-ish string
@@ -146,6 +186,13 @@ export function EntitySplitModal({
     setSavingSelf(true);
     try {
       const res = await ccApi.putSplits(transactionId, rows);
+      // Persist the overall GL category alongside the split when the GL picker is
+      // shown and the value changed (unchanged → skip the extra PATCH).
+      if (showGl && glCat !== (glCategory ?? "")) {
+        await ccApi.patchTransaction(transactionId, {
+          gl_category: glCat || null,
+        });
+      }
       toast.success("Entity split saved");
       onSaved?.(res.splits);
       onClose();
@@ -243,6 +290,35 @@ export function EntitySplitModal({
             </p>
           )}
         </div>
+
+        {/* Overall GL category (mirrors invoicing) — optional; scoped to the
+            primary entity's Chart of Accounts and resolved to a real account. */}
+        {showGl && (
+          <div className="space-y-1.5 border-t border-line pt-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                Overall GL category
+              </label>
+              {glAccount && (
+                <span className="text-xs tabular-nums text-ink-muted">
+                  Account {glAccount}
+                </span>
+              )}
+            </div>
+            <GLCategorySelect
+              value={glCat || null}
+              onChange={setGlCat}
+              entity={glEntity}
+              includeReview={false}
+              className="w-full"
+            />
+            <p className="text-xs text-ink-subtle">
+              Optional — sets the GL account for this charge
+              {glEntity ? ` from ${glEntity}'s chart of accounts` : ""}, like
+              invoicing.
+            </p>
+          </div>
+        )}
 
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>

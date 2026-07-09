@@ -91,6 +91,7 @@ function hydrateTxForEmail(r: TxRow): Tx {
     in_qb: !!r.in_qb,
     exp_acct: r.exp_acct,
     notes: r.notes,
+    gl_category: r.gl_category ?? null,
     dedup_key: r.dedup_key,
     archived_at: r.archived_at ?? null,
     created_at: r.created_at,

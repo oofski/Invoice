@@ -73,6 +73,7 @@ const CC_DDL: string[] = [
      in_qb            INTEGER NOT NULL DEFAULT 0,
      exp_acct         TEXT,
      notes            TEXT,
+     gl_category      TEXT,
      dedup_key        TEXT,
      archived_at      TEXT,
      created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -215,6 +216,14 @@ const CC_ADD_COLUMNS: { table: string; column: string; ddl: string }[] = [
     table: "cc_transactions",
     column: "archived_at",
     ddl: "ALTER TABLE cc_transactions ADD COLUMN archived_at TEXT",
+  },
+  {
+    // v1.9.0: an overall GL category (COA name) the CC accountant assigns to the
+    // whole charge, mirroring the invoice line-item GL coding. Resolves to a real
+    // GL account number (glAccountNumber) via the transaction's primary entity.
+    table: "cc_transactions",
+    column: "gl_category",
+    ddl: "ALTER TABLE cc_transactions ADD COLUMN gl_category TEXT",
   },
   {
     // Exec Mobile Receipt Site: carries an executive's entity split on a queued

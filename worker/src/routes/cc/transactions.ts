@@ -43,6 +43,12 @@ async function ccArchiveReady(env: AppEnv["Bindings"]): Promise<boolean> {
   catch { return false; }
 }
 
+/** True once cc_transactions.gl_category exists (the v1.9.0 overall-GL migration). */
+async function ccGlReady(env: AppEnv["Bindings"]): Promise<boolean> {
+  try { await env.DB.prepare("SELECT gl_category FROM cc_transactions LIMIT 1").first(); return true; }
+  catch { return false; }
+}
+
 /** A `cc_transactions` row joined with the cardholder display name. */
 type TxRowJoined = TxRow & { cardholder_name: string | null };
 
@@ -66,6 +72,7 @@ function hydrateTx(r: TxRowJoined): Tx {
     in_qb: !!r.in_qb,
     exp_acct: r.exp_acct,
     notes: r.notes,
+    gl_category: r.gl_category ?? null,
     dedup_key: r.dedup_key,
     archived_at: r.archived_at ?? null,
     created_at: r.created_at,
@@ -435,6 +442,7 @@ transactions.patch("/:id", async (c) => {
     in_qb?: unknown;
     exp_acct?: unknown;
     notes?: unknown;
+    gl_category?: unknown;
     cardholder_id?: unknown;
     vendor?: unknown;
     amount?: unknown;
@@ -476,6 +484,18 @@ transactions.patch("/:id", async (c) => {
       return c.json({ error: "notes must be a string or null" }, 400);
     sets.push("notes = ?");
     params.push((v as string | null) ?? null);
+  }
+  // v1.9.0 overall GL category (COA name). Manager-only via the onlyNotes guard.
+  // Gated on ccGlReady so a pre-migration isolate (no column) can't throw on the
+  // UPDATE — it simply skips the field until the additive migration has run.
+  if ("gl_category" in body && body.gl_category !== undefined) {
+    const v = body.gl_category;
+    if (v !== null && typeof v !== "string")
+      return c.json({ error: "gl_category must be a string or null" }, 400);
+    if (await ccGlReady(c.env)) {
+      sets.push("gl_category = ?");
+      params.push(v && (v as string).trim() !== "" ? (v as string) : null);
+    }
   }
   // The fields below are manager-only via the onlyNotes guard above (re-parse corrections).
   if ("vendor" in body && body.vendor !== undefined) {

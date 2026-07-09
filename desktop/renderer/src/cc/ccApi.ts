@@ -126,6 +126,8 @@ export interface CcTransaction {
   in_qb: boolean;
   exp_acct: string | null;
   notes: string | null;
+  /** v1.9.0 overall GL category (COA name); null until the accountant codes it. */
+  gl_category?: string | null;
   dedup_key?: string | null;
   archived_at?: string | null;
   created_at: string;
@@ -532,6 +534,8 @@ export interface CcLedgerEntityColumn {
 /** One ledger row = one in-cycle transaction pivoted across entities. */
 export interface CcLedgerRow {
   transaction_id: string;
+  /** v1.9.0 — card source, so the ledger can pivot by Capital One / AMEX. */
+  source?: CcSource;
   have_receipt: boolean; // receipt_status IN ('RECEIVED','UPLOADED')
   in_qb: boolean;
   date: string; // transaction_date (YYYY-MM-DD)
@@ -542,6 +546,10 @@ export interface CcLedgerRow {
   total: number; // roundCents(Σ entities)
   difference: number; // roundCents(charge − total); 0 = fully split
   notes: string | null;
+  /** v1.9.0 overall GL category (COA name); null until coded. */
+  gl_category?: string | null;
+  /** v1.9.0 resolved GL account number (primary entity × gl_category); "" when unresolved. */
+  gl_account?: string;
 }
 
 /** One cardholder section (UNMATCHED trailing section has cardholder_id null). */
@@ -726,6 +734,8 @@ export const ccApi = {
       in_qb: boolean;
       exp_acct: string;
       notes: string;
+      /** v1.9.0 overall GL category (COA name); "" or null clears it. */
+      gl_category: string | null;
       cardholder_id: string | null;
       // Manager-only mis-parse corrections (all optional; non-empty vendor,
       // finite amount, 'YYYY-MM-DD' date, nullable category).

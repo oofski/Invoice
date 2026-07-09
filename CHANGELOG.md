@@ -5,6 +5,46 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.0] — 2026-07-09
+
+Credit-card tab overhaul. **Everything is additive** — the existing receipt
+match → split → export flow, invoice routing, approvals, and coding are
+untouched; new columns/fields default empty and the ledger falls back to its
+old layout if the worker hasn't picked up the new data yet.
+
+### Fixed
+- **"Mark as received" now sticks.** On the Receipt Tracker the check-off (and
+  the bulk "Mark received") now confirm the change against the server and
+  refresh the row, instead of only flipping the badge optimistically — so the
+  status is saved and visibly reflected, with a confirmation toast.
+- **"In QB" now shows a visible result.** Transactions has a new **In QB**
+  column (a green check when a charge is in QuickBooks) and the detail panel has
+  an **In QB** toggle, so the bulk "Mark in QB" / "Mark not in QB" actions
+  visibly change something.
+
+### Added
+- **Manually allocate from the Receipt Tracker — with or without a receipt.**
+  Each row has an **Allocate** action that opens the same coding tools used on
+  Transactions (line-by-line coding when a receipt already has OCR lines,
+  otherwise the entity-split editor). Receiptless charges can be split freely.
+- **Overall GL category, like invoicing.** After a charge is split, the CC
+  accountant can pick an **overall GL category** from the entity's Chart of
+  Accounts (the same picker invoices use). It resolves to a **real GL account
+  number** (via the charge's largest-split entity) and is shown on the
+  Transactions detail, on the Ledger (new **GL Acct** column), and in the
+  Transactions/Ledger Excel exports.
+- **Pivot ledger — one workbook per card, one sheet per cardholder.** Opening
+  the Ledger now lets you pick a card (**Capital One** or **American Express**),
+  see that card's cardholder summary, then open a cardholder's split sheet —
+  mirroring the manual per-card workbook. Excel export follows suit: exporting
+  from a card produces that card's workbook (a sheet per cardholder + a Summary
+  sheet).
+
+The GL-account resolution, the `gl_category` field, and the ledger's per-card
+`source` are **server-side (worker)** additions (a new nullable
+`cc_transactions.gl_category` column via the standard additive migration); the
+tracker, transactions, and ledger UI ship in the desktop app.
+
 ## [1.8.9] — 2026-07-09
 
 ### Fixed / Changed

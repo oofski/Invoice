@@ -8,6 +8,7 @@ import {
   ListChecks,
   Eye,
   Download,
+  SplitSquareHorizontal,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
@@ -20,11 +21,15 @@ import { desktop } from "@/lib/desktop";
 import { downloadSheet, exportDateStamp } from "@/cc/ccExport";
 import { CcStatusBadge } from "@/components/cc/CcStatusBadge";
 import { CcReceiptPane } from "@/components/cc/CcReceiptPane";
+import { EntitySplitModal } from "@/components/cc/EntitySplitModal";
+import { LineCodingModal } from "@/components/cc/LineCodingModal";
 import {
   ccApi,
   sendCcReminders,
   type CcTransaction,
+  type EntitySplit,
   type Receipt,
+  type ReceiptLine,
   type ReceiptStatus,
 } from "@/cc/ccApi";
 
@@ -49,6 +54,49 @@ export default function CcReceiptTrackerPage() {
   const [previewTxId, setPreviewTxId] = useState<string | null>(null);
   const [previewReceipt, setPreviewReceipt] = useState<Receipt | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Manual allocate (with or without a receipt). Opens the same coding modals
+  // used on the Transactions page: LineCodingModal when the tx already has OCR
+  // lines, else EntitySplitModal (entity split + overall GL category). The split
+  // PUT has no receipt gate, so a receiptless tx can be allocated freely.
+  const [allocTx, setAllocTx] = useState<CcTransaction | null>(null);
+  const [allocSplits, setAllocSplits] = useState<EntitySplit[]>([]);
+  const [allocLines, setAllocLines] = useState<ReceiptLine[]>([]);
+  const [allocSplitOpen, setAllocSplitOpen] = useState(false);
+  const [allocLinesOpen, setAllocLinesOpen] = useState(false);
+  const [allocLoadingId, setAllocLoadingId] = useState<string | null>(null);
+
+  async function openAllocate(t: CcTransaction) {
+    setAllocLoadingId(t.id);
+    try {
+      const detail = await ccApi.getTransaction(t.id);
+      setAllocTx(detail.transaction);
+      setAllocSplits(detail.splits ?? []);
+      let lines: ReceiptLine[] = [];
+      try {
+        const lr = await ccApi.getLines(t.id);
+        lines = lr.lines ?? [];
+      } catch {
+        lines = [];
+      }
+      setAllocLines(lines);
+      if (lines.length > 0) setAllocLinesOpen(true);
+      else setAllocSplitOpen(true);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to open allocation");
+      setAllocTx(null);
+    } finally {
+      setAllocLoadingId(null);
+    }
+  }
+
+  function closeAllocate() {
+    setAllocSplitOpen(false);
+    setAllocLinesOpen(false);
+    setAllocTx(null);
+    setAllocSplits([]);
+    setAllocLines([]);
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,15 +160,22 @@ export default function CcReceiptTrackerPage() {
     });
   }
 
-  // Optimistic check-off: flip the badge instantly, PATCH in the background,
-  // revert + toast on error.
+  // Optimistic check-off: flip the badge instantly, PATCH, then RECONCILE from
+  // the server's authoritative row (mirrors CcTransactionsPage.changeStatus so
+  // the change is confirmed + visible, not just optimistic). Reverts + toasts on
+  // error.
   async function checkOff(t: CcTransaction, status: ReceiptStatus) {
     const prevStatus = t.receipt_status;
     setTransactions((rows) =>
       rows.map((r) => (r.id === t.id ? { ...r, receipt_status: status } : r)),
     );
     try {
-      await ccApi.patchTransaction(t.id, { receipt_status: status });
+      const res = await ccApi.patchTransaction(t.id, { receipt_status: status });
+      // Reconcile from the server (authoritative), not just the optimistic flip.
+      setTransactions((rows) =>
+        rows.map((r) => (r.id === t.id ? res.transaction : r)),
+      );
+      toast.success(status === "RECEIVED" ? "Marked received" : "Status updated");
     } catch (err) {
       setTransactions((rows) =>
         rows.map((r) =>
@@ -149,6 +204,8 @@ export default function CcReceiptTrackerPage() {
       });
       toast.success(`${res.updated_count} updated`);
       setSelected(new Set());
+      // Reconcile from the server so the badges/progress match persisted state.
+      await load();
     } catch (err) {
       setTransactions(prev);
       toast.error(err instanceof ApiError ? err.message : "Bulk update failed");
@@ -314,13 +371,24 @@ export default function CcReceiptTrackerPage() {
           <CcStatusBadge status={t.receipt_status} />
         </td>
         <td className="px-3 py-2.5 text-right">
-          <button
-            onClick={() => openPreview(t.id)}
-            className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
-          >
-            <Eye className="h-3.5 w-3.5" />
-            Preview
-          </button>
+          <div className="flex items-center justify-end gap-3">
+            <button
+              onClick={() => openAllocate(t)}
+              disabled={allocLoadingId === t.id}
+              className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline disabled:opacity-50"
+              title="Allocate this transaction across entities (with or without a receipt)"
+            >
+              <SplitSquareHorizontal className="h-3.5 w-3.5" />
+              {allocLoadingId === t.id ? "Opening…" : "Allocate"}
+            </button>
+            <button
+              onClick={() => openPreview(t.id)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              Preview
+            </button>
+          </div>
         </td>
       </tr>
     );
@@ -484,6 +552,40 @@ export default function CcReceiptTrackerPage() {
           })
         )}
       </div>
+
+      {/* Manual allocate — entity split + overall GL category (no-lines path) */}
+      {allocTx && (
+        <EntitySplitModal
+          open={allocSplitOpen}
+          onClose={closeAllocate}
+          transactionId={allocTx.id}
+          amount={allocTx.amount}
+          vendor={allocTx.vendor}
+          existingSplits={allocSplits}
+          showGlCategory
+          glCategory={allocTx.gl_category ?? null}
+          onSaved={() => {
+            closeAllocate();
+            void load();
+          }}
+        />
+      )}
+
+      {/* Manual allocate — line-by-line coding (when the tx already has OCR lines) */}
+      {allocTx && allocLines.length > 0 && (
+        <LineCodingModal
+          open={allocLinesOpen}
+          onClose={closeAllocate}
+          transactionId={allocTx.id}
+          amount={allocTx.amount}
+          vendor={allocTx.vendor}
+          lines={allocLines}
+          onSaved={() => {
+            closeAllocate();
+            void load();
+          }}
+        />
+      )}
 
       {/* Receipt preview */}
       <Modal

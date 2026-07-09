@@ -86,6 +86,7 @@ export interface TxRow {
   in_qb: number; // 0/1
   exp_acct: string | null;
   notes: string | null;
+  gl_category: string | null; // v1.9.0 overall GL category (COA name); NULL until coded
   dedup_key: string | null;
   archived_at: string | null; // v1.3.8 archive: ISO timestamp when archived, else NULL
   created_at: string;
@@ -190,6 +191,7 @@ export interface Tx {
   in_qb: boolean;
   exp_acct: string | null;
   notes: string | null;
+  gl_category: string | null; // v1.9.0 overall GL category (COA name); null until coded
   dedup_key: string | null;
   archived_at: string | null; // v1.3.8 archive: ISO timestamp when archived, else null
   created_at: string;

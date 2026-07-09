@@ -4,6 +4,7 @@ import {
   Archive,
   ArchiveRestore,
   Ban,
+  Check,
   CheckCheck,
   Download,
   ReceiptText,
@@ -34,6 +35,8 @@ import { CcReceiptPane } from "@/components/cc/CcReceiptPane";
 import { EntitySplitModal } from "@/components/cc/EntitySplitModal";
 import { LineCodingModal } from "@/components/cc/LineCodingModal";
 import { CcEditTransactionModal } from "@/components/cc/CcEditTransactionModal";
+import { GLCategorySelect } from "@/components/GLCategorySelect";
+import { ENTITY_COA, ENTITY_COA_ALIAS, glAccountNumber } from "@/lib/constants";
 import {
   ccApi,
   ccEntityLabel,
@@ -228,6 +231,38 @@ export default function CcTransactionsPage() {
     }
   }
 
+  // v1.9.0: single-transaction In-QB toggle (the bug fix surfaces in_qb in the
+  // list + here so the "Mark in QB" action visibly changes something).
+  async function setInQb(id: string, value: boolean) {
+    try {
+      const res = await ccApi.patchTransaction(id, { in_qb: value });
+      setTransactions((prev) =>
+        prev.map((t) => (t.id === id ? res.transaction : t)),
+      );
+      if (detail?.transaction.id === id)
+        setDetail((d) => (d ? { ...d, transaction: res.transaction } : d));
+      toast.success(value ? "Marked in QB" : "Marked not in QB");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Update failed");
+    }
+  }
+
+  // v1.9.0: overall GL category (COA name), like invoicing. Resolves to a real
+  // GL account via the transaction's primary (largest-split) entity.
+  async function saveGlCategory(id: string, cat: string) {
+    try {
+      const res = await ccApi.patchTransaction(id, { gl_category: cat || null });
+      setTransactions((prev) =>
+        prev.map((t) => (t.id === id ? res.transaction : t)),
+      );
+      if (detail?.transaction.id === id)
+        setDetail((d) => (d ? { ...d, transaction: res.transaction } : d));
+      toast.success("GL category saved");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to save GL category");
+    }
+  }
+
   async function reassignCardholder(id: string, cardholderId: string) {
     try {
       await ccApi.patchTransaction(id, {
@@ -306,6 +341,7 @@ export default function CcTransactionsPage() {
       "Amount",
       "Receipt Status",
       "In QB",
+      "GL Category",
       "Exp Acct",
       "Notes",
     ];
@@ -318,6 +354,7 @@ export default function CcTransactionsPage() {
       t.amount,
       t.receipt_status,
       t.in_qb ? "Yes" : "No",
+      t.gl_category ?? "",
       t.exp_acct ?? "",
       t.notes ?? "",
     ]);
@@ -698,6 +735,9 @@ export default function CcTransactionsPage() {
                         Amount
                       </th>
                       <th className="px-4 py-2.5 font-medium">Status</th>
+                      <th className="px-4 py-2.5 text-center font-medium">
+                        In QB
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -755,6 +795,16 @@ export default function CcTransactionsPage() {
                         </td>
                         <td className="px-4 py-3">
                           <CcStatusBadge status={t.receipt_status} />
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {t.in_qb ? (
+                            <Check
+                              className="mx-auto h-4 w-4 text-success"
+                              aria-label="In QuickBooks"
+                            />
+                          ) : (
+                            <span className="text-ink-subtle">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -898,6 +948,68 @@ export default function CcTransactionsPage() {
                       ))}
                     </Select>
                   </div>
+
+                  {/* In QuickBooks — visible per-transaction toggle (v1.9.0 bug
+                      fix: the bulk "Mark in QB" now has a visible counterpart). */}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                      In QuickBooks
+                    </span>
+                    <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
+                      <input
+                        type="checkbox"
+                        checked={detail.transaction.in_qb}
+                        onChange={(e) =>
+                          setInQb(detail.transaction.id, e.target.checked)
+                        }
+                        className="h-4 w-4 rounded border-line accent-accent"
+                      />
+                      {detail.transaction.in_qb ? "In QB" : "Not in QB"}
+                    </label>
+                  </div>
+
+                  {/* Overall GL category (mirrors invoicing) — resolves to a real
+                      GL account via the transaction's primary-split entity. */}
+                  {(() => {
+                    const primary = primaryEntityOf(detail.splits);
+                    const glEntity =
+                      primary && hasCoaEntity(primary) ? primary : null;
+                    const account =
+                      glEntity && detail.transaction.gl_category
+                        ? glAccountNumber(
+                            glEntity,
+                            detail.transaction.gl_category,
+                          )
+                        : "";
+                    return (
+                      <div>
+                        <div className="mb-1 flex items-center justify-between">
+                          <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                            GL category
+                          </p>
+                          {account && (
+                            <span className="text-xs tabular-nums text-ink-muted">
+                              Account {account}
+                            </span>
+                          )}
+                        </div>
+                        <GLCategorySelect
+                          value={detail.transaction.gl_category ?? null}
+                          onChange={(v) =>
+                            saveGlCategory(detail.transaction.id, v)
+                          }
+                          entity={glEntity}
+                          includeReview={false}
+                          className="w-full"
+                        />
+                        <p className="mt-1 text-xs text-ink-subtle">
+                          {glEntity
+                            ? `Sets the GL account from ${glEntity}'s chart of accounts.`
+                            : "Split across entities to resolve a GL account number."}
+                        </p>
+                      </div>
+                    );
+                  })()}
 
                   {/* Line coding (when the receipt has OCR lines) OR the
                       legacy whole-charge entity split (no-lines fallback). */}
@@ -1154,6 +1266,25 @@ function ccCatShort(gl: string): string {
   if (gl === "Retail / Product Costs") return "Retail";
   if (gl === "Sales/Use Tax") return "Tax";
   return gl;
+}
+
+/** The entity carrying the largest split — scopes the overall GL category. */
+function primaryEntityOf(splits: EntitySplit[]): string {
+  let best = "";
+  let bestAmt = 0;
+  for (const s of splits) {
+    if (s.amount > bestAmt) {
+      bestAmt = s.amount;
+      best = s.entity_name;
+    }
+  }
+  return best;
+}
+
+/** Whether an entity has its own Chart of Accounts (UrbanAyurveda does not). */
+function hasCoaEntity(entity: string): boolean {
+  const key = ENTITY_COA_ALIAS[entity] ?? entity;
+  return !!ENTITY_COA[key];
 }
 
 /**

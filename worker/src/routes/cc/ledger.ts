@@ -23,7 +23,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../helpers";
 import { user, hasRole } from "../helpers";
-import { ROLES } from "../../lib/constants";
+import { ROLES, glAccountNumber } from "../../lib/constants";
 import { roundCents } from "../../cc/ccRules";
 import { CC_ENTITY_ORDER, ccEntityLabel } from "../../cc/ccConstants";
 import { isCcEnabled, ccReady } from "../../cc/flag";
@@ -32,6 +32,25 @@ export const ledger = new Hono<AppEnv>();
 
 const MIGRATION_MSG =
   "Credit Cards needs a one-time database setup — run the migration.";
+
+/** True once cc_transactions.gl_category exists (the v1.9.0 overall-GL migration). */
+async function ccGlReady(env: AppEnv["Bindings"]): Promise<boolean> {
+  try { await env.DB.prepare("SELECT gl_category FROM cc_transactions LIMIT 1").first(); return true; }
+  catch { return false; }
+}
+
+/** The entity carrying the largest allocation for a tx (its GL account scope). */
+function primaryEntity(entities: Record<string, number>): string | null {
+  let best: string | null = null;
+  let bestAmt = -Infinity;
+  for (const [entity, amt] of Object.entries(entities)) {
+    if (amt > bestAmt) {
+      bestAmt = amt;
+      best = entity;
+    }
+  }
+  return best;
+}
 
 /** Builds the "CapOne ••2277 / Amex ••36158" card label for a cardholder. */
 function cardLabel(capLast4: string | null, amexLast5: string | null): string {
@@ -50,6 +69,7 @@ interface LedgerEntityColumn {
 
 interface LedgerRow {
   transaction_id: string;
+  source: string; // CAPITAL_ONE | AMEX (v1.9.0 — pivot ledger by card)
   have_receipt: boolean;
   in_qb: boolean;
   date: string; // transaction_date (YYYY-MM-DD)
@@ -59,6 +79,8 @@ interface LedgerRow {
   total: number;
   difference: number;
   notes: string | null;
+  gl_category: string | null; // v1.9.0 overall GL category (COA name)
+  gl_account: string; // resolved GL account number (primary entity × gl_category); "" when unresolved
 }
 
 interface LedgerCardholder {
@@ -137,6 +159,11 @@ ledger.get("/", async (c) => {
   const inCycle =
     "transaction_date >= ? AND transaction_date <= ? AND is_payment = 0";
 
+  // v1.9.0: select the overall GL category only when the additive column exists
+  // (a stale isolate without it would otherwise 500 the whole ledger).
+  const glReady = await ccGlReady(c.env);
+  const glCol = glReady ? "t.gl_category AS gl_category" : "NULL AS gl_category";
+
   // ----- In-cycle, non-payment transactions (archived kept) ------------
   // LEFT JOIN so UNMATCHED (NULL cardholder) rows still surface. Ordered by
   // date/created_at so per-cardholder rows land in statement order; cardholder
@@ -144,6 +171,7 @@ ledger.get("/", async (c) => {
   const txRows = await c.env.DB.prepare(
     `SELECT
         t.id               AS transaction_id,
+        t.source           AS source,
         t.cardholder_id    AS cardholder_id,
         t.transaction_date AS transaction_date,
         t.vendor           AS vendor,
@@ -151,6 +179,7 @@ ledger.get("/", async (c) => {
         t.receipt_status   AS receipt_status,
         t.in_qb            AS in_qb,
         t.notes            AS notes,
+        ${glCol},
         t.created_at       AS created_at,
         ch.first_name      AS first_name,
         ch.last_name       AS last_name,
@@ -164,6 +193,7 @@ ledger.get("/", async (c) => {
     .bind(...cycleParams)
     .all<{
       transaction_id: string;
+      source: string;
       cardholder_id: string | null;
       transaction_date: string;
       vendor: string;
@@ -171,6 +201,7 @@ ledger.get("/", async (c) => {
       receipt_status: string;
       in_qb: number;
       notes: string | null;
+      gl_category: string | null;
       created_at: string;
       first_name: string | null;
       last_name: string | null;
@@ -228,8 +259,15 @@ ledger.get("/", async (c) => {
     for (const v of Object.values(entities)) rowTotal += v;
     const total = roundCents(rowTotal);
 
+    // Resolve the overall GL category → real account number via the tx's
+    // primary (largest-allocation) entity, mirroring the invoice GL coding.
+    const glCategory = t.gl_category ?? null;
+    const primary = primaryEntity(entities);
+    const glAccount = glCategory && primary ? glAccountNumber(primary, glCategory) : "";
+
     g.rows.push({
       transaction_id: t.transaction_id,
+      source: t.source,
       have_receipt:
         t.receipt_status === "RECEIVED" || t.receipt_status === "UPLOADED",
       in_qb: t.in_qb === 1,
@@ -240,6 +278,8 @@ ledger.get("/", async (c) => {
       total,
       difference: roundCents(charge - total),
       notes: t.notes,
+      gl_category: glCategory,
+      gl_account: glAccount,
     });
 
     for (const [entity, amt] of Object.entries(entities)) {
