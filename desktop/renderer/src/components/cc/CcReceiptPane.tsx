@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { ccApi } from "@/cc/ccApi";
+import { ReceiptDownloadFab } from "@/components/cc/ReceiptDownloadFab";
 
 // react-pdf is heavy and browser-only — load it lazily (mirrors PdfPane).
 const PdfViewer = lazy(() => import("@/components/PdfViewer"));
@@ -14,11 +15,15 @@ const PdfViewer = lazy(() => import("@/components/PdfViewer"));
 export function CcReceiptPane({
   receiptId,
   fileType,
+  fileName,
 }: {
   receiptId: string | null;
   fileType?: string | null;
+  /** Original file name, used only to name the downloaded copy. */
+  fileName?: string | null;
 }) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [blob, setBlob] = useState<Blob | null>(null);
   const [isImage, setIsImage] = useState(false);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -28,6 +33,7 @@ export function CcReceiptPane({
     let createdUrl: string | null = null;
 
     setObjectUrl(null);
+    setBlob(null);
     setError(false);
 
     if (!receiptId) return;
@@ -41,6 +47,7 @@ export function CcReceiptPane({
         // file_type, to decide PDF vs image rendering.
         const ct = (blob.type || fileType || "").toLowerCase();
         setIsImage(ct.startsWith("image/"));
+        setBlob(blob);
         createdUrl = URL.createObjectURL(blob);
         setObjectUrl(createdUrl);
       })
@@ -77,27 +84,28 @@ export function CcReceiptPane({
     );
   }
 
-  if (isImage) {
-    return (
-      <div className="scroll-thin flex h-full items-center justify-center overflow-auto bg-surface-2 p-4">
-        <img
-          src={objectUrl}
-          alt="Receipt"
-          className="max-h-full max-w-full rounded shadow"
-        />
-      </div>
-    );
-  }
-
   return (
-    <Suspense
-      fallback={
-        <div className="flex h-full items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-ink-subtle" />
+    <div className="relative h-full">
+      {isImage ? (
+        <div className="scroll-thin flex h-full items-center justify-center overflow-auto bg-surface-2 p-4">
+          <img
+            src={objectUrl}
+            alt="Receipt"
+            className="max-h-full max-w-full rounded shadow"
+          />
         </div>
-      }
-    >
-      <PdfViewer url={objectUrl} />
-    </Suspense>
+      ) : (
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-ink-subtle" />
+            </div>
+          }
+        >
+          <PdfViewer url={objectUrl} />
+        </Suspense>
+      )}
+      <ReceiptDownloadFab blob={blob} fileName={fileName} />
+    </div>
   );
 }

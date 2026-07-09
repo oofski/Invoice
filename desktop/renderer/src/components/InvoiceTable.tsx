@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { AlertTriangle, ArchiveRestore, MapPin } from "lucide-react";
+import { AlertTriangle, ArchiveRestore, MapPin, Download } from "lucide-react";
 import { StatusBadge } from "@/components/ui/Badges";
 import { EmptyState } from "@/components/ui/primitives";
 import { formatCurrency, ageLabel, cn } from "@/lib/utils";
@@ -14,6 +14,8 @@ export function InvoiceTable({
   emptyDescription,
   onUnarchive,
   unarchivingId,
+  onDownload,
+  downloadingId,
 }: {
   invoices: QueueInvoice[];
   basePath?: string;
@@ -23,6 +25,13 @@ export function InvoiceTable({
   onUnarchive?: (id: string) => void;
   /** Id currently being unarchived (disables its button). */
   unarchivingId?: string | null;
+  /**
+   * When provided, renders a per-row "Download PDF" action (rows with a PDF).
+   * Read-only convenience — the parent owns the fetch/save; nothing is mutated.
+   */
+  onDownload?: (inv: QueueInvoice) => void;
+  /** Id currently being downloaded (disables its button). */
+  downloadingId?: string | null;
 }) {
   if (invoices.length === 0) {
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
@@ -40,6 +49,7 @@ export function InvoiceTable({
             <th className="px-4 py-2.5 font-medium">Approver</th>
             <th className="px-4 py-2.5 font-medium">Status</th>
             <th className="px-4 py-2.5 font-medium">Age</th>
+            {onDownload && <th className="px-4 py-2.5 font-medium" />}
             {onUnarchive && <th className="px-4 py-2.5 font-medium" />}
           </tr>
         </thead>
@@ -100,6 +110,24 @@ export function InvoiceTable({
                 <td className="px-4 py-3 text-ink-muted">
                   {ageLabel(inv.created_at)}
                 </td>
+                {onDownload && (
+                  <td className="px-4 py-3 text-right">
+                    {inv.has_pdf ? (
+                      <button
+                        type="button"
+                        onClick={() => onDownload(inv)}
+                        disabled={downloadingId === inv.id}
+                        title="Download the invoice PDF"
+                        className="inline-flex items-center gap-1 font-medium text-accent hover:underline disabled:opacity-50"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        {downloadingId === inv.id ? "…" : "PDF"}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-ink-subtle">—</span>
+                    )}
+                  </td>
+                )}
                 {onUnarchive && (
                   <td className="px-4 py-3 text-right">
                     {inv.archived_at ? (

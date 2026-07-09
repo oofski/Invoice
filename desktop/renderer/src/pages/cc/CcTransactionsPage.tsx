@@ -973,7 +973,9 @@ export default function CcTransactionsPage() {
                           >
                             <span className="flex items-center gap-2 truncate text-ink">
                               <Paperclip className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
-                              <span className="truncate">{r.file_name}</span>
+                              <span className="truncate" title={r.file_name}>
+                                {r.file_name}
+                              </span>
                             </span>
                             <span className="ml-2 flex shrink-0 items-center gap-2">
                               <button
@@ -1092,6 +1094,7 @@ export default function CcTransactionsPage() {
           <CcReceiptPane
             receiptId={previewReceipt?.id ?? null}
             fileType={previewReceipt?.file_type}
+            fileName={previewReceipt?.file_name}
           />
         </div>
       </Modal>
@@ -1126,7 +1129,10 @@ function LineCodingSummary({ lines }: { lines: ReceiptLine[] }) {
                   key={a.id ?? ai}
                   className="flex items-center justify-between text-xs text-ink-muted"
                 >
-                  <span className="truncate">
+                  <span
+                    className="truncate"
+                    title={`${ccEntityLabel(a.entity_name)} · ${a.location} · ${a.gl_category}`}
+                  >
                     {ccEntityLabel(a.entity_name)} · {a.location} ·{" "}
                     {ccCatShort(a.gl_category)}
                   </span>

@@ -205,7 +205,10 @@ export default function UploadPage() {
                 <FileText className="mt-0.5 h-5 w-5 shrink-0 text-ink-subtle" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-medium text-ink">
+                    <p
+                      className="truncate text-sm font-medium text-ink"
+                      title={item.file.name}
+                    >
                       {item.file.name}
                     </p>
                     <span className="shrink-0 text-xs text-ink-subtle">

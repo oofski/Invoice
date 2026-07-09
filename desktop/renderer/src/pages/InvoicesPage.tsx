@@ -44,6 +44,7 @@ export default function InvoicesPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [unarchivingId, setUnarchivingId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const { data, loading, error, refetch } = useApi<{ invoices: QueueInvoice[] }>(
     `/api/invoices?limit=${PAGE_LIMIT}${showArchived ? "&includeArchived=1" : ""}`,
@@ -157,6 +158,21 @@ export default function InvoicesPage() {
       toast.error(err instanceof ApiError ? err.message : "Archive failed");
     } finally {
       setClearing(false);
+    }
+  }
+
+  // Row-level "Download PDF" — mirrors the invoice detail page's download
+  // (same /pdf endpoint, so an approved/exported invoice arrives stamped).
+  // Read-only: fetches the file and saves it; nothing about the invoice changes.
+  async function downloadPdf(inv: QueueInvoice) {
+    setDownloadingId(inv.id);
+    try {
+      const blob = await api.getBlob(`/api/invoices/${inv.id}/pdf`);
+      downloadBlob(blob, `${inv.vendor}_${inv.invoice_number}.pdf`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Download failed");
+    } finally {
+      setDownloadingId(null);
     }
   }
 
@@ -319,6 +335,8 @@ export default function InvoicesPage() {
           ) : (
             <InvoiceTable
               invoices={filtered}
+              onDownload={downloadPdf}
+              downloadingId={downloadingId}
               onUnarchive={isAdmin && showArchived ? unarchive : undefined}
               unarchivingId={unarchivingId}
             />

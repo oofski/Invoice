@@ -505,6 +505,7 @@ export default function CcReceiptTrackerPage() {
             <CcReceiptPane
               receiptId={previewReceipt?.id ?? null}
               fileType={previewReceipt?.file_type}
+              fileName={previewReceipt?.file_name}
             />
           )}
         </div>

@@ -5,6 +5,7 @@ import { toast } from "@/components/ui/Toast";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { CcStatusBadge } from "@/components/cc/CcStatusBadge";
+import { ReceiptDownloadFab } from "@/components/cc/ReceiptDownloadFab";
 import {
   ccApi,
   type CandidateTx,
@@ -25,11 +26,15 @@ const PdfViewer = lazy(() => import("@/components/PdfViewer"));
 export function CcInboxReceiptPane({
   inboxId,
   fileType,
+  fileName,
 }: {
   inboxId: string | null;
   fileType?: string | null;
+  /** Original file name, used only to name the downloaded copy. */
+  fileName?: string | null;
 }) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [blob, setBlob] = useState<Blob | null>(null);
   const [isImage, setIsImage] = useState(false);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -39,6 +44,7 @@ export function CcInboxReceiptPane({
     let createdUrl: string | null = null;
 
     setObjectUrl(null);
+    setBlob(null);
     setError(false);
 
     if (!inboxId) return;
@@ -50,6 +56,7 @@ export function CcInboxReceiptPane({
         if (!active) return;
         const ct = (blob.type || fileType || "").toLowerCase();
         setIsImage(ct.startsWith("image/"));
+        setBlob(blob);
         createdUrl = URL.createObjectURL(blob);
         setObjectUrl(createdUrl);
       })
@@ -83,27 +90,29 @@ export function CcInboxReceiptPane({
       </div>
     );
   }
-  if (isImage) {
-    return (
-      <div className="scroll-thin flex h-full items-center justify-center overflow-auto bg-surface-2 p-4">
-        <img
-          src={objectUrl}
-          alt="Receipt"
-          className="max-h-full max-w-full rounded shadow"
-        />
-      </div>
-    );
-  }
   return (
-    <Suspense
-      fallback={
-        <div className="flex h-full items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-ink-subtle" />
+    <div className="relative h-full">
+      {isImage ? (
+        <div className="scroll-thin flex h-full items-center justify-center overflow-auto bg-surface-2 p-4">
+          <img
+            src={objectUrl}
+            alt="Receipt"
+            className="max-h-full max-w-full rounded shadow"
+          />
         </div>
-      }
-    >
-      <PdfViewer url={objectUrl} />
-    </Suspense>
+      ) : (
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-ink-subtle" />
+            </div>
+          }
+        >
+          <PdfViewer url={objectUrl} />
+        </Suspense>
+      )}
+      <ReceiptDownloadFab blob={blob} fileName={fileName} />
+    </div>
   );
 }
 

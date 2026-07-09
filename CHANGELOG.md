@@ -5,6 +5,28 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.8.8] — 2026-07-09
+
+### Added
+- **Download a credit-card receipt.** When you open a receipt (from Transactions,
+  the Receipt Tracker, or the Inbox), a **Download** button now lets you save a
+  copy of the PDF or image you're viewing. (Invoices already had Download PDF on
+  the invoice page.)
+- **Download an invoice PDF straight from the Invoices list.** Each invoice row
+  that has a PDF now has a one-click **PDF** download, so you don't have to open
+  the invoice first.
+- **Collapse / expand each cardholder in the Credit Card Ledger.** Click a
+  cardholder's header to fold its split matrix away (the header and charge count
+  stay visible) and click again to expand — handy when the ledger has many
+  cardholders. Sections start expanded, exactly as before.
+- **Hover tooltips on cut-off text.** Long file names, merchant/cardholder names,
+  and the entity · location · GL coding labels that were truncated now show their
+  full value on hover (the coding label even spells out the full GL category).
+
+These are all **view-only conveniences** — downloading, folding a section, and
+hover tooltips. Nothing about invoices, receipts, matching, splits, coding, or
+exports is changed; no data is created, edited, or removed.
+
 ## [1.8.7] — 2026-07-09
 
 ### Changed

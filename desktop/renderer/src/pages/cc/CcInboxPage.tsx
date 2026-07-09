@@ -173,7 +173,10 @@ export default function CcInboxPage() {
                     className="w-full px-4 py-3 text-left"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium text-ink">
+                      <span
+                        className="truncate text-sm font-medium text-ink"
+                        title={it.cardholder_name || "Unknown cardholder"}
+                      >
                         {it.cardholder_name || "Unknown cardholder"}
                       </span>
                       <span className="shrink-0 text-xs text-ink-subtle">
@@ -181,7 +184,10 @@ export default function CcInboxPage() {
                       </span>
                     </div>
                     <div className="mt-0.5 flex items-center justify-between gap-2">
-                      <span className="truncate text-xs text-ink-muted">
+                      <span
+                        className="truncate text-xs text-ink-muted"
+                        title={it.ocr_extracted_data?.merchant_name || it.file_name}
+                      >
                         {it.ocr_extracted_data?.merchant_name || it.file_name}
                       </span>
                       {typeof it.ocr_extracted_data?.total === "number" && (
@@ -225,7 +231,10 @@ export default function CcInboxPage() {
               <Card className="flex min-w-0 flex-1 flex-col overflow-hidden">
                 <div className="flex items-center gap-2 border-b border-line px-4 py-3">
                   <ReceiptText className="h-4 w-4 text-ink-subtle" />
-                  <h2 className="truncate font-display text-sm font-semibold text-ink">
+                  <h2
+                    className="truncate font-display text-sm font-semibold text-ink"
+                    title={selected.file_name}
+                  >
                     {selected.file_name}
                   </h2>
                 </div>
@@ -233,6 +242,7 @@ export default function CcInboxPage() {
                   <CcInboxReceiptPane
                     inboxId={selected.id}
                     fileType={selected.file_type}
+                    fileName={selected.file_name}
                   />
                 </div>
               </Card>

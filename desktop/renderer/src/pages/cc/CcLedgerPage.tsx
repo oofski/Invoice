@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BookOpen, Download, SlidersHorizontal, Check } from "lucide-react";
+import {
+  BookOpen,
+  Download,
+  SlidersHorizontal,
+  Check,
+  ChevronRight,
+  ChevronDown,
+} from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
 import { Card, Button, Input, Spinner, EmptyState } from "@/components/ui/primitives";
@@ -131,10 +138,15 @@ function CardholderSection({
   cardholder,
   columns,
   onRowClick,
+  collapsed = false,
+  onToggle,
 }: {
   cardholder: LedgerCardholder;
   columns: CcLedgerResponse["entity_columns"];
   onRowClick: (row: LedgerRow) => void;
+  /** When true the matrix is folded away (header stays visible). */
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
   const chargeSum = roundCents(
     cardholder.rows.reduce((s, r) => s + (r.charge || 0), 0),
@@ -143,7 +155,18 @@ function CardholderSection({
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        title={collapsed ? "Expand this cardholder" : "Collapse this cardholder"}
+        className="flex w-full flex-wrap items-center gap-3 border-b border-line px-4 py-3 text-left hover:bg-surface-2"
+      >
+        {collapsed ? (
+          <ChevronRight className="h-4 w-4 shrink-0 text-ink-subtle" />
+        ) : (
+          <ChevronDown className="h-4 w-4 shrink-0 text-ink-subtle" />
+        )}
         <BookOpen className="h-4 w-4 shrink-0 text-ink-subtle" />
         <h2
           className={cn(
@@ -159,8 +182,9 @@ function CardholderSection({
         <span className="ml-auto text-xs text-ink-subtle">
           {rowCount} {rowCount === 1 ? "charge" : "charges"}
         </span>
-      </div>
+      </button>
 
+      {!collapsed && (
       <div className="scroll-thin overflow-x-auto">
         <table className="w-full min-w-[1080px] text-sm">
           <thead>
@@ -266,6 +290,7 @@ function CardholderSection({
           </tfoot>
         </table>
       </div>
+      )}
     </Card>
   );
 }
@@ -280,6 +305,15 @@ export default function CcLedgerPage() {
   const [loading, setLoading] = useState(true);
   const [cycleStart, setCycleStart] = useState("");
   const [cycleEnd, setCycleEnd] = useState("");
+  // Which cardholder sections are folded away (view-only; keyed by cardholder_id).
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleCollapse = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -470,14 +504,19 @@ export default function CcLedgerPage() {
             description="Import a statement and code entity splits to populate the ledger."
           />
         ) : (
-          cardholders.map((ch) => (
-            <CardholderSection
-              key={ch.cardholder_id ?? "__unmatched__"}
-              cardholder={ch}
-              columns={data!.entity_columns}
-              onRowClick={onRowClick}
-            />
-          ))
+          cardholders.map((ch) => {
+            const key = ch.cardholder_id ?? "__unmatched__";
+            return (
+              <CardholderSection
+                key={key}
+                cardholder={ch}
+                columns={data!.entity_columns}
+                onRowClick={onRowClick}
+                collapsed={collapsed.has(key)}
+                onToggle={() => toggleCollapse(key)}
+              />
+            );
+          })
         )}
       </div>
     </div>
