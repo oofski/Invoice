@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogIn, UserPlus, ArrowLeft, Server } from "lucide-react";
+import { LogIn, UserPlus, ArrowLeft, Server, Banknote } from "lucide-react";
 import { Button, Card, Input } from "@/components/ui/primitives";
 import {
   api,
@@ -61,7 +61,7 @@ export default function LoginPage() {
     setError(null);
     persistServer();
     if (!serverUrl.trim()) {
-      setError("Enter the server URL for your InvoiceIQ Worker.");
+      setError("Enter the server URL for your EBG server.");
       return;
     }
     setLoading(true);
@@ -97,7 +97,7 @@ export default function LoginPage() {
     setError(null);
     persistServer();
     if (!serverUrl.trim()) {
-      setError("Enter the server URL for your InvoiceIQ Worker.");
+      setError("Enter the server URL for your EBG server.");
       return;
     }
     setLoading(true);
@@ -121,13 +121,18 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-bg p-4">
       <Card className="w-full max-w-md p-8">
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-accent text-lg font-bold text-accent-fg">
-            IQ
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-accent text-accent-fg">
+            <Banknote className="h-6 w-6" />
           </div>
-          <h1 className="font-wordmark text-xl font-bold uppercase tracking-[0.18em] text-ink">InvoiceIQ</h1>
-          <p className="text-sm text-ink-muted">
+          <h1 className="font-wordmark text-xl font-bold uppercase tracking-[0.16em] text-ink">
+            EBG
+          </h1>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-muted">
+            Invoices &amp; Credit Cards
+          </p>
+          <p className="mt-1 text-sm text-ink-muted">
             {mode === "login"
-              ? "AP automation — sign in to continue"
+              ? "Sign in to continue"
               : "Create the first admin account"}
           </p>
         </div>
@@ -265,7 +270,7 @@ function ServerField({
         onChange={(e) => onChange(e.target.value)}
       />
       <p className="mt-1 text-xs text-ink-subtle">
-        Your InvoiceIQ Worker address. Saved on this device.
+        Your EBG server address. Saved on this device.
       </p>
     </div>
   );

@@ -5,6 +5,17 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.8.7] — 2026-07-09
+
+### Changed
+- **Rebranded to "EBG - Invoices and Credit Cards" with a dollar-bill logo.** The
+  app name now reads **EBG - Invoices and Credit Cards** everywhere it shows —
+  the sidebar (EBG over "Invoices & Credit Cards"), the login screen, the window
+  and taskbar title, the installer, and the Start Menu shortcut. The old "IQ"
+  badge is replaced by a dollar-bill (banknote) mark in the same brand color,
+  including the app/taskbar icon. No functionality changed; the internal app id
+  is unchanged so existing installs still auto-update in place.
+
 ## [1.8.6] — 2026-07-09
 
 ### Added

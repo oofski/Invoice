@@ -15,6 +15,7 @@ import {
   Menu,
   X,
   CreditCard,
+  Banknote,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ROLES, roleLabel, type Role } from "@/lib/constants";
@@ -129,13 +130,18 @@ export function AppShell() {
 
   const sidebar = (
     <div className="flex h-full flex-col bg-sidebar text-[#CFD2D2]">
-      <div className="flex items-center gap-2 px-5 py-4">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">
-          IQ
+      <div className="flex items-center gap-2.5 px-5 py-4">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
+          <Banknote className="h-5 w-5" />
         </div>
-        <span className="font-wordmark text-lg tracking-[0.18em] text-white">
-          InvoiceIQ
-        </span>
+        <div className="flex min-w-0 flex-col leading-tight">
+          <span className="font-wordmark text-base tracking-[0.16em] text-white">
+            EBG
+          </span>
+          <span className="text-[9px] font-medium uppercase tracking-[0.05em] text-[#9FA6A6]">
+            Invoices &amp; Credit Cards
+          </span>
+        </div>
       </div>
       <nav className="flex-1 space-y-1 px-3 py-2">
         {items.map((item) => {
