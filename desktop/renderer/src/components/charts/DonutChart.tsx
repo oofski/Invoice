@@ -1,10 +1,11 @@
 /**
- * DonutChart — category donut with a centered total and a compact, wrapping
- * legend beneath it. Slice detail (name + amount + percent of total) lives in the
- * hover tooltip ONLY — there are no baked-in slice labels or leader lines to
- * overlap or spill off the card. Used for "spend by entity / category / GL".
+ * DonutChart — a bare category donut with a centered total. There is NO legend
+ * and NO baked-in slice labels: every slice's detail (name + amount + percent of
+ * total) lives in the hover tooltip ONLY, so nothing can overlap or spill off the
+ * card. Point at a slice to read it. Used for "spend by entity / category / GL".
  * Pure props, no data.
  */
+import { useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import type { TooltipContentProps } from "recharts";
 import {
@@ -101,11 +102,18 @@ export function DonutChart({
     __pct: total > 0 ? ((d.value || 0) / total) * 100 : 0,
   }));
 
+  // While a slice is hovered the tooltip renders over the donut center, so the
+  // "TOTAL" overlay fades out to hand that space to the tooltip (no text collision).
+  // Enter is set per-slice; reset only when the pointer leaves the whole donut, so
+  // moving between adjacent slices never flickers the overlay back in.
+  const [hovering, setHovering] = useState(false);
+
   return (
-    <div className="flex flex-col items-center gap-4">
+    <div className="flex flex-col items-center">
       <div
         className="relative"
         style={{ width: height, height, maxWidth: "100%" }}
+        onMouseLeave={() => setHovering(false)}
       >
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -120,6 +128,7 @@ export function DonutChart({
               strokeWidth={2}
               startAngle={90}
               endAngle={-270}
+              onMouseEnter={() => setHovering(true)}
             >
               {rows.map((d, i) => (
                 <Cell key={`${d.name}-${i}`} fill={d.__color} />
@@ -131,7 +140,11 @@ export function DonutChart({
             />
           </PieChart>
         </ResponsiveContainer>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+        <div
+          className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center transition-opacity duration-150 ${
+            hovering ? "opacity-0" : "opacity-100"
+          }`}
+        >
           <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-ink-subtle">
             Total
           </span>
@@ -140,27 +153,6 @@ export function DonutChart({
           </span>
         </div>
       </div>
-
-      {/* Compact legend — swatch + (truncated) name + share. Wraps, never overflows;
-          exact amounts live in the hover tooltip. */}
-      <ul className="flex max-w-full flex-wrap justify-center gap-x-4 gap-y-1.5">
-        {rows.map((d, i) => (
-          <li
-            key={`${d.name}-${i}`}
-            className="inline-flex min-w-0 items-center gap-1.5 text-xs"
-            title={`${d.name} · ${valueFormat(d.value)} · ${formatPercent(d.__pct)}`}
-          >
-            <span
-              className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
-              style={{ backgroundColor: d.__color }}
-            />
-            <span className="max-w-[9rem] truncate text-ink-muted">{d.name}</span>
-            <span className="shrink-0 tabular-nums text-ink-subtle">
-              {formatPercent(d.__pct)}
-            </span>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

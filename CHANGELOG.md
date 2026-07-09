@@ -5,6 +5,22 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.8.5] — 2026-07-09
+
+### Changed
+- **Dashboard vendor/category charts are now fully hover-driven — zero baked-in
+  text.** Following up on 1.8.4: the "Spend by entity", "Spend by category", and
+  "Top vendors" panels no longer show any legend or axis labels. They're clean
+  charts you explore by hovering — point at a donut slice or a vendor bar and a
+  tooltip shows the **name, amount, and percent of total**. (The credit-card
+  dashboard's per-cardholder progress bars keep their names, since the name is
+  what identifies each row there.)
+- While you hover a donut slice, the centered **TOTAL** fades out so the tooltip
+  reads cleanly in that space — no more text overlapping in the middle of the
+  donut. Vendor-bar tooltips are labeled "Spend" instead of a generic "Value".
+
+This is a **desktop-app (renderer) change**; it ships in the installer.
+
 ## [1.8.4] — 2026-07-09
 
 ### Added

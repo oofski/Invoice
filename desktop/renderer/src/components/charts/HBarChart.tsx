@@ -3,10 +3,12 @@
  * per-cardholder progress). Optionally stacks a muted `secondary` segment beside
  * the primary value (e.g. received vs. open).
  *
- * Category names are TRUNCATED with an ellipsis to fit the reserved axis width so
- * they never clip, overlap, or leave the card; the hover tooltip carries the full
- * name, the amount, and the percent of total. No always-on value labels. Pure
- * props, no data.
+ * By default the category names are TRUNCATED with an ellipsis to fit the reserved
+ * axis width so they never clip, overlap, or leave the card. Pass
+ * `hideCategoryLabels` to drop the name axis entirely and make the chart fully
+ * hover-driven (used for "Top vendors"). Either way the hover tooltip carries the
+ * full name, the amount, and the percent of total. No always-on value labels.
+ * Pure props, no data.
  */
 import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
 import type { TooltipContentProps } from "recharts";
@@ -44,6 +46,13 @@ export interface HBarChartProps {
   max?: number;
   /** Width reserved for the category (name) labels. */
   yWidth?: number;
+  /**
+   * Hide the Y-axis category (name) labels entirely so the chart is fully
+   * hover-driven — the names live in the tooltip only (used for "Top vendors").
+   * Default false: the labeled axis is kept, which is required where the name IS
+   * the identity of each row (e.g. per-cardholder progress bars).
+   */
+  hideCategoryLabels?: boolean;
 }
 
 /**
@@ -137,6 +146,7 @@ export function HBarChart({
   height,
   max,
   yWidth = 120,
+  hideCategoryLabels = false,
 }: HBarChartProps) {
   const hasSecondary = data.some((d) => typeof d.secondary === "number");
   const resolvedHeight = height ?? Math.max(data.length * 40 + 24, 120);
@@ -165,11 +175,12 @@ export function HBarChart({
         <YAxis
           type="category"
           dataKey="name"
-          width={yWidth}
-          tick={<CategoryTick axisWidth={yWidth} />}
+          width={hideCategoryLabels ? 0 : yWidth}
+          tick={hideCategoryLabels ? false : <CategoryTick axisWidth={yWidth} />}
           tickLine={false}
           axisLine={false}
           interval={0}
+          hide={hideCategoryLabels}
         />
         <Tooltip
           cursor={{ fill: CURSOR_FILL }}

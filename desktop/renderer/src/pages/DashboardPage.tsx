@@ -345,6 +345,8 @@ export default function DashboardPage() {
                     data={vendorData}
                     color={chartColors.info}
                     valueFormat={formatCompactCurrency}
+                    primaryName="Spend"
+                    hideCategoryLabels
                   />
                 ) : (
                   <ChartSkeleton />
