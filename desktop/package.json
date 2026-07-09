@@ -1,7 +1,7 @@
 {
   "name": "invoiceiq-desktop",
   "private": true,
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "InvoiceIQ desktop AP automation app",
   "main": "electron/main.js",
   "type": "commonjs",

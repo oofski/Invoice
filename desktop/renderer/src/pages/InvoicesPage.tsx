@@ -45,7 +45,7 @@ export default function InvoicesPage() {
   const [clearing, setClearing] = useState(false);
   const [unarchivingId, setUnarchivingId] = useState<string | null>(null);
 
-  const { data, loading, refetch } = useApi<{ invoices: QueueInvoice[] }>(
+  const { data, loading, error, refetch } = useApi<{ invoices: QueueInvoice[] }>(
     `/api/invoices?limit=${PAGE_LIMIT}${showArchived ? "&includeArchived=1" : ""}`,
   );
 
@@ -63,6 +63,18 @@ export default function InvoicesPage() {
   );
 
   const atCap = invoices.length >= PAGE_LIMIT;
+
+  // Empty-state diagnostics: distinguish "filtered to nothing" from "nothing to
+  // show" so the user can recover (clear filters / reveal archived) instead of
+  // staring at a silently-empty table.
+  const hasFilters = status !== "ALL" || !!entity || !!search;
+  const isPrivileged =
+    profile.role === ROLES.ADMIN || profile.role === ROLES.ACCOUNTANT;
+  function clearFilters() {
+    setStatus("ALL");
+    setEntity("");
+    setSearch("");
+  }
 
   // Projects the currently-filtered rows into an .xlsx Blob. Shared by the
   // "Download Excel" button AND the export-before-clear safety step.
@@ -243,6 +255,66 @@ export default function InvoicesPage() {
           {loading ? (
             <div className="flex justify-center py-16">
               <Spinner />
+            </div>
+          ) : error ? (
+            <div className="px-4 py-12 text-center">
+              <p className="text-sm font-medium text-danger">
+                Couldn't load invoices.
+              </p>
+              <p className="mx-auto mt-1 max-w-md text-xs text-ink-muted">
+                {error}
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-4"
+                onClick={() => refetch()}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="px-4 py-12 text-center">
+              <p className="text-sm font-medium text-ink">
+                No invoices to show.
+              </p>
+              {hasFilters ? (
+                <>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    No invoices match the current filters.
+                  </p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="mt-4"
+                    onClick={clearFilters}
+                  >
+                    Clear filters
+                  </Button>
+                </>
+              ) : !showArchived ? (
+                <>
+                  <p className="mx-auto mt-1 max-w-md text-xs text-ink-muted">
+                    {isPrivileged
+                      ? "If invoices were archived (for example via “Clear”), they’re hidden from the default list. Records are preserved and reversible."
+                      : "You only see invoices assigned to you. Any archived invoices are also hidden."}
+                  </p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => setShowArchived(true)}
+                  >
+                    Show archived
+                  </Button>
+                </>
+              ) : (
+                <p className="mx-auto mt-1 max-w-md text-xs text-ink-muted">
+                  {isPrivileged
+                    ? "There are no invoices yet — upload one from the Upload tab."
+                    : "No invoices are assigned to you."}
+                </p>
+              )}
             </div>
           ) : (
             <InvoiceTable

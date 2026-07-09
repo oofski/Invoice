@@ -207,6 +207,14 @@ main {
 .bottom-bar-stack {
   gap: 10px;
 }
+/* "Do you want to split this receipt?" prompt above the split/skip choice. */
+.split-ask {
+  margin: 0 0 2px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+}
 
 /* ---------------------------------------------------------------- spinner */
 .spinner {

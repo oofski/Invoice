@@ -43,6 +43,8 @@ export interface FlowState {
   mode: SplitMode;
   /** Whether the server reported it applied the split at drop time. */
   splitApplied: boolean;
+  /** True when the exec chose "send without splitting" at review. */
+  skippedSplit: boolean;
 }
 
 interface FlowApi extends FlowState {
@@ -51,6 +53,7 @@ interface FlowApi extends FlowState {
   setTotal: (total: number) => void;
   setLines: (lines: ReceiptLine[], mode: SplitMode) => void;
   setSplitApplied: (applied: boolean) => void;
+  setSkippedSplit: (skipped: boolean) => void;
   reset: () => void;
 }
 
@@ -66,6 +69,7 @@ const emptyState: FlowState = {
   lines: [],
   mode: "quick",
   splitApplied: false,
+  skippedSplit: false,
 };
 
 const FlowContext = createContext<FlowApi | null>(null);
@@ -90,6 +94,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
         matchedTransactionId: null,
         candidateIds: [],
         splitApplied: false,
+        skippedSplit: false,
       };
     });
   }, []);
@@ -126,6 +131,10 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     (applied: boolean) => setState((prev) => ({ ...prev, splitApplied: applied })),
     [],
   );
+  const setSkippedSplit = useCallback(
+    (skipped: boolean) => setState((prev) => ({ ...prev, skippedSplit: skipped })),
+    [],
+  );
 
   const reset = useCallback(() => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -141,9 +150,19 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       setTotal,
       setLines,
       setSplitApplied,
+      setSkippedSplit,
       reset,
     }),
-    [state, setFile, applyDropResult, setTotal, setLines, setSplitApplied, reset],
+    [
+      state,
+      setFile,
+      applyDropResult,
+      setTotal,
+      setLines,
+      setSplitApplied,
+      setSkippedSplit,
+      reset,
+    ],
   );
 
   return <FlowContext.Provider value={value}>{children}</FlowContext.Provider>;

@@ -85,6 +85,14 @@ export function OcrReviewScreen() {
     navigate("/split");
   }
 
+  // "Send without splitting": the receipt was already filed by the preview drop,
+  // so just confirm — the accountant will code/split it. Only offered once the
+  // drop succeeded (status set).
+  function onSendAsIs() {
+    flow.setSkippedSplit(true);
+    navigate("/done", { replace: true });
+  }
+
   const parsedTotal = parseMoney(totalInput);
   const canContinue = parsedTotal > 0 && !scanning;
   const lineItems = ocr?.line_items ?? [];
@@ -166,9 +174,17 @@ export function OcrReviewScreen() {
       </main>
 
       <div className="bottom-bar bottom-bar-stack">
+        {!scanning && (
+          <p className="split-ask">Do you want to split this receipt?</p>
+        )}
         <Button onClick={onContinue} disabled={!canContinue}>
-          Continue to split
+          Yes — split by business & location
         </Button>
+        {status && (
+          <Button variant="secondary" onClick={onSendAsIs} disabled={scanning}>
+            No — send as-is
+          </Button>
+        )}
         <Button variant="ghost" onClick={() => navigate("/capture")}>
           Retake photo
         </Button>

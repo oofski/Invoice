@@ -5,6 +5,26 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.8.2] — 2026-07-09
+
+### Fixed
+- **Invoices tab no longer shows up empty with no explanation.** The Invoices
+  page now surfaces load failures (with a Retry) instead of silently showing an
+  empty list, and when the list is genuinely empty it explains why and offers a
+  way out: if invoices were archived (e.g. via "Clear"), a **Show archived**
+  button reveals and restores them; active filters get a **Clear filters**
+  button; and non-admin roles are told they only see invoices assigned to them.
+  (Root cause: the page never read the API error, so any failed/empty load looked
+  identical to "no invoices.")
+
+### Added
+- **"Do you want to split it?" after uploading a credit-card receipt.** Uploading
+  a receipt no longer jumps straight into the split screen. After the receipt is
+  saved (and the accountant notified), the exec gets a clear choice — **Split it**
+  (opens the split/coding step) or **Not now / Send as-is** (files it for the
+  accountant to code). Works the same on the desktop app (My Receipts) and the
+  phone site.
+
 ## [1.8.1] — 2026-07-07
 
 ### Added — Executive Mobile Receipt Site

@@ -13,7 +13,7 @@ import { Button } from "../components/Button";
  */
 export function ConfirmScreen() {
   const navigate = useNavigate();
-  const { status, splitApplied, reset } = useFlow();
+  const { status, splitApplied, skippedSplit, reset } = useFlow();
 
   // Deep link / refresh with no completed submit → home.
   useEffect(() => {
@@ -39,9 +39,11 @@ export function ConfirmScreen() {
         <div className="done-check" aria-hidden="true">✓</div>
         <h1 className="done-title">Sent to the accountant</h1>
         <p className="done-sub">
-          {matched
-            ? "Submitted — your accountant has been notified."
-            : "Sent to your accountant to file. Your entity split is saved and will apply automatically when it matches your charge."}
+          {skippedSplit
+            ? "Sent to your accountant — they'll code and split it. Skipping the split is fine."
+            : matched
+              ? "Submitted — your accountant has been notified."
+              : "Sent to your accountant to file. Your entity split is saved and will apply automatically when it matches your charge."}
         </p>
 
         <div className="done-actions">

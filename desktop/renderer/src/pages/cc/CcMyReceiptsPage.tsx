@@ -38,6 +38,9 @@ export default function CcMyReceiptsPage() {
   const [linesOpen, setLinesOpen] = useState(false);
   const [ocrLines, setOcrLines] = useState<ReceiptLine[]>([]);
   const [preparing, setPreparing] = useState(false);
+  // After the receipt is uploaded, ask whether to split it now (clarity) instead
+  // of auto-opening the coding modal.
+  const [splitPromptOpen, setSplitPromptOpen] = useState(false);
   // Force-refresh the "Returned receipts" section after a fresh drop.
   const [returnedKey, setReturnedKey] = useState(0);
   const [returnedCount, setReturnedCount] = useState(0);
@@ -165,10 +168,10 @@ export default function CcMyReceiptsPage() {
         }
       }
 
-      // Always open the Quick-default coding modal (it codes the whole charge
-      // when there are no item lines).
+      // Receipt is now uploaded + the manager alerted. Ask whether to split it
+      // now (opens the Quick-default coding modal) or send it as-is.
       setOcrLines(lines);
-      setLinesOpen(true);
+      setSplitPromptOpen(true);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Upload failed");
     } finally {
@@ -201,6 +204,7 @@ export default function CcMyReceiptsPage() {
     setPickedFile(null);
     setOcrLines([]);
     setLinesOpen(false);
+    setSplitPromptOpen(false);
   }
 
   function actionFor(t: CcTransaction) {
@@ -342,7 +346,7 @@ export default function CcMyReceiptsPage() {
 
       {/* Receipt upload modal (Amex + Capital One) */}
       <Modal
-        open={!!uploadTx && !linesOpen}
+        open={!!uploadTx && !linesOpen && !splitPromptOpen}
         onClose={() => {
           setUploadTx(null);
           setPickedFile(null);
@@ -420,11 +424,50 @@ export default function CcMyReceiptsPage() {
                 disabled={!pickedFile || preparing}
                 title={pickedFile ? undefined : "Choose a file first"}
               >
-                Next: code receipt
+                Upload receipt
               </Button>
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* After upload: explicit choice to split now or send as-is. */}
+      <Modal
+        open={splitPromptOpen}
+        onClose={() => {
+          setSplitPromptOpen(false);
+          finishUpload();
+        }}
+        title="Receipt uploaded"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-ink-muted">
+            Your receipt is saved and your accountant has been notified. Do you
+            want to split it across businesses &amp; locations now?
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setSplitPromptOpen(false);
+                finishUpload();
+                toast.success(
+                  "Receipt sent — you can split it anytime from My Receipts.",
+                );
+              }}
+            >
+              Not now
+            </Button>
+            <Button
+              onClick={() => {
+                setSplitPromptOpen(false);
+                setLinesOpen(true);
+              }}
+            >
+              Split it
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {/* Receipt coding — Quick split (default) or Line-by-line. Opens for both
