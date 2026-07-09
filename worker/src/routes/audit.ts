@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "./helpers";
 import { isStaffOrAdmin, user, hasRole } from "./helpers";
-import { parseJson, nowIso } from "../lib/util";
+import { parseJson, nowIso, chunk } from "../lib/util";
 import { ROLES, AUDIT_ACTION } from "../lib/constants";
 import { audit as writeAudit } from "../lib/db";
 import type { UserRow, InvoiceRow } from "../lib/types";
@@ -55,16 +55,18 @@ async function enrich(c: import("hono").Context<AppEnv>, rows: AuditRow[]) {
   const invIds = Array.from(new Set(rows.map((r) => r.invoice_id).filter(Boolean))) as string[];
   const nameById: Record<string, string> = {};
   const vendorById: Record<string, string> = {};
-  if (userIds.length) {
+  // Batch each id list (one `?` per id) so the IN-lookups never exceed D1's
+  // bound-param cap when a page spans many distinct users/invoices.
+  for (const batch of chunk(userIds)) {
     const us = await c.env.DB.prepare(
-      `SELECT id, name FROM users WHERE id IN (${userIds.map(() => "?").join(",")})`,
-    ).bind(...userIds).all<Pick<UserRow, "id" | "name">>();
+      `SELECT id, name FROM users WHERE id IN (${batch.map(() => "?").join(",")})`,
+    ).bind(...batch).all<Pick<UserRow, "id" | "name">>();
     for (const u of us.results ?? []) nameById[u.id] = u.name;
   }
-  if (invIds.length) {
+  for (const batch of chunk(invIds)) {
     const iv = await c.env.DB.prepare(
-      `SELECT id, vendor FROM invoices WHERE id IN (${invIds.map(() => "?").join(",")})`,
-    ).bind(...invIds).all<Pick<InvoiceRow, "id" | "vendor">>();
+      `SELECT id, vendor FROM invoices WHERE id IN (${batch.map(() => "?").join(",")})`,
+    ).bind(...batch).all<Pick<InvoiceRow, "id" | "vendor">>();
     for (const i of iv.results ?? []) vendorById[i.id] = i.vendor;
   }
   return rows.map((e) => ({

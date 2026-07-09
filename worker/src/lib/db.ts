@@ -5,7 +5,7 @@ import type {
   ApprovalRow,
   UserRow,
 } from "./types";
-import { uuid, parseJson } from "./util";
+import { uuid, parseJson, chunk } from "./util";
 import { ROLES, glAccountNumber, REQUIRES_MANUAL_REVIEW } from "./constants";
 
 /** Writes one audit_log row (Brief §13 — audit every state change). */
@@ -161,22 +161,26 @@ export async function reviewCounts(
   invoiceIds: string[],
 ): Promise<Record<string, { review_count: number; blocking_count: number }>> {
   if (invoiceIds.length === 0) return {};
-  const placeholders = invoiceIds.map(() => "?").join(",");
-  const rows = await env.DB.prepare(
-    `SELECT invoice_id,
-            SUM(CASE WHEN requires_review = 1 THEN 1 ELSE 0 END) AS review_count,
-            SUM(CASE WHEN gl_category = ? THEN 1 ELSE 0 END) AS blocking_count
-       FROM line_items
-      WHERE invoice_id IN (${placeholders})
-      GROUP BY invoice_id`,
-  )
-    .bind(REQUIRES_MANUAL_REVIEW, ...invoiceIds)
-    .all<{ invoice_id: string; review_count: number; blocking_count: number }>();
   const out: Record<string, { review_count: number; blocking_count: number }> = {};
-  for (const r of rows.results ?? [])
-    out[r.invoice_id] = {
-      review_count: r.review_count ?? 0,
-      blocking_count: r.blocking_count ?? 0,
-    };
+  // D1 caps bound params at 100, so batch the id list (one `?` per id + the
+  // gl_category param) instead of binding all ids at once.
+  for (const batch of chunk(invoiceIds)) {
+    const placeholders = batch.map(() => "?").join(",");
+    const rows = await env.DB.prepare(
+      `SELECT invoice_id,
+              SUM(CASE WHEN requires_review = 1 THEN 1 ELSE 0 END) AS review_count,
+              SUM(CASE WHEN gl_category = ? THEN 1 ELSE 0 END) AS blocking_count
+         FROM line_items
+        WHERE invoice_id IN (${placeholders})
+        GROUP BY invoice_id`,
+    )
+      .bind(REQUIRES_MANUAL_REVIEW, ...batch)
+      .all<{ invoice_id: string; review_count: number; blocking_count: number }>();
+    for (const r of rows.results ?? [])
+      out[r.invoice_id] = {
+        review_count: r.review_count ?? 0,
+        blocking_count: r.blocking_count ?? 0,
+      };
+  }
   return out;
 }

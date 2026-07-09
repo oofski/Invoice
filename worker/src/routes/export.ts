@@ -11,7 +11,7 @@ import {
   type ExportInvoice,
 } from "../lib/export";
 import { findVendorMapping, loadVendorMappings } from "../lib/rules";
-import { uuid, nowIso } from "../lib/util";
+import { uuid, nowIso, chunk } from "../lib/util";
 import { INVOICE_STATUS, AUDIT_ACTION, REQUIRES_MANUAL_REVIEW } from "../lib/constants";
 import type {
   InvoiceRow,
@@ -41,11 +41,16 @@ async function assembleExportInvoices(
   if (!Array.isArray(invoiceIds) || invoiceIds.length === 0)
     return { ok: false, response: c.json({ error: "Provide at least one invoiceId" }, 400) };
 
-  const ph = invoiceIds.map(() => "?").join(",");
-  const invRows = await c.env.DB.prepare(
-    `SELECT * FROM invoices WHERE id IN (${ph})`,
-  ).bind(...invoiceIds).all<InvoiceRow>();
-  const invoices = invRows.results ?? [];
+  // D1 caps bound params at 100, so batch the invoice-id list (one `?` per id)
+  // and merge the rows instead of binding all ids in a single statement.
+  const invoices: InvoiceRow[] = [];
+  for (const batch of chunk(invoiceIds)) {
+    const ph = batch.map(() => "?").join(",");
+    const invRows = await c.env.DB.prepare(
+      `SELECT * FROM invoices WHERE id IN (${ph})`,
+    ).bind(...batch).all<InvoiceRow>();
+    invoices.push(...(invRows.results ?? []));
+  }
   if (invoices.length !== invoiceIds.length)
     return { ok: false, response: c.json({ error: "One or more invoices not found" }, 404) };
 
@@ -71,14 +76,21 @@ async function assembleExportInvoices(
   // FIX-11 (v1.6.0): HARD-BLOCK (422) only for the REQUIRES_MANUAL_REVIEW sentinel
   // category — those lines have no real account number to export. All other review
   // flags (concrete-category requires_review, ambiguity, reconciliation) only WARN.
-  const blocking = await c.env.DB.prepare(
-    `SELECT invoice_id, COUNT(*) AS c FROM line_items
-       WHERE gl_category = ? AND invoice_id IN (${ph})
-       GROUP BY invoice_id`,
-  ).bind(REQUIRES_MANUAL_REVIEW, ...invoiceIds).all<{ invoice_id: string; c: number }>();
-  if ((blocking.results ?? []).length) {
+  // Batch the id list (one `?` per id + the gl_category param). Each invoice_id
+  // lives in exactly one batch, so the per-batch GROUP BY rows just concatenate.
+  const blockingRows: { invoice_id: string; c: number }[] = [];
+  for (const batch of chunk(invoiceIds)) {
+    const ph = batch.map(() => "?").join(",");
+    const blocking = await c.env.DB.prepare(
+      `SELECT invoice_id, COUNT(*) AS c FROM line_items
+         WHERE gl_category = ? AND invoice_id IN (${ph})
+         GROUP BY invoice_id`,
+    ).bind(REQUIRES_MANUAL_REVIEW, ...batch).all<{ invoice_id: string; c: number }>();
+    blockingRows.push(...(blocking.results ?? []));
+  }
+  if (blockingRows.length) {
     const blockingMap: Record<string, number> = {};
-    for (const r of blocking.results ?? []) blockingMap[r.invoice_id] = r.c;
+    for (const r of blockingRows) blockingMap[r.invoice_id] = r.c;
     return { ok: false, response: c.json({ error: "Some invoices have unresolved manual-review items", blocking: blockingMap }, 422) };
   }
 
@@ -86,13 +98,18 @@ async function assembleExportInvoices(
   // non-blocking review flags — concrete-category requires_review lines, ambiguous
   // locations, or a reconciliation gap — unless the caller acknowledged them.
   if (!acknowledgeWarnings) {
-    const flags = await c.env.DB.prepare(
-      `SELECT invoice_id, COUNT(*) AS c FROM line_items
-         WHERE requires_review = 1 AND gl_category != ? AND invoice_id IN (${ph})
-         GROUP BY invoice_id`,
-    ).bind(REQUIRES_MANUAL_REVIEW, ...invoiceIds).all<{ invoice_id: string; c: number }>();
+    const flagRows: { invoice_id: string; c: number }[] = [];
+    for (const batch of chunk(invoiceIds)) {
+      const ph = batch.map(() => "?").join(",");
+      const flags = await c.env.DB.prepare(
+        `SELECT invoice_id, COUNT(*) AS c FROM line_items
+           WHERE requires_review = 1 AND gl_category != ? AND invoice_id IN (${ph})
+           GROUP BY invoice_id`,
+      ).bind(REQUIRES_MANUAL_REVIEW, ...batch).all<{ invoice_id: string; c: number }>();
+      flagRows.push(...(flags.results ?? []));
+    }
     const flaggedLines: Record<string, number> = {};
-    for (const r of flags.results ?? []) flaggedLines[r.invoice_id] = r.c;
+    for (const r of flagRows) flaggedLines[r.invoice_id] = r.c;
 
     const locationAmbiguous: string[] = [];
     const reconciliation: Record<string, number> = {};
@@ -121,27 +138,33 @@ async function assembleExportInvoices(
     }
   }
 
-  const liRows = await c.env.DB.prepare(
-    `SELECT * FROM line_items WHERE invoice_id IN (${ph})`,
-  ).bind(...invoiceIds).all<LineItemRow>();
   const byInvoice = new Map<string, LineItemRow[]>();
-  for (const li of liRows.results ?? []) {
-    const arr = byInvoice.get(li.invoice_id) ?? [];
-    arr.push(li);
-    byInvoice.set(li.invoice_id, arr);
+  for (const batch of chunk(invoiceIds)) {
+    const ph = batch.map(() => "?").join(",");
+    const liRows = await c.env.DB.prepare(
+      `SELECT * FROM line_items WHERE invoice_id IN (${ph})`,
+    ).bind(...batch).all<LineItemRow>();
+    for (const li of liRows.results ?? []) {
+      const arr = byInvoice.get(li.invoice_id) ?? [];
+      arr.push(li);
+      byInvoice.set(li.invoice_id, arr);
+    }
   }
 
   // Tolerate a pre-migration DB (no invoice_allocations table yet): treat as
   // "no allocations" so export keeps working until the migration is applied.
   const allocByInvoice = new Map<string, InvoiceAllocationRow[]>();
   try {
-    const allocRows = await c.env.DB.prepare(
-      `SELECT * FROM invoice_allocations WHERE invoice_id IN (${ph})`,
-    ).bind(...invoiceIds).all<InvoiceAllocationRow>();
-    for (const a of allocRows.results ?? []) {
-      const arr = allocByInvoice.get(a.invoice_id) ?? [];
-      arr.push(a);
-      allocByInvoice.set(a.invoice_id, arr);
+    for (const batch of chunk(invoiceIds)) {
+      const ph = batch.map(() => "?").join(",");
+      const allocRows = await c.env.DB.prepare(
+        `SELECT * FROM invoice_allocations WHERE invoice_id IN (${ph})`,
+      ).bind(...batch).all<InvoiceAllocationRow>();
+      for (const a of allocRows.results ?? []) {
+        const arr = allocByInvoice.get(a.invoice_id) ?? [];
+        arr.push(a);
+        allocByInvoice.set(a.invoice_id, arr);
+      }
     }
   } catch {
     // invoice_allocations table not present yet — proceed with no allocations.
@@ -166,11 +189,15 @@ async function finalizeExport(
   exportId: string,
   fileName: string,
 ): Promise<void> {
-  const ph = invoiceIds.map(() => "?").join(",");
   const at = nowIso();
-  await c.env.DB.prepare(
-    `UPDATE invoices SET status=?, exported_at=?, export_id=? WHERE id IN (${ph})`,
-  ).bind(INVOICE_STATUS.EXPORTED, at, exportId, ...invoiceIds).run();
+  // Batch the id list (one `?` per id + the 3 fixed SET params) so the UPDATE
+  // never exceeds D1's bound-param cap.
+  for (const batch of chunk(invoiceIds)) {
+    const ph = batch.map(() => "?").join(",");
+    await c.env.DB.prepare(
+      `UPDATE invoices SET status=?, exported_at=?, export_id=? WHERE id IN (${ph})`,
+    ).bind(INVOICE_STATUS.EXPORTED, at, exportId, ...batch).run();
+  }
 
   for (const invoice of invoices) {
     await audit(c.env, {
@@ -192,10 +219,10 @@ exportRoutes.get("/", async (c) => {
   const list = rows.results ?? [];
   const ids = Array.from(new Set(list.map((r) => r.exported_by).filter(Boolean)));
   const nameById: Record<string, string> = {};
-  if (ids.length) {
+  for (const batch of chunk(ids)) {
     const us = await c.env.DB.prepare(
-      `SELECT id, name FROM users WHERE id IN (${ids.map(() => "?").join(",")})`,
-    ).bind(...ids).all<Pick<UserRow, "id" | "name">>();
+      `SELECT id, name FROM users WHERE id IN (${batch.map(() => "?").join(",")})`,
+    ).bind(...batch).all<Pick<UserRow, "id" | "name">>();
     for (const u of us.results ?? []) nameById[u.id] = u.name;
   }
   return c.json({

@@ -5,6 +5,25 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.8.3] — 2026-07-09
+
+### Fixed
+- **Invoices tab now loads at scale (the real root cause).** Once an account had
+  more than ~100 invoices, the Invoices list failed with a database error
+  (`D1_ERROR: too many SQL variables`) and showed nothing. Cause: the list ran a
+  single query that bound one parameter per invoice to compute review-flag
+  counts, and Cloudflare D1 caps a query at 100 bound parameters — so with a few
+  hundred invoices the whole request 500'd. The query now batches its lookups in
+  chunks of 90, so it works no matter how many invoices exist.
+- **Same fix applied to Export and bulk credit-card operations**, which used the
+  identical "one parameter per id" pattern and would have failed the same way at
+  scale (invoice export, audit-log name lookups, CC upload-batch delete/dedup,
+  notification scoping). All now batch their queries under the D1 limit.
+
+This is a **server-side (worker) fix** — the desktop app is unchanged from 1.8.2;
+the version bump is just the release marker. The fix takes effect as soon as the
+worker redeploys.
+
 ## [1.8.2] — 2026-07-09
 
 ### Fixed

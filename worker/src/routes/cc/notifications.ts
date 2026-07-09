@@ -20,7 +20,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../helpers";
 import { user, hasRole } from "../helpers";
 import { ROLES } from "../../lib/constants";
-import { uuid } from "../../lib/util";
+import { uuid, chunk } from "../../lib/util";
 import { isCcEnabled, ccReady } from "../../cc/flag";
 import { sendCcReminder, renderCcReminder } from "../../cc/ccEmail";
 import type {
@@ -110,20 +110,36 @@ async function pendingForCardholder(
   cardholderId: string,
   restrictIds: string[] | null,
 ): Promise<TxRow[]> {
-  let sql =
+  const baseSql =
     `SELECT * FROM cc_transactions
       WHERE cardholder_id = ?
         AND is_payment = 0
         AND is_credit = 0
         AND receipt_status = 'PENDING'`;
-  const params: string[] = [cardholderId];
-  if (restrictIds && restrictIds.length > 0) {
-    sql += ` AND id IN (${restrictIds.map(() => "?").join(",")})`;
-    params.push(...restrictIds);
+
+  // No id restriction → a single query with the original ordering.
+  if (!restrictIds || restrictIds.length === 0) {
+    const rows = await env.DB
+      .prepare(`${baseSql} ORDER BY transaction_date DESC`)
+      .bind(cardholderId)
+      .all<TxRow>();
+    return rows.results ?? [];
   }
-  sql += " ORDER BY transaction_date DESC";
-  const rows = await env.DB.prepare(sql).bind(...params).all<TxRow>();
-  return rows.results ?? [];
+
+  // Restricted: D1 caps bound params at 100, so batch the id list (one `?` per id
+  // + the cardholder_id param) and merge, then re-apply the DESC ordering across
+  // batches so the contract holds.
+  const out: TxRow[] = [];
+  for (const batch of chunk(restrictIds)) {
+    const ph = batch.map(() => "?").join(",");
+    const rows = await env.DB
+      .prepare(`${baseSql} AND id IN (${ph})`)
+      .bind(cardholderId, ...batch)
+      .all<TxRow>();
+    out.push(...(rows.results ?? []));
+  }
+  out.sort((a, b) => (b.transaction_date ?? "").localeCompare(a.transaction_date ?? ""));
+  return out;
 }
 
 /**

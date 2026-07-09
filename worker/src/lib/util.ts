@@ -1,5 +1,23 @@
 /** Misc helpers shared across the Worker. */
 
+/**
+ * Cloudflare D1 rejects any query that binds more than 100 parameters
+ * ("D1_ERROR: too many SQL variables"). Queries that build a `WHERE col IN (?,?,…)`
+ * clause with one placeholder per id therefore fail once the id list is large
+ * (e.g. hundreds of invoices). `CHUNK_SIZE` keeps each batch well under the cap
+ * (leaving headroom for a few fixed params in the same statement); callers run
+ * one query per `chunk()` batch and merge the results.
+ */
+export const D1_MAX_VARS = 100;
+export const CHUNK_SIZE = 90;
+
+export function chunk<T>(arr: readonly T[], size: number = CHUNK_SIZE): T[][] {
+  const out: T[][] = [];
+  const n = Math.max(1, Math.floor(size));
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+
 export function uuid(): string {
   return crypto.randomUUID();
 }

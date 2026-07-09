@@ -17,7 +17,7 @@ import type { AppEnv } from "../helpers";
 import { user, hasRole } from "../helpers";
 import { ROLES } from "../../lib/constants";
 import { isCcEnabled, ccReady } from "../../cc/flag";
-import { uuid, nowIso, parseJson } from "../../lib/util";
+import { uuid, nowIso, parseJson, chunk } from "../../lib/util";
 import { roundCents } from "../../cc/ccRules";
 import { ccRawUploadKey, ccPut, ccDelete } from "../../cc/ccStorage";
 import {
@@ -121,15 +121,18 @@ async function buildBreakdown(
   const ids = [...counts.keys()].filter((k): k is string => !!k);
   const names = new Map<string, string>();
   if (ids.length) {
-    const placeholders = ids.map(() => "?").join(",");
     try {
-      const res = await env.DB.prepare(
-        `SELECT id, first_name, last_name FROM cc_cardholders WHERE id IN (${placeholders})`,
-      )
-        .bind(...ids)
-        .all<{ id: string; first_name: string; last_name: string | null }>();
-      for (const ch of res.results ?? [])
-        names.set(ch.id, `${ch.first_name}${ch.last_name ? ` ${ch.last_name}` : ""}`);
+      // Batch the id list (D1 caps bound params) — merge names across chunks.
+      for (const batch of chunk(ids)) {
+        const placeholders = batch.map(() => "?").join(",");
+        const res = await env.DB.prepare(
+          `SELECT id, first_name, last_name FROM cc_cardholders WHERE id IN (${placeholders})`,
+        )
+          .bind(...batch)
+          .all<{ id: string; first_name: string; last_name: string | null }>();
+        for (const ch of res.results ?? [])
+          names.set(ch.id, `${ch.first_name}${ch.last_name ? ` ${ch.last_name}` : ""}`);
+      }
     } catch (e) {
       console.error("[cc] buildBreakdown name lookup failed:", e);
     }
@@ -464,12 +467,12 @@ uploads.delete("/:id", async (c) => {
   const txIds = (txRows.results ?? []).map((r) => r.id);
   const txCount = txIds.length;
 
-  const ph = txIds.map(() => "?").join(",");
-
   // --- Safety block (option C): count DISTINCT batch tx that are "protected" ---
   // A tx is protected if it has ANY child receipt / entity split / receipt line,
   // OR it is already in QB. We union the protected tx-id sets so the reported
   // count is an accurate distinct-tx count (not a sum of independent rows).
+  // The tx-id list is batched (D1 caps bound params) — the DISTINCT union is
+  // unaffected since each chunk contributes to the same set.
   let protectedCount = 0;
   if (txCount > 0) {
     const protectedIds = new Set<string>();
@@ -477,12 +480,15 @@ uploads.delete("/:id", async (c) => {
       if (r.in_qb === 1) protectedIds.add(r.id);
     }
     for (const table of ["cc_receipts", "cc_entity_splits", "cc_receipt_lines"]) {
-      const res = await c.env.DB.prepare(
-        `SELECT DISTINCT transaction_id FROM ${table} WHERE transaction_id IN (${ph})`,
-      )
-        .bind(...txIds)
-        .all<{ transaction_id: string }>();
-      for (const row of res.results ?? []) protectedIds.add(row.transaction_id);
+      for (const batch of chunk(txIds)) {
+        const ph = batch.map(() => "?").join(",");
+        const res = await c.env.DB.prepare(
+          `SELECT DISTINCT transaction_id FROM ${table} WHERE transaction_id IN (${ph})`,
+        )
+          .bind(...batch)
+          .all<{ transaction_id: string }>();
+        for (const row of res.results ?? []) protectedIds.add(row.transaction_id);
+      }
     }
     protectedCount = protectedIds.size;
   }
@@ -502,13 +508,22 @@ uploads.delete("/:id", async (c) => {
   // --- Cascade delete (children first; allowed when not blocked or when force) ---
   let receiptsRemoved = 0;
   if (txCount > 0) {
+    // Every tx-keyed step batches its id list (D1 caps bound params). Each stage
+    // completes across all chunks before the next begins, preserving the
+    // children-first (FK-safe) ordering of the single-statement version.
+
     // 1. Receipts: best-effort R2 delete of each object, then drop the rows.
-    const receipts = await c.env.DB.prepare(
-      `SELECT id, r2_key FROM cc_receipts WHERE transaction_id IN (${ph})`,
-    )
-      .bind(...txIds)
-      .all<{ id: string; r2_key: string }>();
-    for (const rcpt of receipts.results ?? []) {
+    const receiptRows: { id: string; r2_key: string }[] = [];
+    for (const batch of chunk(txIds)) {
+      const ph = batch.map(() => "?").join(",");
+      const receipts = await c.env.DB.prepare(
+        `SELECT id, r2_key FROM cc_receipts WHERE transaction_id IN (${ph})`,
+      )
+        .bind(...batch)
+        .all<{ id: string; r2_key: string }>();
+      receiptRows.push(...(receipts.results ?? []));
+    }
+    for (const rcpt of receiptRows) {
       if (rcpt.r2_key) {
         try {
           await ccDelete(c.env, rcpt.r2_key);
@@ -517,32 +532,47 @@ uploads.delete("/:id", async (c) => {
         }
       }
     }
-    receiptsRemoved = (receipts.results ?? []).length;
-    await c.env.DB.prepare(`DELETE FROM cc_receipts WHERE transaction_id IN (${ph})`)
-      .bind(...txIds)
-      .run();
+    receiptsRemoved = receiptRows.length;
+    for (const batch of chunk(txIds)) {
+      const ph = batch.map(() => "?").join(",");
+      await c.env.DB.prepare(`DELETE FROM cc_receipts WHERE transaction_id IN (${ph})`)
+        .bind(...batch)
+        .run();
+    }
 
     // 2-4. Remaining tx-keyed coding children (allocations → lines → splits).
-    await c.env.DB.prepare(`DELETE FROM cc_line_allocations WHERE transaction_id IN (${ph})`)
-      .bind(...txIds)
-      .run();
-    await c.env.DB.prepare(`DELETE FROM cc_receipt_lines WHERE transaction_id IN (${ph})`)
-      .bind(...txIds)
-      .run();
-    await c.env.DB.prepare(`DELETE FROM cc_entity_splits WHERE transaction_id IN (${ph})`)
-      .bind(...txIds)
-      .run();
+    for (const batch of chunk(txIds)) {
+      const ph = batch.map(() => "?").join(",");
+      await c.env.DB.prepare(`DELETE FROM cc_line_allocations WHERE transaction_id IN (${ph})`)
+        .bind(...batch)
+        .run();
+    }
+    for (const batch of chunk(txIds)) {
+      const ph = batch.map(() => "?").join(",");
+      await c.env.DB.prepare(`DELETE FROM cc_receipt_lines WHERE transaction_id IN (${ph})`)
+        .bind(...batch)
+        .run();
+    }
+    for (const batch of chunk(txIds)) {
+      const ph = batch.map(() => "?").join(",");
+      await c.env.DB.prepare(`DELETE FROM cc_entity_splits WHERE transaction_id IN (${ph})`)
+        .bind(...batch)
+        .run();
+    }
 
     // 5. Re-queue matched inbox items: detach the tx/receipt link and set the
     // queue's awaiting-match status (PENDING_MATCH). We do NOT delete the
     // cardholder's dropped file (its own r2_key stays) — it returns to triage.
-    await c.env.DB.prepare(
-      `UPDATE cc_receipt_inbox
-          SET matched_transaction_id = NULL, matched_receipt_id = NULL, status = 'PENDING_MATCH'
-        WHERE matched_transaction_id IN (${ph})`,
-    )
-      .bind(...txIds)
-      .run();
+    for (const batch of chunk(txIds)) {
+      const ph = batch.map(() => "?").join(",");
+      await c.env.DB.prepare(
+        `UPDATE cc_receipt_inbox
+            SET matched_transaction_id = NULL, matched_receipt_id = NULL, status = 'PENDING_MATCH'
+          WHERE matched_transaction_id IN (${ph})`,
+      )
+        .bind(...batch)
+        .run();
+    }
 
     // 6. The transactions themselves.
     await c.env.DB.prepare("DELETE FROM cc_transactions WHERE upload_batch_id = ?")
