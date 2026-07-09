@@ -10,11 +10,23 @@ export const dashboard = new Hono<AppEnv>();
 dashboard.get("/stats", async (c) => {
   if (!isStaffOrAdmin(c)) return c.json({ error: "Forbidden" }, 403);
 
+  // Exclude archived (e.g. "Cleared") invoices so the KPI counters drop the
+  // moment an invoice is archived — matching /analytics and the invoices list,
+  // which already filter archived_at IS NULL. Gated on the archive migration
+  // having run (archiveReady) so this is a no-op on pre-migration databases.
+  const archived = await archiveReady(c.env);
   const invRows = await c.env.DB.prepare(
-    "SELECT id, status, business, total_amount, exported_at, created_at FROM invoices",
+    `SELECT id, status, business, total_amount, exported_at, created_at FROM invoices${
+      archived ? " WHERE archived_at IS NULL" : ""
+    }`,
   ).all<InvoiceRow>();
   const reviewRows = await c.env.DB.prepare(
-    "SELECT DISTINCT invoice_id FROM line_items WHERE requires_review = 1",
+    archived
+      ? `SELECT DISTINCT li.invoice_id AS invoice_id
+           FROM line_items li
+           JOIN invoices i ON i.id = li.invoice_id
+          WHERE li.requires_review = 1 AND i.archived_at IS NULL`
+      : "SELECT DISTINCT invoice_id FROM line_items WHERE requires_review = 1",
   ).all<{ invoice_id: string }>();
 
   const invoices = invRows.results ?? [];

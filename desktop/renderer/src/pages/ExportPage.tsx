@@ -18,7 +18,7 @@ import { INVOICE_STATUS } from "@/lib/constants";
 import { buildBillWorkbook } from "@/lib/workbook";
 import { zipPdfs } from "@/lib/zip";
 import type { QueueInvoice } from "@/components/InvoiceTable";
-import type { ExportRow, FactorResponse } from "@/lib/types";
+import type { ExportRow, FactorResponse, EntitySheet } from "@/lib/types";
 
 function downloadCsv(csv: string, fileName: string) {
   downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8;" }), fileName);
@@ -92,6 +92,9 @@ export default function ExportPage() {
   const [exporting, setExporting] = useState(false);
   const [factoring, setFactoring] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  // The last Factor result, kept so the per-entity download buttons can rebuild
+  // one entity's sheet on demand (view-only — no re-export, no server call).
+  const [factorResult, setFactorResult] = useState<FactorResponse | null>(null);
   const [zipping, setZipping] = useState(false);
   const [zipProgress, setZipProgress] = useState<{ done: number; total: number } | null>(
     null,
@@ -180,12 +183,21 @@ export default function ExportPage() {
     });
     const blob = buildBillWorkbook(res.entities, res.header);
     downloadBlob(blob, res.fileName);
+    // Keep the result so the user can also grab any single entity's sheet.
+    setFactorResult(res);
     toast.success(
       `Factored ${res.invoiceCount} invoices into ${res.entities.length} entity tab(s)`,
     );
     setSelected(new Set());
     refetch();
     refetchHistory();
+  }
+
+  /** Rebuild + download ONE entity's sheet as its own .xlsx (from the last Factor). */
+  function downloadEntitySheet(entity: EntitySheet) {
+    if (!factorResult) return;
+    const blob = buildBillWorkbook([entity], factorResult.header);
+    downloadBlob(blob, `${entity.entity}_bills_${yyyymmdd()}.xlsx`);
   }
 
   async function runFactor() {
@@ -316,6 +328,41 @@ export default function ExportPage() {
               {formatCurrency(selectedTotal)}
             </span>
           </div>
+        )}
+
+        {/* Per-entity downloads from the last Factor (the combined all-tabs
+            workbook already downloaded; this adds one file per entity). */}
+        {factorResult && factorResult.entities.length > 0 && (
+          <Card>
+            <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+              <FileSpreadsheet className="h-4 w-4 text-ink-subtle" />
+              <h2 className="font-display text-sm font-semibold text-ink">
+                Download by entity
+              </h2>
+              <span className="ml-auto text-xs text-ink-subtle">
+                from your last factor · {factorResult.invoiceCount} invoice
+                {factorResult.invoiceCount === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2 p-4">
+              {factorResult.entities.map((e) => (
+                <Button
+                  key={e.entity}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => downloadEntitySheet(e)}
+                  title={`Download just ${e.entity}'s bills as its own .xlsx`}
+                >
+                  <Download className="h-4 w-4" />
+                  {e.entity}
+                </Button>
+              ))}
+            </div>
+            <p className="px-4 pb-4 text-xs text-ink-subtle">
+              Each button saves only that entity’s sheet as its own file. The
+              combined all-tabs workbook already downloaded above.
+            </p>
+          </Card>
         )}
 
         {/* Export-ready table */}

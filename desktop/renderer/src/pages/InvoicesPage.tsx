@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Download, Archive } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Spinner, Input, Button } from "@/components/ui/primitives";
@@ -49,6 +49,19 @@ export default function InvoicesPage() {
   const { data, loading, error, refetch } = useApi<{ invoices: QueueInvoice[] }>(
     `/api/invoices?limit=${PAGE_LIMIT}${showArchived ? "&includeArchived=1" : ""}`,
   );
+
+  // Keep the list live: poll every 15s (mirrors the dashboard) and refetch when
+  // the window regains focus, so a deleted invoice or a finished review made
+  // elsewhere shows up without needing to leave and re-open the page.
+  useEffect(() => {
+    const id = setInterval(() => refetch(), 15000);
+    const onFocus = () => refetch();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refetch]);
 
   const invoices = useMemo(() => data?.invoices ?? [], [data]);
   const filtered = useMemo(
