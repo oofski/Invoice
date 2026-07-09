@@ -22,6 +22,13 @@ on:
 permissions:
   contents: write
 
+# Serialize release runs on the same ref so two builds can never race on the
+# same version — which could split assets across two draft releases or strand a
+# draft. Queue (don't cancel) so an in-flight publish always finishes.
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -77,8 +84,14 @@ jobs:
       # Build + publish via electron-builder. `--publish always` uploads the
       # .exe AND the auto-update metadata (latest.yml + .blockmap) to a GitHub
       # Release named after the version in desktop/package.json (e.g. v1.0.1),
-      # creating the tag if needed. Triggered by a version tag push OR a manual
-      # "Run workflow" (workflow_dispatch). The download link is then at:
+      # creating the tag if needed. The publish config uses releaseType "draft",
+      # so the release stays a DRAFT (hidden from the public "latest release"
+      # feed) while assets upload — this closes the auto-update race where
+      # electron-builder would flip the release to published the instant the
+      # .exe landed but BEFORE latest.yml finished uploading, so an app checking
+      # for updates in that window 404'd on latest.yml. The final publish-release
+      # job below flips the draft to published only once every asset is present.
+      # Triggered by a version tag push OR a manual "Run workflow". Download link:
       #   https://github.com/<owner>/<repo>/releases/tag/v<version>
       - name: Build + publish installer
         env:
@@ -151,3 +164,48 @@ jobs:
           name: invoiceiq-macos-dmg
           path: desktop/release/*.dmg
           if-no-files-found: error
+
+  # Flip the draft release to PUBLISHED — only after BOTH platform jobs have
+  # finished uploading, so the release becomes visible to the auto-updater with
+  # every asset (latest.yml, .exe, .dmg, latest-mac.yml) already present. This is
+  # what fixes the "Cannot find latest.yml … 404" race: until this step runs the
+  # release is a draft and the updater never sees a half-uploaded release.
+  #
+  # `if: always() && needs.build-windows.result == 'success'` publishes as long
+  # as the Windows build succeeded, even if the (unsigned, secondary) macOS build
+  # failed — so a flaky mac job never strands a good Windows release as a hidden
+  # draft. If Windows failed there is nothing worth publishing and the draft is
+  # left for inspection.
+  publish-release:
+    needs: [build-windows, build-macos]
+    if: ${{ always() && needs.build-windows.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./desktop/package.json').version")
+          TAG="v${VERSION}"
+          echo "Publishing draft release ${TAG}…"
+          # The draft may still report its assets as uploading for a beat; give it
+          # a moment so latest.yml is durably attached before the release goes live.
+          sleep 10
+          # Retry so a transient gh/API blip can't strand a good build as a
+          # permanent draft (the whole point of this job). 5 attempts, backing off.
+          for attempt in 1 2 3 4 5; do
+            if gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest; then
+              echo "Published ${TAG}."
+              exit 0
+            fi
+            echo "Publish attempt ${attempt} failed; retrying in $((attempt * 5))s…"
+            sleep $((attempt * 5))
+          done
+          echo "::error::Failed to publish draft release ${TAG} after 5 attempts."
+          exit 1

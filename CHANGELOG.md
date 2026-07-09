@@ -5,6 +5,31 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.8.6] — 2026-07-09
+
+### Added
+- **Credit Card Accountant is now a Credit-Cards-only view.** A user with the
+  "Credit Card Accountant" role now sees only the Credit Cards module — the same
+  Credit Cards view an admin sees (Dashboard, Ledger, Receipt Tracker,
+  Transactions, Inbox, Upload, Notifications, Cardholders, My Receipts) — and
+  none of the invoicing/AP screens. They land directly on the Credit Cards
+  dashboard, their sidebar shows just Credit Cards + Settings, and the AP pages
+  are off-limits (typing an invoice URL bounces them back to Credit Cards). All
+  other roles are unchanged. (Assign the role in Admin → Users.)
+
+### Fixed
+- **"Check for updates" no longer errors right after a release ships.** Updating
+  could briefly fail with "Cannot find latest.yml … 404" in the ~8-second window
+  after a new release went live but before its auto-update metadata finished
+  uploading. The release pipeline now keeps each release as a hidden draft until
+  every file is uploaded and only then publishes it, so that window is gone — and
+  the app also retries that transient case and shows a friendly "a new version is
+  finishing publishing, try again in a minute" message instead of a raw error.
+
+The Credit-Card-Accountant view ships in the desktop app; the auto-update fix is
+part release pipeline (protects all installed clients on the next update) and
+part desktop app.
+
 ## [1.8.5] — 2026-07-09
 
 ### Changed

@@ -1,7 +1,7 @@
 {
   "name": "invoiceiq-desktop",
   "private": true,
-  "version": "1.8.5",
+  "version": "1.8.6",
   "description": "InvoiceIQ desktop AP automation app",
   "main": "electron/main.js",
   "type": "commonjs",
@@ -56,7 +56,7 @@
         "provider": "github",
         "owner": "oofski",
         "repo": "Invoice",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ]
   }

@@ -1,7 +1,8 @@
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
-import { ProfileProvider } from "@/components/ProfileProvider";
+import { HashRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { ProfileProvider, useProfile } from "@/components/ProfileProvider";
 import { AppShell } from "@/components/AppShell";
 import { Toaster } from "@/components/ui/Toast";
+import { ROLES } from "@/lib/constants";
 
 import LoginPage from "@/pages/LoginPage";
 import ChangePasswordPage from "@/pages/ChangePasswordPage";
@@ -53,6 +54,20 @@ function CcManagerGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Layout guard for the AP / invoicing routes. The Credit-Card-Accountant role is
+ * scoped to the Credit Cards module only, so it is bounced to /credit-cards if it
+ * tries to reach an AP page by typing the hash route directly (its sidebar already
+ * hides these). Every other role passes through unchanged.
+ */
+function ApOnly() {
+  const profile = useProfile();
+  if (profile.role === ROLES.CREDIT_CARD_ACCOUNTANT) {
+    return <Navigate to="/credit-cards" replace />;
+  }
+  return <Outlet />;
+}
+
 /** Landing redirect for /credit-cards — managers → dashboard, cardholders → my-receipts. */
 function CcHome() {
   const isManager = useCcManager();
@@ -86,16 +101,19 @@ export default function App() {
           }
         >
           <Route index element={<HomeRedirect />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/upload" element={<UploadPage />} />
-          <Route path="/invoices" element={<InvoicesPage />} />
-          <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
-          <Route path="/approvals" element={<ApprovalsPage />} />
-          <Route path="/approvals/:id" element={<ApprovalsPage />} />
-          <Route path="/export" element={<ExportPage />} />
-          <Route path="/vendors" element={<VendorsPage />} />
-          <Route path="/audit" element={<AuditPage />} />
-          <Route path="/admin/users" element={<AdminUsersPage />} />
+          {/* AP / invoicing — off-limits to the Credit-Card-Accountant role. */}
+          <Route element={<ApOnly />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/upload" element={<UploadPage />} />
+            <Route path="/invoices" element={<InvoicesPage />} />
+            <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+            <Route path="/approvals" element={<ApprovalsPage />} />
+            <Route path="/approvals/:id" element={<ApprovalsPage />} />
+            <Route path="/export" element={<ExportPage />} />
+            <Route path="/vendors" element={<VendorsPage />} />
+            <Route path="/audit" element={<AuditPage />} />
+            <Route path="/admin/users" element={<AdminUsersPage />} />
+          </Route>
           <Route path="/settings" element={<SettingsPage />} />
 
           {/* Credit Cards (CCRMS) — manager screens vs the cardholder "My Receipts" view */}

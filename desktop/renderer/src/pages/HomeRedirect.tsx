@@ -10,6 +10,10 @@ export default function HomeRedirect() {
       return <Navigate to="/approvals" replace />;
     case ROLES.STAFF:
       return <Navigate to="/upload" replace />;
+    // Credit-Card-Accountant is scoped to the Credit Cards module — land there
+    // (CcHome then forwards managers to the CC dashboard).
+    case ROLES.CREDIT_CARD_ACCOUNTANT:
+      return <Navigate to="/credit-cards" replace />;
     case ROLES.ACCOUNTANT:
     case ROLES.ADMIN:
     default:

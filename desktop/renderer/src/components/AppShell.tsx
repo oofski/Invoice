@@ -79,17 +79,31 @@ const NAV: NavItem[] = [
   },
   // Credit Cards (CCRMS) — shown only when useCcEnabled() is true (the role
   // list is permissive; the real gate is the ccEnabled flag in the filter).
+  // The Credit-Card-Accountant is scoped to THIS module only (no AP items above),
+  // so their sidebar is just Credit Cards + Settings — mirroring the admin's CC view.
   {
     href: "/credit-cards",
     label: "Credit Cards",
     icon: CreditCard,
-    roles: [ROLES.ACCOUNTANT, ROLES.STAFF, ROLES.EXECUTIVE, ROLES.ADMIN],
+    roles: [
+      ROLES.ACCOUNTANT,
+      ROLES.STAFF,
+      ROLES.EXECUTIVE,
+      ROLES.ADMIN,
+      ROLES.CREDIT_CARD_ACCOUNTANT,
+    ],
   },
   {
     href: "/settings",
     label: "Settings",
     icon: Settings,
-    roles: [ROLES.ACCOUNTANT, ROLES.STAFF, ROLES.EXECUTIVE, ROLES.ADMIN],
+    roles: [
+      ROLES.ACCOUNTANT,
+      ROLES.STAFF,
+      ROLES.EXECUTIVE,
+      ROLES.ADMIN,
+      ROLES.CREDIT_CARD_ACCOUNTANT,
+    ],
   },
 ];
 
@@ -99,6 +113,13 @@ export function AppShell() {
   const { pathname } = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const ccEnabled = useCcEnabled();
+  // The Credit-Card-Accountant is scoped to the Credit Cards module, so the
+  // footer refresh is labeled generically instead of "Check for invoices".
+  const ccOnly = profile.role === ROLES.CREDIT_CARD_ACCOUNTANT;
+  const refreshLabel = ccOnly ? "Refresh" : "Check for invoices";
+  const refreshTitle = ccOnly
+    ? "Reload the latest credit-card data"
+    : "Re-scan the server for new invoices and updates";
 
   const items = NAV.filter(
     (n) =>
@@ -142,11 +163,11 @@ export function AppShell() {
       <div className="border-t border-white/10 p-3">
         <button
           onClick={() => window.location.reload()}
-          title="Re-scan the server for new invoices and updates"
+          title={refreshTitle}
           className="mb-1 flex w-full items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover"
         >
           <RefreshCw className="h-4 w-4" />
-          Check for invoices
+          {refreshLabel}
         </button>
         <div className="mb-2 px-2">
           <p className="truncate text-sm font-medium text-white">

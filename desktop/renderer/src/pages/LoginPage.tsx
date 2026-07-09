@@ -27,6 +27,9 @@ function landingFor(role: AuthUser["role"]): string {
       return "/approvals";
     case ROLES.STAFF:
       return "/upload";
+    // Credit-Card-Accountant is scoped to the Credit Cards module only.
+    case ROLES.CREDIT_CARD_ACCOUNTANT:
+      return "/credit-cards";
     default:
       return "/dashboard";
   }

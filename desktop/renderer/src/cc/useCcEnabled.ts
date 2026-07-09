@@ -35,10 +35,9 @@ function isPinnedCardholder(profile: CcProfile): boolean {
 
 /** Full manager dashboard: the credit_card_accountant role + admins. */
 export function isCcManager(profile: CcProfile): boolean {
-  // credit_card_accountant is worker-only in ROLES; compare by string to avoid
-  // an import-time coupling on the renderer's ROLES copy.
-  const role = profile.role as string;
-  return role === ROLES.ADMIN || role === "credit_card_accountant";
+  return (
+    profile.role === ROLES.ADMIN || profile.role === ROLES.CREDIT_CARD_ACCOUNTANT
+  );
 }
 
 /** Own "My Receipts" view only: executives (limited to the pinned cardholder for now). */
