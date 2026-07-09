@@ -5,6 +5,44 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.8.4] — 2026-07-09
+
+### Added
+- **Invoices paid by credit card are routed to the Credit Cards section
+  automatically.** When an invoice is scanned and the document states it was
+  paid on a card (e.g. "Paid by Credit Card", "Visa ending 1234", "charged to
+  card on file"), the invoice is lifted out of the accounts-payable flow and
+  dropped into the Credit Card module: it auto-matches to the corresponding card
+  transaction when one can be found, otherwise it lands in the accountant's
+  receipt inbox to triage. The original invoice is **archived, never deleted**,
+  so a mis-detection is fully recoverable. Detection reads a new "how it was
+  paid" field captured during OCR extraction and is deliberately conservative —
+  a generic "we accept Visa/Mastercard" footer does not trigger it. If the
+  Credit Card module isn't enabled, nothing changes and the invoice stays in AP.
+
+### Changed
+- **Dashboard charts redesigned — no more overlapping or spilled text.** The
+  "Top vendors" and "Spend by category / entity" panels no longer print labels
+  on top of the chart. Instead you get clean charts with a hover tooltip that
+  shows the exact **name, amount, and percent of total** for whatever slice or
+  bar you point at, plus a compact legend beneath each donut. Long vendor and
+  category names are truncated (full name on hover) so nothing runs off the card.
+- **KPI cards (Total AP, Invoices, Avg Invoice, etc.) restyled** to a cleaner,
+  more uniform, professional layout — same color scheme, refined spacing,
+  iconography, and typography.
+
+### Fixed
+- **Deleting a credit-card transaction now removes it from all dashboard
+  reporting.** Archived/deleted CC transactions were still counted in the Credit
+  Card dashboard's totals, per-cardholder breakdown, KPIs, spend-by-category,
+  spend-by-entity, and monthly trend — so the numbers overstated real spend.
+  Every dashboard aggregation now excludes archived transactions, so reporting
+  reflects only transactions that still exist.
+
+The dashboard/UI changes ship in the desktop app; the invoice-routing and
+CC-dashboard fixes are **server-side (worker)** and take effect as soon as the
+worker redeploys.
+
 ## [1.8.3] — 2026-07-09
 
 ### Fixed

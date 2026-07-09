@@ -87,7 +87,7 @@ dashboard.get("/summary", async (c) => {
   // card payments are excluded.)
   const cycleParams = [cycleStart, cycleEnd];
   const inCycle =
-    "transaction_date >= ? AND transaction_date <= ? AND is_payment = 0";
+    "transaction_date >= ? AND transaction_date <= ? AND is_payment = 0 AND archived_at IS NULL";
 
   // ----- Headline totals ----------------------------------------------
   const totalsRow = await c.env.DB.prepare(
@@ -127,7 +127,7 @@ dashboard.get("/summary", async (c) => {
         COUNT(*) AS total
       FROM cc_transactions t
       JOIN cc_cardholders ch ON ch.id = t.cardholder_id
-      WHERE t.transaction_date >= ? AND t.transaction_date <= ? AND t.is_payment = 0
+      WHERE t.transaction_date >= ? AND t.transaction_date <= ? AND t.is_payment = 0 AND t.archived_at IS NULL
       GROUP BY ch.id
       ORDER BY open DESC, name ASC`,
   )
@@ -264,7 +264,7 @@ interface CcMonthlyPoint {
 // Cycle-scoped KPIs + entity/category donuts, plus a trailing-N-months combo
 // series (spend bars + receipt-completion% line) that spans cycles. The universe
 // mirrors /summary EXACTLY (in-cycle, is_payment = 0, credits kept, archived
-// kept) so Total Spend / counts reconcile with the summary KPI cards. The
+// excluded) so Total Spend / counts reconcile with the summary KPI cards. The
 // monthly series is trailing-N-months regardless of the selected cycle.
 dashboard.get("/analytics", async (c) => {
   if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
@@ -295,7 +295,7 @@ dashboard.get("/analytics", async (c) => {
   }
   const cycleParams = [cycleStart, cycleEnd];
   const inCycle =
-    "transaction_date >= ? AND transaction_date <= ? AND is_payment = 0";
+    "transaction_date >= ? AND transaction_date <= ? AND is_payment = 0 AND archived_at IS NULL";
 
   const months = clampInt(c.req.query("months"), 12, 1, 24);
 
@@ -332,7 +332,7 @@ dashboard.get("/analytics", async (c) => {
             COUNT(*) AS tx_count,
             SUM(CASE WHEN receipt_status IN ('RECEIVED','UPLOADED') THEN 1 ELSE 0 END) AS receipts_received
        FROM cc_transactions
-      WHERE transaction_date >= ? AND is_payment = 0
+      WHERE transaction_date >= ? AND is_payment = 0 AND archived_at IS NULL
       GROUP BY month`,
   )
     .bind(startDate)
@@ -365,7 +365,7 @@ dashboard.get("/analytics", async (c) => {
     `SELECT s.entity_name AS entity_name, COALESCE(SUM(s.amount), 0) AS spend
        FROM cc_entity_splits s
        JOIN cc_transactions t ON t.id = s.transaction_id
-      WHERE t.transaction_date >= ? AND t.transaction_date <= ? AND t.is_payment = 0
+      WHERE t.transaction_date >= ? AND t.transaction_date <= ? AND t.is_payment = 0 AND t.archived_at IS NULL
       GROUP BY s.entity_name
       ORDER BY spend DESC`,
   )

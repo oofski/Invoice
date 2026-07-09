@@ -254,7 +254,7 @@ export default function DashboardPage() {
 
       <div className="space-y-6 p-6">
         {/* KPI row — period totals (analytics) + status counters (stats) */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
           <KpiCard
             label="Total AP"
             value={

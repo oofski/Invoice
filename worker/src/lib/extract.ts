@@ -58,6 +58,14 @@ export interface ExtractedInvoice {
    */
   shipping: number | null;
   line_items: ExtractedLineItem[];
+  /**
+   * The tender the invoice states it was PAID with, if shown (e.g. "Paid by
+   * Credit Card", "Visa ending 1234", "Check #123", "ACH"). Empty when the invoice
+   * doesn't state how it was paid. Additive (v1.8.4): used ONLY by the best-effort
+   * AP→Credit-Card reroute (lib/ccRoute.ts) — a card tender routes the invoice to
+   * the CC module. Never affects invoice coding/routing/export.
+   */
+  payment_method: string;
 }
 
 const INVOICE_SCHEMA = {
@@ -78,6 +86,13 @@ const INVOICE_SCHEMA = {
     ship_to_address: {
       type: "string",
       description: "The ship-to / delivery address. If absent, the bill-to / receiver address.",
+    },
+    payment_method: {
+      type: "string",
+      description:
+        "How the invoice states it was PAID, if shown anywhere on the document (e.g. \"Paid by Credit Card\", " +
+        "\"Visa ending 1234\", \"Charged to card on file\", \"Mastercard ****5678\", \"Check #123\", \"ACH\", \"Cash\"). " +
+        "Copy the tender text verbatim. Return an empty string if the invoice does not state how it was paid.",
     },
     line_items: {
       type: "array",
@@ -128,7 +143,8 @@ Return ONE object per visible line on EVERY page; never merge, summarize, or ski
 Capture discount, credit, rebate, refund, and adjustment lines as their OWN separate line items. A discount/credit is a NEGATIVE amount — values in parentheses (10.00), with a trailing CR, or a leading minus are negative; never drop or net them into another line.
 For each line item's suggested_category, pick the single best GL category from the allowed enum using these hints: a "sales tax"/"use tax" line => "Sales/Use Tax"; "cleaning" => "Repairs & Maintenance"; "rent" => "Occupancy - Rent"; "freight"/"shipping" => "Freight"; "software"/"IT"/"subscription" => "Computer & IT". If you are not confident, use "${REQUIRES_MANUAL_REVIEW}".
 Money values are numbers. Dates are MM/DD/YYYY. quantity and unit_price are OPTIONAL (capture only when shown). If the invoice has no itemized lines, return one line item whose amount is the total.
-Capture any shipping/freight/handling charge from the totals block in the \`shipping\` field (0 if none); if freight appears as its own line item, keep it a line item and omit the header field.`;
+Capture any shipping/freight/handling charge from the totals block in the \`shipping\` field (0 if none); if freight appears as its own line item, keep it a line item and omit the header field.
+If the invoice states how it was PAID (e.g. "Paid by Credit Card", "Visa ending 1234", "Charged to card on file", "Check #123", "ACH"), copy that tender text verbatim into \`payment_method\`; return an empty string if the document does not say how it was paid.`;
 
 function num(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -213,6 +229,7 @@ export function normalizeExtract(data: unknown): ExtractedInvoice {
     shipping: num(d.shipping),
     ship_to_address: str(d.ship_to_address),
     line_items,
+    payment_method: str(d.payment_method),
   };
 }
 

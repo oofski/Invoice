@@ -9,6 +9,7 @@ import { getPdf, putPdf, pdfKey, putReductoRaw } from "./storage";
 import { runRulesPipeline } from "./pipeline";
 import { audit, resolveApproverUser, getInvoice } from "./db";
 import { sendApprovalEmail } from "./email";
+import { maybeRouteInvoiceToCc } from "./ccRoute";
 import { uuid, nowIso, parseAmount, toIsoDate } from "./util";
 import {
   AUDIT_ACTION,
@@ -545,6 +546,18 @@ export async function processInvoiceAI(
       } catch (e) {
         console.error("[process] approval email failed:", e);
       }
+    }
+
+    // Additive, best-effort (v-CCroute): if OCR indicates this invoice was PAID BY
+    // A CREDIT CARD, route it out of the AP flow into the Credit Card module
+    // (auto-match else CC inbox) and archive the source invoice. Fully self-
+    // contained and never throws — a failure leaves the invoice as a normal AP
+    // invoice. Wrapped again here so it can NEVER reach the outer catch (which
+    // would mark AI processing failed) or block the finalize return.
+    try {
+      await maybeRouteInvoiceToCc(env, invoiceId);
+    } catch (e) {
+      console.error("[process] cc reroute failed (invoice stays in AP):", e);
     }
 
     return {
