@@ -196,8 +196,12 @@ export function AppShell() {
 
   return (
     <div className="flex min-h-screen bg-bg">
-      {/* Desktop sidebar */}
-      <aside className="hidden w-60 shrink-0 md:block">{sidebar}</aside>
+      {/* Desktop sidebar — sticky at full viewport height so the footer
+          (Check for invoices / Sign out) stays visible on every page, even when
+          the main content is taller than the screen and the page scrolls. */}
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 self-start md:block">
+        {sidebar}
+      </aside>
 
       {/* Mobile sidebar */}
       {mobileOpen && (
@@ -220,9 +224,7 @@ export function AppShell() {
               <Menu className="h-5 w-5" />
             )}
           </button>
-          <span className="font-wordmark tracking-[0.18em] text-ink">
-            InvoiceIQ
-          </span>
+          <span className="font-wordmark tracking-[0.18em] text-ink">EBG</span>
           <span className="text-xs text-ink-muted">{profile.name}</span>
         </header>
 
