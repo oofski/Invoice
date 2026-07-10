@@ -1,5 +1,12 @@
-import { useRef, useState } from "react";
-import { Upload, CheckCircle2, Clock, AlertTriangle, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Upload,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  X,
+  Camera,
+} from "lucide-react";
 import { Card, Button } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/Toast";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
@@ -8,6 +15,15 @@ import { ccApi, type PerFileResult } from "@/cc/ccApi";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const ALLOWED = ["application/pdf", "image/jpeg", "image/png"];
+
+/** True when this device/build can open a live camera (getUserMedia). */
+function cameraSupported(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices &&
+    typeof navigator.mediaDevices.getUserMedia === "function"
+  );
+}
 
 /**
  * Cardholder multi-file drop zone (design §4 — Feature A). Drag-and-drop OR a
@@ -27,6 +43,83 @@ export function CcDropReceipts({ onDropped }: { onDropped?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<PerFileResult[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // v1.9.1: live-camera capture (take a photo of a paper receipt). Uses
+  // getUserMedia + a canvas snapshot → a JPEG File fed through the same `send`
+  // path as file/drag uploads. Gracefully hidden when no camera is available.
+  const [cameraOn, setCameraOn] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const canUseCamera = cameraSupported();
+
+  function stopCamera() {
+    const s = streamRef.current;
+    if (s) {
+      for (const track of s.getTracks()) track.stop();
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOn(false);
+  }
+
+  // Always release the camera when the component unmounts.
+  useEffect(() => stopCamera, []);
+
+  async function openCamera() {
+    if (!canUseCamera || starting) return;
+    setStarting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCameraOn(true);
+      // Attach on the next tick once the <video> is mounted.
+      requestAnimationFrame(() => {
+        const v = videoRef.current;
+        if (v) {
+          v.srcObject = stream;
+          void v.play().catch(() => undefined);
+        }
+      });
+    } catch {
+      toast.error(
+        "Couldn't open the camera. Check the app's camera permission, or use Choose files.",
+      );
+      stopCamera();
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  function capturePhoto() {
+    const v = videoRef.current;
+    const c = canvasRef.current;
+    if (!v || !c || !v.videoWidth) return;
+    c.width = v.videoWidth;
+    c.height = v.videoHeight;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(v, 0, 0, c.width, c.height);
+    c.toBlob(
+      (blob) => {
+        if (!blob) {
+          toast.error("Couldn't capture the photo. Try again.");
+          return;
+        }
+        const file = new File([blob], `receipt-${Date.now()}.jpg`, {
+          type: "image/jpeg",
+        });
+        stopCamera();
+        void send([file]);
+      },
+      "image/jpeg",
+      0.92,
+    );
+  }
 
   /** Validate the picked set; bad files become local ERROR results (never sent). */
   function partition(files: File[]): { valid: File[]; rejected: PerFileResult[] } {
@@ -142,20 +235,62 @@ export function CcDropReceipts({ onDropped }: { onDropped?: () => void }) {
           <p className="mt-2 text-sm font-medium text-ink">
             Drag receipts here, or
           </p>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="mt-2"
-            loading={busy}
-            disabled={busy}
-            onClick={() => fileRef.current?.click()}
-          >
-            Choose files
-          </Button>
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={busy}
+              disabled={busy}
+              onClick={() => fileRef.current?.click()}
+            >
+              Choose files
+            </Button>
+            {canUseCamera && (
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={starting}
+                disabled={busy || cameraOn}
+                onClick={openCamera}
+              >
+                <Camera className="h-3.5 w-3.5" />
+                Take photo
+              </Button>
+            )}
+          </div>
           <p className="mt-2 text-xs text-ink-subtle">
             PDF, JPG, or PNG · max 20MB · drop several at once
+            {canUseCamera ? " · or snap a photo" : ""}
           </p>
         </div>
+
+        {/* Live camera capture */}
+        {cameraOn && (
+          <div className="space-y-2 rounded-xl border border-line bg-surface-2 p-3">
+            <div className="overflow-hidden rounded-lg bg-black">
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                className="mx-auto max-h-[50vh] w-full object-contain"
+              />
+            </div>
+            <div className="flex items-center justify-center gap-2">
+              <Button size="sm" onClick={capturePhoto} disabled={busy}>
+                <Camera className="h-3.5 w-3.5" />
+                Capture
+              </Button>
+              <Button variant="ghost" size="sm" onClick={stopCamera}>
+                Cancel
+              </Button>
+            </div>
+            <p className="text-center text-xs text-ink-subtle">
+              Line up the receipt and tap Capture — it'll be matched
+              automatically.
+            </p>
+          </div>
+        )}
+        <canvas ref={canvasRef} className="hidden" />
 
         {results.length > 0 && (
           <div className="space-y-1.5">

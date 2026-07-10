@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2, Check, Search, Undo2, Trash2 } from "lucide-react";
 import { Button, Input, Spinner } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/Toast";
@@ -143,6 +143,11 @@ export function CcInboxPane({
 }) {
   const [note, setNote] = useState("");
   const [search, setSearch] = useState("");
+  // v1.9.1: when a receipt was mis-resolved (or belongs to another cardholder),
+  // let the manager search across ALL cardholders instead of only the resolved
+  // one — so any unmatched receipt can still be looked up and attached.
+  const [allCardholders, setAllCardholders] = useState(false);
+  const [engaged, setEngaged] = useState(false);
   const [picker, setPicker] = useState<CcTransaction[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
 
@@ -151,44 +156,43 @@ export function CcInboxPane({
     setNote("");
     setSearch("");
     setPicker([]);
+    setEngaged(false);
+    setAllCardholders(false);
   }, [item.id]);
 
-  // Lazily load the assign picker (scoped to the resolved cardholder when known,
-  // else all). Triggered the first time the manager focuses the search box.
-  async function ensurePicker() {
-    if (picker.length > 0 || pickerLoading) return;
-    setPickerLoading(true);
-    try {
-      const res = await ccApi.listTransactions(
-        item.cardholder_id
-          ? { cardholder_id: item.cardholder_id, per_page: 200 }
-          : { per_page: 200 },
-      );
-      setPicker((res.transactions ?? []).filter((t) => !t.is_payment));
-    } catch (err) {
-      toast.error(
-        err instanceof ApiError ? err.message : "Failed to load transactions",
-      );
-    } finally {
-      setPickerLoading(false);
-    }
-  }
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const open = picker.filter(
-      (t) => t.receipt_status === "PENDING" || t.receipt_status === "UPLOADED",
-    );
-    if (!q) return open.slice(0, 25);
-    return open
-      .filter(
-        (t) =>
-          t.vendor.toLowerCase().includes(q) ||
-          formatCurrency(t.amount).includes(q) ||
-          (t.transaction_date ?? "").includes(q),
-      )
-      .slice(0, 25);
-  }, [picker, search]);
+  // v1.9.1: real server-side transaction search (mirrors CcTransactionsPage).
+  // Runs once the picker is engaged (first focus). Searches vendor server-side
+  // (q=), can drop the cardholder scope, and returns ANY status so a receipt can
+  // be attached to a transaction the auto-matcher's window missed.
+  useEffect(() => {
+    if (!engaged) return;
+    let active = true;
+    const timer = setTimeout(async () => {
+      setPickerLoading(true);
+      try {
+        const res = await ccApi.listTransactions({
+          q: search.trim() || undefined,
+          cardholder_id: allCardholders
+            ? undefined
+            : item.cardholder_id ?? undefined,
+          per_page: 25,
+        });
+        if (active) setPicker((res.transactions ?? []).filter((t) => !t.is_payment));
+      } catch (err) {
+        if (active)
+          toast.error(
+            err instanceof ApiError ? err.message : "Failed to load transactions",
+          );
+      } finally {
+        if (active) setPickerLoading(false);
+      }
+    }, search ? 250 : 0);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engaged, search, allCardholders, item.cardholder_id]);
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -235,19 +239,38 @@ export function CcInboxPane({
         )}
       </div>
 
-      {/* Assign-to-transaction picker */}
+      {/* Assign-to-transaction picker (server-side search) */}
       <div className="min-h-0 flex-1 space-y-1.5">
-        <p className="text-xs font-medium uppercase tracking-[0.12em] text-ink-muted">
-          Assign to transaction
-          {item.cardholder_name ? ` · ${item.cardholder_name}` : ""}
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-ink-muted">
+            Assign to transaction
+            {!allCardholders && item.cardholder_name
+              ? ` · ${item.cardholder_name}`
+              : ""}
+          </p>
+          <label
+            className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-muted"
+            title="Search every cardholder, not just the one this receipt resolved to"
+          >
+            <input
+              type="checkbox"
+              checked={allCardholders}
+              onChange={(e) => {
+                setAllCardholders(e.target.checked);
+                setEngaged(true);
+              }}
+              className="h-3.5 w-3.5 rounded border-line accent-accent"
+            />
+            All cardholders
+          </label>
+        </div>
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onFocus={ensurePicker}
-            placeholder="Search vendor, amount, or date…"
+            onFocus={() => setEngaged(true)}
+            placeholder="Search any transaction by vendor…"
             className="pl-8"
           />
         </div>
@@ -256,14 +279,14 @@ export function CcInboxPane({
             <div className="flex justify-center py-4">
               <Spinner />
             </div>
-          ) : filtered.length === 0 ? (
+          ) : picker.length === 0 ? (
             <p className="px-1 py-2 text-xs text-ink-muted">
-              {picker.length === 0
-                ? "Click the box to load open transactions."
-                : "No open transactions match."}
+              {!engaged
+                ? "Click the box to look up a transaction to attach."
+                : "No transactions match — try a different vendor or search all cardholders."}
             </p>
           ) : (
-            filtered.map((t) => (
+            picker.map((t) => (
               <button
                 key={t.id}
                 disabled={busy}
@@ -276,6 +299,9 @@ export function CcInboxPane({
                   </span>
                   <span className="text-xs text-ink-muted">
                     {formatDate(t.transaction_date)}
+                    {allCardholders && t.cardholder_name
+                      ? ` · ${t.cardholder_name}`
+                      : ""}
                   </span>
                 </span>
                 <span className="shrink-0 text-right">

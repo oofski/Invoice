@@ -5,6 +5,37 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.1] — 2026-07-10
+
+Three credit-card additions. **All additive** — the existing receipt match →
+split → export flow is untouched, and there are **no worker/database changes**
+(every endpoint these use already existed and already authorized the accountant).
+
+### Added
+- **Add receipts right from the Inbox — upload a PDF or take a photo.** The
+  manager Inbox now has an "Add receipts" panel: drag-drop / choose PDF·JPG·PNG
+  (as before) **plus a "Take photo" button** that opens the camera and snaps the
+  receipt (via the device camera; it falls back to Choose files when no camera
+  is available). Whatever you add lands in the inbox and is auto-matched, or is
+  ready to file manually (below).
+- **Look up and attach any transaction to an unmatched receipt.** When a dropped
+  receipt can't be auto-matched, the "Assign to transaction" box now does a real
+  server-side search of **any** transaction by vendor — with a **"All
+  cardholders"** toggle for when the receipt resolved to the wrong person, and it
+  can attach to a charge of any status (not just still-open ones). Previously it
+  only filtered the resolved cardholder's most recent page.
+- **Two-fold split: a business, then evenly across its locations.** In the split
+  editor you can now put an amount on a business (e.g. $100 on Neroli) and click
+  **"Split locations"** to divide it evenly across that business's locations
+  ($20 to each of Neroli's five) — a "split across everything" plus a per-business
+  even split. This works on the **computer** (the entity-split editor, which
+  saves by location via line coding when you use it) and on the **phone** (a new
+  "Even locations" button on each multi-location business). Businesses left as a
+  single lump still save exactly as before.
+
+The receipt-upload/camera, inbox search, and desktop split ship in the desktop
+app; the phone even-split ships in the mobile receipt web app.
+
 ## [1.9.0] — 2026-07-09
 
 Credit-card tab overhaul. **Everything is additive** — the existing receipt

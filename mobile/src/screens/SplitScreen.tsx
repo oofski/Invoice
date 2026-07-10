@@ -258,6 +258,40 @@ export function SplitScreen() {
       return next;
     });
   }
+  /**
+   * v1.9.1 — one-tap two-fold split: take a business's amount (or the unallocated
+   * remainder when it's still empty) and split it EVENLY across ALL of its
+   * locations. e.g. $100 on Neroli → $20 to each of its 5 locations.
+   */
+  function evenLocations(entity: string) {
+    const locs = locationsFor(entity);
+    if (locs.length <= 1) return;
+    const rows = quick[entity] ?? [];
+    const entityTotal = roundCents(
+      rows.reduce((a, r) => {
+        const n = parseFloat(r.amount);
+        return a + (Number.isFinite(n) ? n : 0);
+      }, 0),
+    );
+    const otherAllocated = roundCents(quickAllocated - entityTotal);
+    const base =
+      entityTotal > 0
+        ? entityTotal
+        : Math.max(0, roundCents(roundCents(total) - otherAllocated));
+    const cents = Math.round(base * 100);
+    const per = Math.floor(cents / locs.length);
+    let rem = cents - per * locs.length;
+    const newRows: QuickRow[] = locs.map((loc) => {
+      let c = per;
+      if (rem > 0) {
+        c += 1;
+        rem -= 1;
+      }
+      return { location: loc, amount: base > 0 ? (c / 100).toFixed(2) : "" };
+    });
+    setQuick((prev) => ({ ...prev, [entity]: newRows }));
+  }
+
   /** Even split across EVERY currently-shown location row. */
   function splitEvenly() {
     const flatKeys: { entity: string; idx: number }[] = [];
@@ -477,6 +511,16 @@ export function SplitScreen() {
                           onClick={() => setSheetEntity(e.canonical)}
                         >
                           📍 Locations{rows.length > 1 ? ` (${rows.length})` : ""}
+                        </button>
+                      )}
+                      {multi && (
+                        <button
+                          type="button"
+                          className="chip chip-mini"
+                          onClick={() => evenLocations(e.canonical)}
+                          aria-label={`Split ${e.label} evenly across its ${locs.length} locations`}
+                        >
+                          Even locations
                         </button>
                       )}
                       <button

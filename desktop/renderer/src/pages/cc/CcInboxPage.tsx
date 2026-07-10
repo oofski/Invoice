@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Inbox, ReceiptText, Trash2 } from "lucide-react";
+import {
+  Inbox,
+  ReceiptText,
+  Trash2,
+  Plus,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { CcSubNav } from "@/components/cc/CcSubNav";
 import { Card, Spinner, EmptyState } from "@/components/ui/primitives";
@@ -10,6 +17,7 @@ import {
   CcInboxPane,
   CcInboxReceiptPane,
 } from "@/components/cc/CcInboxPane";
+import { CcDropReceipts } from "@/components/cc/CcDropReceipts";
 import { ccApi, type InboxItem } from "@/cc/ccApi";
 import { useCcManager } from "@/cc/useCcEnabled";
 
@@ -42,6 +50,8 @@ export default function CcInboxPage() {
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // v1.9.1: let the accountant add receipts here (upload PDFs / take a photo).
+  const [addOpen, setAddOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -132,6 +142,36 @@ export default function CcInboxPage() {
         subtitle="Unmatched receipts dropped by cardholders"
       />
       <CcSubNav />
+
+      {/* Add receipts — upload PDFs or take a photo (v1.9.1). Collapsible so it
+          stays out of the way of the queue. */}
+      <div className="px-6 pt-4">
+        <Card className="overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setAddOpen((v) => !v)}
+            className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-surface-2"
+          >
+            {addOpen ? (
+              <ChevronDown className="h-4 w-4 text-ink-subtle" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-ink-subtle" />
+            )}
+            <Plus className="h-4 w-4 text-ink-subtle" />
+            <span className="font-display text-sm font-semibold text-ink">
+              Add receipts
+            </span>
+            <span className="ml-auto text-xs text-ink-muted">
+              Upload a PDF/photo or take a picture — we'll match it automatically
+            </span>
+          </button>
+          {addOpen && (
+            <div className="border-t border-line p-4">
+              <CcDropReceipts onDropped={load} />
+            </div>
+          )}
+        </Card>
+      </div>
 
       <div className="flex min-h-0 flex-1 gap-4 p-6">
         {/* Left: queue */}
