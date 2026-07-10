@@ -5,6 +5,7 @@ import { Button, Select } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/Toast";
 import { cn, formatCurrency } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
+import { emitCcRefresh } from "@/cc/ccRefresh";
 import {
   CC_ENTITIES,
   CC_GL_BACK_BAR,
@@ -496,6 +497,7 @@ export function LineCodingModal({
     try {
       const res = await ccApi.putLines(transactionId, payload);
       toast.success("Line coding saved");
+      emitCcRefresh();
       onSaved?.(res);
       onClose();
     } catch (err) {

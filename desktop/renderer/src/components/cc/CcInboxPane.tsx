@@ -1,17 +1,59 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Loader2, Check, Search, Undo2, Trash2 } from "lucide-react";
+import { Loader2, Check, Search, Undo2, Trash2, Pencil } from "lucide-react";
 import { Button, Input, Spinner } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/Toast";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { CcStatusBadge } from "@/components/cc/CcStatusBadge";
 import { ReceiptDownloadFab } from "@/components/cc/ReceiptDownloadFab";
+import { LineCodingModal } from "@/components/cc/LineCodingModal";
 import {
   ccApi,
+  ccEntityLabel,
   type CandidateTx,
   type CcTransaction,
   type InboxItem,
+  type ReceiptLine,
 } from "@/cc/ccApi";
+
+/**
+ * Whether the carried split can be faithfully edited in LineCodingModal, which
+ * models ONE entity per line. A mobile quick-split can pack several entities into
+ * a single "Receipt total" line — that can't round-trip (a location would bind to
+ * the wrong entity), so such splits stay view-only.
+ */
+function splitEditableInLineModal(lines: ReceiptLine[] | undefined): boolean {
+  if (!lines?.length) return false;
+  for (const line of lines) {
+    const entities = new Set((line.allocations ?? []).map((a) => a.entity_name));
+    if (entities.size > 1) return false;
+  }
+  return true;
+}
+
+/** Flatten the executive's carried split into display rows (entity · location). */
+function pendingSplitRows(
+  ps: InboxItem["pending_split"],
+): { label: string; amount: number }[] {
+  if (!ps) return [];
+  if (ps.lines?.length) {
+    const rows: { label: string; amount: number }[] = [];
+    for (const line of ps.lines) {
+      for (const a of line.allocations ?? []) {
+        const loc = a.location && a.location !== a.entity_name ? ` · ${a.location}` : "";
+        rows.push({ label: `${ccEntityLabel(a.entity_name)}${loc}`, amount: a.amount });
+      }
+    }
+    return rows;
+  }
+  if (ps.entity_splits?.length) {
+    return ps.entity_splits.map((s) => ({
+      label: ccEntityLabel(s.entity_name),
+      amount: s.amount,
+    }));
+  }
+  return [];
+}
 
 // react-pdf is heavy and browser-only — load it lazily (mirrors CcReceiptPane).
 const PdfViewer = lazy(() => import("@/components/PdfViewer"));
@@ -134,15 +176,19 @@ export function CcInboxPane({
   onAssign,
   onReturn,
   onDelete,
+  onPendingSplitChanged,
 }: {
   item: InboxItem;
   busy?: boolean;
   onAssign: (transactionId: string) => void | Promise<void>;
   onReturn: (note: string) => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
+  /** Called after the accountant edits the executive's carried split. */
+  onPendingSplitChanged?: () => void;
 }) {
   const [note, setNote] = useState("");
   const [search, setSearch] = useState("");
+  const [splitOpen, setSplitOpen] = useState(false);
   // v1.9.1: when a receipt was mis-resolved (or belongs to another cardholder),
   // let the manager search across ALL cardholders instead of only the resolved
   // one — so any unmatched receipt can still be looked up and attached.
@@ -158,7 +204,17 @@ export function CcInboxPane({
     setPicker([]);
     setEngaged(false);
     setAllCardholders(false);
+    setSplitOpen(false);
   }, [item.id]);
+
+  // The executive's carried split (parsed by the worker) + whether it's editable.
+  const splitRows = pendingSplitRows(item.pending_split);
+  const ocrTotal = item.ocr_extracted_data?.total ?? null;
+  const canEditSplit =
+    !!item.pending_split?.lines?.length &&
+    typeof ocrTotal === "number" &&
+    ocrTotal > 0 &&
+    splitEditableInLineModal(item.pending_split.lines);
 
   // v1.9.1: real server-side transaction search (mirrors CcTransactionsPage).
   // Runs once the picker is engaged (first focus). Searches vendor server-side
@@ -215,6 +271,46 @@ export function CcInboxPane({
             : "No receipt date"}
         </p>
       </div>
+
+      {/* Executive's carried split — view + edit (incl. location) before filing */}
+      {splitRows.length > 0 && (
+        <div className="rounded-lg border border-line bg-surface px-3 py-2.5">
+          <div className="mb-1 flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-[0.12em] text-ink-muted">
+              Executive's split
+            </p>
+            {canEditSplit && (
+              <button
+                onClick={() => setSplitOpen(true)}
+                disabled={busy}
+                className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline disabled:opacity-50"
+                title="Review / edit the split (including location) before filing"
+              >
+                <Pencil className="h-3 w-3" />
+                Edit
+              </button>
+            )}
+          </div>
+          <ul className="space-y-0.5">
+            {splitRows.map((r, i) => (
+              <li
+                key={i}
+                className="flex items-center justify-between gap-2 text-xs text-ink-muted"
+              >
+                <span className="truncate" title={r.label}>
+                  {r.label}
+                </span>
+                <span className="shrink-0 tabular-nums text-ink">
+                  {formatCurrency(r.amount)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-[11px] text-ink-subtle">
+            Submitted from the app — applied automatically when you file it.
+          </p>
+        </div>
+      )}
 
       {/* Candidate suggestions */}
       <div className="min-h-0 space-y-1.5">
@@ -356,6 +452,23 @@ export function CcInboxPane({
           </Button>
         </div>
       </div>
+
+      {/* Edit the executive's carried split (incl. location) before filing.
+          Reconciles to the receipt's OCR total; saved back to pending_splits. */}
+      {canEditSplit && item.pending_split?.lines && (
+        <LineCodingModal
+          open={splitOpen}
+          onClose={() => setSplitOpen(false)}
+          amount={ocrTotal as number}
+          vendor={item.ocr_extracted_data?.merchant_name || item.file_name}
+          lines={item.pending_split.lines}
+          onSubmit={async (lines: ReceiptLine[]) => {
+            await ccApi.patchInboxPendingSplits(item.id, { lines });
+            toast.success("Split updated");
+            onPendingSplitChanged?.();
+          }}
+        />
+      )}
     </div>
   );
 }

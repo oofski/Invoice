@@ -37,6 +37,7 @@ import { LineCodingModal } from "@/components/cc/LineCodingModal";
 import { CcEditTransactionModal } from "@/components/cc/CcEditTransactionModal";
 import { GLCategorySelect } from "@/components/GLCategorySelect";
 import { ENTITY_COA, ENTITY_COA_ALIAS, glAccountNumber } from "@/lib/constants";
+import { emitCcRefresh } from "@/cc/ccRefresh";
 import {
   ccApi,
   ccEntityLabel,
@@ -226,6 +227,7 @@ export default function CcTransactionsPage() {
       if (detail?.transaction.id === id)
         setDetail((d) => (d ? { ...d, transaction: res.transaction } : d));
       toast.success("Status updated");
+      emitCcRefresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Update failed");
     }
@@ -242,6 +244,7 @@ export default function CcTransactionsPage() {
       if (detail?.transaction.id === id)
         setDetail((d) => (d ? { ...d, transaction: res.transaction } : d));
       toast.success(value ? "Marked in QB" : "Marked not in QB");
+      emitCcRefresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Update failed");
     }
@@ -420,6 +423,7 @@ export default function CcTransactionsPage() {
     try {
       await ccApi.deleteReceipt(receipt.id);
       toast.success("Receipt deleted");
+      emitCcRefresh();
       if (detail) await loadDetail(detail.transaction.id);
       await load();
     } catch (err) {
@@ -446,6 +450,7 @@ export default function CcTransactionsPage() {
       });
       toast.success(`Updated ${res.updated_count} transaction(s)`);
       clearSelection();
+      emitCcRefresh();
       await load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Bulk update failed");
@@ -468,6 +473,7 @@ export default function CcTransactionsPage() {
       const res = await ccApi.archiveTransactions(ids);
       toast.success(`Archived ${res.archived} transaction(s)`);
       clearSelection();
+      emitCcRefresh();
       await load();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Bulk update failed");
@@ -1088,6 +1094,11 @@ export default function CcTransactionsPage() {
                               <span className="truncate" title={r.file_name}>
                                 {r.file_name}
                               </span>
+                              {uploadMethodLabel(r.upload_method) && (
+                                <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] font-medium text-ink-subtle ring-1 ring-inset ring-line">
+                                  {uploadMethodLabel(r.upload_method)}
+                                </span>
+                              )}
                             </span>
                             <span className="ml-2 flex shrink-0 items-center gap-2">
                               <button
@@ -1266,6 +1277,22 @@ function ccCatShort(gl: string): string {
   if (gl === "Retail / Product Costs") return "Retail";
   if (gl === "Sales/Use Tax") return "Tax";
   return gl;
+}
+
+/** Short provenance label for a receipt's upload method (v1.9.2). */
+function uploadMethodLabel(m: string | null | undefined): string | null {
+  switch (m) {
+    case "INVOICE_IQ_APP":
+      return "via app";
+    case "MANAGER_UPLOAD":
+      return "by manager";
+    case "CAPITAL_ONE_APP":
+      return "Cap One app";
+    case "MANUAL_UPLOAD":
+      return "manual";
+    default:
+      return null;
+  }
 }
 
 /** The entity carrying the largest split — scopes the overall GL category. */

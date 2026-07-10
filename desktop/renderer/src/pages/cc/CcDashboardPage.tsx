@@ -20,6 +20,7 @@ import { formatDate, ageLabel } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { desktop } from "@/lib/desktop";
 import { downloadSheet, exportDateStamp } from "@/cc/ccExport";
+import { useCcRefresh } from "@/cc/ccRefresh";
 import {
   ccApi,
   sendCcReminders,
@@ -97,8 +98,10 @@ export default function CcDashboardPage() {
   const [cycleStart, setCycleStart] = useState("");
   const [cycleEnd, setCycleEnd] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    // A background refresh (focus / poll / cc:data-changed) must not blank the
+    // page with the full spinner — only the first/explicit load shows it.
+    if (!opts?.silent) setLoading(true);
     const query = {
       cycle_start: cycleStart || undefined,
       cycle_end: cycleEnd || undefined,
@@ -134,6 +137,14 @@ export default function CcDashboardPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // v1.9.2: keep every KPI/chart live — refetch (silently) on cc:data-changed
+  // events, window focus, and a slow interval, so adds/deletes/matches reflect
+  // without navigating away.
+  const refresh = useCallback(() => {
+    void load({ silent: true });
+  }, [load]);
+  useCcRefresh(refresh);
 
   async function remind(row: DashboardCardholderRow) {
     setRemindingId(row.cardholder_id);

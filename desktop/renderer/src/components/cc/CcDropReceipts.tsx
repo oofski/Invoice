@@ -12,6 +12,7 @@ import { toast } from "@/components/ui/Toast";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { ccApi, type PerFileResult } from "@/cc/ccApi";
+import { emitCcRefresh } from "@/cc/ccRefresh";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const ALLOWED = ["application/pdf", "image/jpeg", "image/png"];
@@ -177,6 +178,7 @@ export function CcDropReceipts({ onDropped }: { onDropped?: () => void }) {
         toast.success(`${matched} matched · ${queued} sent to manager`);
       }
       onDropped?.();
+      emitCcRefresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Drop failed");
     } finally {

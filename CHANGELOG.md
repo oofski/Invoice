@@ -5,6 +5,36 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.2] — 2026-07-10
+
+Two credit-card improvements. **Additive** — the only backend change is that the
+inbox now returns the executive's carried split it already stored (a new nullable
+`cc_receipt_inbox.pending_splits` column already existed); nothing about the
+match → split → export flow changes.
+
+### Fixed
+- **The credit-card dashboard (and the Inbox tab count) now stay current.** They
+  used to load once and go stale — deleting unmatched receipts still showed the
+  old count until you navigated away. Now every KPI, chart, and the Inbox badge
+  refresh live: right after an add / delete / match / status change, on window
+  focus, and on a periodic check.
+
+### Added
+- **See (and fix) the executive's split before filing a receipt.** On the Inbox,
+  each unmatched receipt now shows the split the executive submitted from the app
+  — each business, its location, and the amount. When the split is for a single
+  business you can **Edit** it (including the location) right there before
+  filing; it's applied automatically when you assign the receipt. (A split that
+  spans several businesses on one line stays view-only to avoid mis-binding a
+  location — it's still fully editable on the transaction after you file it.)
+- **Receipt origin at a glance.** A transaction's receipts now show where each
+  came from — "via app" (the executive), "by manager", etc. — so it's clear the
+  split was submitted by the approver.
+
+Note: for a MATCHED transaction the accountant could already view and edit the
+executive's split (including location) from the transaction detail; this release
+brings that visibility to the Inbox (pre-filing) too.
+
 ## [1.9.1] — 2026-07-10
 
 Three credit-card additions. **All additive** — the existing receipt match →

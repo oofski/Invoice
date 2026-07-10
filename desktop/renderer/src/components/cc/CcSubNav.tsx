@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useCcManager } from "@/cc/useCcEnabled";
 import { ccApi } from "@/cc/ccApi";
+import { useCcRefresh } from "@/cc/ccRefresh";
 
 /**
  * Intra-module navigation for the Credit Cards section. The AppShell exposes a
@@ -47,20 +48,25 @@ const CARDHOLDER_TABS: CcTab[] = [
   { to: "/credit-cards/my-receipts", label: "My Receipts", icon: UserCircle },
 ];
 
-/** Pending inbox count for the manager's "Inbox" tab badge (best-effort). */
+/**
+ * Pending inbox count for the manager's "Inbox" tab badge (best-effort). v1.9.2:
+ * kept live via `useCcRefresh` (cc:data-changed events + focus + interval) so it
+ * drops the moment unmatched receipts are deleted / assigned / returned, instead
+ * of staying stale until the next navigation.
+ */
 function usePendingInboxCount(enabled: boolean): number {
   const [count, setCount] = useState(0);
-  useEffect(() => {
+  const refetch = useCallback(() => {
     if (!enabled) return;
-    let active = true;
     ccApi
       .listInbox({ status: "PENDING_MATCH" })
-      .then((res) => active && setCount((res.items ?? []).length))
-      .catch(() => active && setCount(0));
-    return () => {
-      active = false;
-    };
+      .then((res) => setCount((res.items ?? []).length))
+      .catch(() => setCount(0));
   }, [enabled]);
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+  useCcRefresh(refetch);
   return count;
 }
 

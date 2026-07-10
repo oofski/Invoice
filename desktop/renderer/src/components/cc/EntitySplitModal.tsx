@@ -7,6 +7,7 @@ import { cn, formatCurrency } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { GLCategorySelect } from "@/components/GLCategorySelect";
 import { ENTITY_COA, ENTITY_COA_ALIAS, glAccountNumber } from "@/lib/constants";
+import { emitCcRefresh } from "@/cc/ccRefresh";
 import { locationsFor, splitEven } from "@/cc/ccLines";
 import {
   CC_ENTITIES,
@@ -337,6 +338,7 @@ export function EntitySplitModal({
           await ccApi.patchTransaction(transactionId, { gl_category: glCat || null });
         }
         toast.success("Split saved across locations");
+        emitCcRefresh();
         // Synthesize the entity rollup for the caller's local state.
         onSaved?.(
           rows.map((r, i) => ({
@@ -353,6 +355,7 @@ export function EntitySplitModal({
           await ccApi.patchTransaction(transactionId, { gl_category: glCat || null });
         }
         toast.success("Entity split saved");
+        emitCcRefresh();
         onSaved?.(res.splits);
         onClose();
       }

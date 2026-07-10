@@ -311,6 +311,17 @@ async function hydrateInbox(
     }
   }
 
+  // v1.9.2: surface the executive's carried split (if any) so the accountant can
+  // review/edit it before assigning. Never throws — a bad payload just omits it.
+  let pendingSplit: InboxItem["pending_split"] = null;
+  const carried = parsePendingPayload((r as InboxRowWithSplits).pending_splits);
+  if (carried) {
+    pendingSplit =
+      carried.kind === "lines"
+        ? { lines: carried.lines }
+        : { entity_splits: carried.rows };
+  }
+
   const item: InboxItem = {
     id: r.id,
     uploaded_by: r.uploaded_by,
@@ -331,6 +342,7 @@ async function hydrateInbox(
     resolved_by: r.resolved_by,
     created_at: r.created_at,
     updated_at: r.updated_at,
+    pending_split: pendingSplit,
   };
 
   if (opts.withCandidates && candidateIds.length > 0) {

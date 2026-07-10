@@ -254,6 +254,15 @@ export interface InboxItem {
   candidate_transaction_ids?: string[];
   candidates?: CandidateTx[];
   return_note?: string | null;
+  /**
+   * v1.9.2: the executive's carried split, parsed so the accountant can review /
+   * edit it before assigning. `lines` (entity × location × gl) is the normal
+   * shape; `entity_splits` is the legacy entity-only shape. Null when none.
+   */
+  pending_split?: {
+    lines?: ReceiptLine[];
+    entity_splits?: { entity_name: string; amount: number }[];
+  } | null;
   created_at: string;
   updated_at?: string;
 }
@@ -812,6 +821,16 @@ export const ccApi = {
   /** Manager: send an item back to the cardholder with an optional note. */
   returnInbox: (id: string, body: { note?: string } = {}) =>
     api.post<ReturnInboxResponse>(`/api/cc/receipts/inbox/${id}/return`, body),
+  /**
+   * Manager (or the dropper): review/adjust the executive's carried split on a
+   * queued receipt. Stashes it (applied automatically on assign) or applies now
+   * if already matched. v1.9.2.
+   */
+  patchInboxPendingSplits: (id: string, body: { lines: ReceiptLine[] }) =>
+    api.patch<{ applied: boolean; pending: boolean }>(
+      `/api/cc/receipts/inbox/${id}/pending_splits`,
+      body,
+    ),
   /** Path for streaming inbox file bytes (fetch via api.getBlob / getInboxBlob). */
   inboxFileUrl: (id: string) => `/api/cc/receipts/inbox/${id}/file`,
   getInboxBlob: (id: string) =>

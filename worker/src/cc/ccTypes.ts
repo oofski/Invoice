@@ -433,6 +433,16 @@ export interface InboxItem {
   updated_at: string;
   /** Joined candidate transactions (manager queue list only). */
   candidates?: CandidateTx[];
+  /**
+   * v1.9.2: the executive's carried split, parsed so the accountant can review
+   * (and edit) it BEFORE assigning. Rich `lines` (entity × location × gl) is the
+   * normal shape; `entity_splits` is the legacy entity-only shape. Null/absent
+   * when no split was carried.
+   */
+  pending_split?: {
+    lines?: ReceiptLine[];
+    entity_splits?: EntitySplitInput[];
+  } | null;
 }
 
 /**

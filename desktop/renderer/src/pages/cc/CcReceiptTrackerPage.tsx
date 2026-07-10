@@ -23,6 +23,7 @@ import { CcStatusBadge } from "@/components/cc/CcStatusBadge";
 import { CcReceiptPane } from "@/components/cc/CcReceiptPane";
 import { EntitySplitModal } from "@/components/cc/EntitySplitModal";
 import { LineCodingModal } from "@/components/cc/LineCodingModal";
+import { emitCcRefresh } from "@/cc/ccRefresh";
 import {
   ccApi,
   sendCcReminders,
@@ -176,6 +177,7 @@ export default function CcReceiptTrackerPage() {
         rows.map((r) => (r.id === t.id ? res.transaction : r)),
       );
       toast.success(status === "RECEIVED" ? "Marked received" : "Status updated");
+      emitCcRefresh();
     } catch (err) {
       setTransactions((rows) =>
         rows.map((r) =>
@@ -204,6 +206,7 @@ export default function CcReceiptTrackerPage() {
       });
       toast.success(`${res.updated_count} updated`);
       setSelected(new Set());
+      emitCcRefresh();
       // Reconcile from the server so the badges/progress match persisted state.
       await load();
     } catch (err) {

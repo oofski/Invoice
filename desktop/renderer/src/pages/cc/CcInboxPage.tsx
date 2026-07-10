@@ -20,6 +20,7 @@ import {
 import { CcDropReceipts } from "@/components/cc/CcDropReceipts";
 import { ccApi, type InboxItem } from "@/cc/ccApi";
 import { useCcManager } from "@/cc/useCcEnabled";
+import { emitCcRefresh } from "@/cc/ccRefresh";
 
 /**
  * Manager "Inbox / Unmatched receipts" screen (design §4 — Feature A) at
@@ -97,6 +98,7 @@ export default function CcInboxPage() {
       });
       toast.success(`Filed to ${res.transaction?.vendor ?? "transaction"}`);
       removeFromQueue(selected.id);
+      emitCcRefresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed to assign");
     } finally {
@@ -111,6 +113,7 @@ export default function CcInboxPage() {
       await ccApi.returnInbox(selected.id, note ? { note } : {});
       toast.success("Sent back to cardholder");
       removeFromQueue(selected.id);
+      emitCcRefresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed to send back");
     } finally {
@@ -128,6 +131,7 @@ export default function CcInboxPage() {
       await ccApi.deleteInbox(it.id);
       toast.success("Receipt deleted");
       removeFromQueue(it.id);
+      emitCcRefresh();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Delete failed");
     } finally {
@@ -297,6 +301,7 @@ export default function CcInboxPage() {
                     onDelete={
                       isManager ? () => handleDelete(selected) : undefined
                     }
+                    onPendingSplitChanged={load}
                   />
                 </div>
               </Card>
