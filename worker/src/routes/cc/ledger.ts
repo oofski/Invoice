@@ -128,7 +128,7 @@ const UNMATCHED_KEY = "__unmatched__";
 ledger.get("/", async (c) => {
   if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
   if (!(await ccReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
-  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT))
     return c.json({ error: "Forbidden" }, 403);
 
   // ----- Resolve the cycle window (identical to dashboard /summary) ----

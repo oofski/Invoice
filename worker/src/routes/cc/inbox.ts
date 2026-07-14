@@ -236,7 +236,7 @@ const NOT_READY = {
 } as const;
 
 function isManager(c: import("hono").Context<AppEnv>): boolean {
-  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN);
+  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT);
 }
 
 /** An empty normalized receipt (OCR-failure / no-file degradation). */

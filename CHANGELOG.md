@@ -5,6 +5,51 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.3] — 2026-07-14
+
+A batch-review release aimed at large upload days. **Additive** — every change
+widens what accountants can do or surfaces more of what already happened; no
+existing flow (routing, approval, matching, export) changes behavior, and the
+schema is untouched.
+
+### Added
+- **The general accountant now has full credit-card power.** Everything a
+  credit-card accountant or admin could do — delete, split, code, match — is now
+  available to the `accountant` role too, across the whole CC module (dashboard,
+  transactions, inbox, ledger, receipts, splits, line coding).
+- **Duplicate uploads collapse by invoice number.** When the same invoice lands
+  several times in one batch, it's put out once even if the scan reads the total
+  slightly differently each time — matching is now on vendor + invoice number
+  (invoices with no readable number are never merged). The upload screen shows a
+  roll-up: how many processed, how many duplicates were skipped, how many failed.
+- **See what an approval was for.** An invoice that was split now shows the split
+  itself on both the invoice detail and the approval view — each business/class
+  and its dollar amount (and percentage), plus who approved it and when, and any
+  approval comment. The audit trail labels split-applied / split-cleared events.
+- **Every GL category, per institution.** The GL-category picker for an invoice
+  now offers the full universal category list for every entity (its own chart of
+  accounts still supplies the account number where it has one), so a
+  needs-processing invoice is never blocked by a short per-entity list.
+- **Dollar reconcile while splitting.** The invoice split dialog now shows the
+  dollar value of each slice next to its percentage and a running "$X of $Y"
+  readout on the quick-split tab, plus an "N of M lines assigned · $X of $Y"
+  coverage readout on the per-line tab.
+
+### Fixed
+- **Re-opening an already-coded receipt no longer wipes or corrupts its coding.**
+  The line-by-line editor now seeds correctly from existing multi-entity coding
+  and opens on the line view when coding is already present.
+- **Split/coding writes are now atomic.** Replacing a receipt's lines, its entity
+  splits, and an invoice's per-line split each run as a single transaction, so a
+  mid-write failure can no longer leave coding half-applied or the line view and
+  ledger/export disagreeing.
+- **Client-side tax allocation matches the server exactly** — the by-spend tax
+  split now floors each share and distributes the remaining cents by weight
+  (the same algorithm the worker uses), so the live preview always reconciles.
+- **Flagged / unbalanced items stay deletable.** Admins, accountants, and
+  credit-card accountants can delete an invoice even when it's flagged as not
+  balancing, so a bad upload never gets stuck.
+
 ## [1.9.2] — 2026-07-10
 
 Two credit-card improvements. **Additive** — the only backend change is that the

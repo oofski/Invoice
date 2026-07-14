@@ -12,6 +12,7 @@ import { PdfPane } from "@/components/PdfPane";
 import { InvoiceDataPanel } from "@/components/InvoiceDataPanel";
 import { LineItemsTable } from "@/components/LineItemsTable";
 import { AuditTimeline } from "@/components/AuditTimeline";
+import { SplitSummary } from "@/components/SplitSummary";
 import { Card, Button, Spinner } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
 import { useProfile } from "@/components/ProfileProvider";
@@ -233,7 +234,8 @@ export default function InvoiceDetailPage() {
               </Button>
             </>
           )}
-          {profile.role === ROLES.ADMIN && (
+          {(profile.role === ROLES.ADMIN ||
+            profile.role === ROLES.ACCOUNTANT) && (
             <Button
               variant="danger"
               size="sm"
@@ -260,6 +262,10 @@ export default function InvoiceDetailPage() {
             canEditRouting={canEditRouting}
             onRerouted={refetch}
           />
+
+          {/* v1.9.3 (Feature E): if a split was applied during approval, show what
+              it was (per-target breakdown) + who approved it and when. */}
+          <SplitSummary invoice={invoice} />
 
           {reviewCount > 0 && (
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-danger-soft-fg/30 bg-danger-soft-bg p-3 text-sm text-danger-soft-fg">

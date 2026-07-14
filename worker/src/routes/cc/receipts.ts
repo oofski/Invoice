@@ -53,7 +53,7 @@ const UPLOAD_METHODS: CcUploadMethod[] = [
 ];
 
 function isManager(c: import("hono").Context<AppEnv>): boolean {
-  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN);
+  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT);
 }
 
 /** Manager, or the cardholder who owns this transaction (mirrors `ccScopeClause`). */

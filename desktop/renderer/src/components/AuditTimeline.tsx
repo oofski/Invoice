@@ -21,6 +21,8 @@ const ACTION_LABELS: Record<string, string> = {
   REJECTED: "Rejected",
   GL_OVERRIDE: "GL override",
   LINE_ITEM_SPLIT: "Line item split",
+  INVOICE_SPLIT: "Split applied",
+  SPLIT_CLEARED: "Split cleared",
   MANUAL_REVIEW_RESOLVED: "Manual review resolved",
   REMINDER_SENT: "Reminder sent",
   EXPORTED: "Exported",

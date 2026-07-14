@@ -22,7 +22,7 @@ import type { Cardholder, CardholderRow, CcCardSource } from "../../cc/ccTypes";
 export const cardholders = new Hono<AppEnv>();
 
 function isManager(c: import("hono").Context<AppEnv>): boolean {
-  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN);
+  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT);
 }
 
 function hydrate(r: CardholderRow): Cardholder {

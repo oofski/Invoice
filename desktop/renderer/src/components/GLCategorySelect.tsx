@@ -4,7 +4,8 @@ import {
   CATEGORY_GROUP_OF,
   ENTITY_COA,
   ENTITY_COA_ALIAS,
-  GL_CATEGORY_GROUPS,
+  ENTITY_COA_LEGACY,
+  GL_CATEGORIES_FLAT,
   REQUIRES_MANUAL_REVIEW,
   glAccountNumber,
 } from "@/lib/constants";
@@ -67,10 +68,20 @@ export function GLCategorySelect({
   let body: ReactNode;
 
   if (entity) {
-    // Entity-filtered: offer only this entity's own COA categories (alias-
-    // resolved), grouped by reporting group in the canonical order.
-    const coa = ENTITY_COA[ENTITY_COA_ALIAS[entity] ?? entity] ?? {};
-    const offered = Object.keys(coa);
+    // v1.9.3: offer EVERY GL category available for this institution — its own
+    // COA keys + its legacy names + the universal set — grouped by reporting
+    // group. The account number is prefixed only where this institution's COA
+    // resolves one (optionLabel handles that); a category with no entity-specific
+    // number is still selectable (validation accepts the full flat list).
+    const resolved = ENTITY_COA_ALIAS[entity] ?? entity;
+    const coa = ENTITY_COA[resolved] ?? {};
+    const offered = Array.from(
+      new Set([
+        ...Object.keys(coa),
+        ...Object.keys(ENTITY_COA_LEGACY[resolved] ?? {}),
+        ...GL_CATEGORIES_FLAT,
+      ]),
+    );
     const offeredSet = new Set(offered);
 
     const byGroup = new Map<string, string[]>();
@@ -116,16 +127,28 @@ export function GLCategorySelect({
       </>
     );
   } else {
-    // No entity chosen: fall back to the full grouped list (prior behavior).
-    body = GL_CATEGORY_GROUPS.map((group) => (
-      <optgroup key={group.group} label={group.group}>
-        {group.categories.map((c) => (
-          <option key={c} value={c}>
-            {optionLabel(entity, c)}
-          </option>
-        ))}
-      </optgroup>
-    ));
+    // No entity chosen (e.g. a not-yet-classified needs-processing invoice):
+    // show the FULL universal category list, grouped, so nothing is hidden.
+    const byGroup = new Map<string, string[]>();
+    for (const name of GL_CATEGORIES_FLAT) {
+      const group = CATEGORY_GROUP_OF[name] ?? "Operating Expenses";
+      const list = byGroup.get(group);
+      if (list) list.push(name);
+      else byGroup.set(group, [name]);
+    }
+    body = GROUP_ORDER.map((group) => {
+      const names = byGroup.get(group);
+      if (!names || names.length === 0) return null;
+      return (
+        <optgroup key={group} label={group}>
+          {names.map((c) => (
+            <option key={c} value={c}>
+              {optionLabel(entity, c)}
+            </option>
+          ))}
+        </optgroup>
+      );
+    });
   }
 
   return (

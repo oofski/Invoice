@@ -139,7 +139,7 @@ async function ownsTx(
   c: import("hono").Context<AppEnv>,
   txCardholderId: string | null,
 ): Promise<boolean> {
-  if (hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN)) return true;
+  if (hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT)) return true;
   if (!txCardholderId) return false;
   const u = user(c);
   const first = (u.name || "").trim().split(/\s+/)[0] ?? "";
@@ -251,7 +251,7 @@ transactions.get("/", async (c) => {
 transactions.patch("/bulk", async (c) => {
   if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
   if (!(await ccReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
-  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT))
     return c.json({ error: "Forbidden" }, 403);
 
   const body = (await c.req.json().catch(() => ({}))) as {
@@ -329,7 +329,7 @@ transactions.patch("/bulk", async (c) => {
 transactions.post("/archive", async (c) => {
   if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
   if (!(await ccArchiveReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
-  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT))
     return c.json({ error: "Forbidden" }, 403);
 
   const body = (await c.req.json().catch(() => ({}))) as { ids?: unknown };
@@ -359,7 +359,7 @@ transactions.post("/archive", async (c) => {
 transactions.post("/:id/archive", async (c) => {
   if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
   if (!(await ccArchiveReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
-  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT))
     return c.json({ error: "Forbidden" }, 403);
 
   const id = c.req.param("id");
@@ -380,7 +380,7 @@ transactions.post("/:id/archive", async (c) => {
 transactions.post("/:id/unarchive", async (c) => {
   if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
   if (!(await ccArchiveReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
-  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT))
     return c.json({ error: "Forbidden" }, 403);
 
   const id = c.req.param("id");
@@ -433,7 +433,7 @@ transactions.patch("/:id", async (c) => {
   const existing = await selectTxJoined(c.env, id);
   if (!existing) return c.json({ error: "Not found" }, 404);
 
-  const isManager = hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN);
+  const isManager = hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT);
   const owns = await ownsTx(c, existing.cardholder_id);
   if (!owns) return c.json({ error: "Forbidden" }, 403);
 

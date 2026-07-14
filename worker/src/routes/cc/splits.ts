@@ -21,7 +21,7 @@ import type { EntitySplit, EntitySplitInput, EntitySplitRow, TxRow } from "../..
 export const splits = new Hono<AppEnv>();
 
 function isManager(c: import("hono").Context<AppEnv>): boolean {
-  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN);
+  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT);
 }
 
 /**
@@ -111,22 +111,29 @@ splits.put("/transactions/:id/splits", async (c) => {
 
   // Replace-all: DELETE then INSERT (zero-amount rows are dropped on write).
   const at = nowIso();
-  await c.env.DB.prepare("DELETE FROM cc_entity_splits WHERE transaction_id = ?")
-    .bind(id)
-    .run();
+  // v1.9.3 fix (#4): an entity-only split supersedes any prior per-location line
+  // coding — clear cc_receipt_lines / cc_line_allocations too, or GET /lines
+  // would keep returning stale coding that contradicts the new entity split
+  // (the ledger/export read cc_entity_splits, so they'd disagree with the line
+  // view). Batched with the split rewrite so the replace-all is atomic.
+  const stmts = [
+    c.env.DB.prepare("DELETE FROM cc_line_allocations WHERE transaction_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM cc_receipt_lines WHERE transaction_id = ?").bind(id),
+    c.env.DB.prepare("DELETE FROM cc_entity_splits WHERE transaction_id = ?").bind(id),
+  ];
   for (const s of rows) {
     const amount = roundCents(typeof s.amount === "number" ? s.amount : Number(s.amount));
     if (amount === 0) continue;
-    await c.env.DB.prepare(
-      "INSERT INTO cc_entity_splits (id, transaction_id, entity_name, amount, created_at) VALUES (?,?,?,?,?)",
-    )
-      .bind(uuid(), id, s.entity_name, amount, at)
-      .run();
+    stmts.push(
+      c.env.DB.prepare(
+        "INSERT INTO cc_entity_splits (id, transaction_id, entity_name, amount, created_at) VALUES (?,?,?,?,?)",
+      ).bind(uuid(), id, s.entity_name, amount, at),
+    );
   }
-
-  await c.env.DB.prepare("UPDATE cc_transactions SET updated_at = ? WHERE id = ?")
-    .bind(at, id)
-    .run();
+  stmts.push(
+    c.env.DB.prepare("UPDATE cc_transactions SET updated_at = ? WHERE id = ?").bind(at, id),
+  );
+  await c.env.DB.batch(stmts);
 
   return c.json({ splits: await listSplits(c.env, id) });
 });

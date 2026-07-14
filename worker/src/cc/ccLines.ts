@@ -252,23 +252,38 @@ export function rollupEntitySplits(lines: ReceiptLine[]): EntitySplitInput[] {
  * DELETE then INSERT, $0 rows dropped). Keeps the legacy modal/email/GET-detail
  * correct for free. Caller supplies the same `at` timestamp it used for the lines.
  */
+export function deriveEntitySplitsStmts(
+  env: Env,
+  transactionId: string,
+  lines: ReceiptLine[],
+  at: string,
+): D1PreparedStatement[] {
+  const rows = rollupEntitySplits(lines);
+  const stmts: D1PreparedStatement[] = [
+    env.DB.prepare("DELETE FROM cc_entity_splits WHERE transaction_id = ?").bind(transactionId),
+  ];
+  for (const r of rows) {
+    stmts.push(
+      env.DB.prepare(
+        "INSERT INTO cc_entity_splits (id, transaction_id, entity_name, amount, created_at) VALUES (?,?,?,?,?)",
+      ).bind(uuid(), transactionId, r.entity_name, r.amount, at),
+    );
+  }
+  return stmts;
+}
+
+/**
+ * v1.9.3 fix (#6): the replace-all is now atomic — all DELETE + INSERT rows go
+ * through a single `env.DB.batch([...])` so a mid-loop failure can't leave
+ * `cc_entity_splits` half-written (the line-item split already did this).
+ */
 export async function deriveEntitySplits(
   env: Env,
   transactionId: string,
   lines: ReceiptLine[],
   at: string,
 ): Promise<void> {
-  const rows = rollupEntitySplits(lines);
-  await env.DB.prepare("DELETE FROM cc_entity_splits WHERE transaction_id = ?")
-    .bind(transactionId)
-    .run();
-  for (const r of rows) {
-    await env.DB.prepare(
-      "INSERT INTO cc_entity_splits (id, transaction_id, entity_name, amount, created_at) VALUES (?,?,?,?,?)",
-    )
-      .bind(uuid(), transactionId, r.entity_name, r.amount, at)
-      .run();
-  }
+  await env.DB.batch(deriveEntitySplitsStmts(env, transactionId, lines, at));
 }
 
 // ---------------------------------------------------------------------------
@@ -485,18 +500,16 @@ export async function readLines(env: Env, txId: string, txAmount: number) {
  * carries a `receipt_id` it is preserved (manual lines write NULL). Uses the
  * supplied `at` timestamp throughout for consistency with the entity rollup.
  */
-export async function replaceLines(
+export function replaceLinesStmts(
   env: Env,
   txId: string,
   lines: ReceiptLine[],
   at: string,
-): Promise<void> {
-  await env.DB.prepare("DELETE FROM cc_line_allocations WHERE transaction_id = ?")
-    .bind(txId)
-    .run();
-  await env.DB.prepare("DELETE FROM cc_receipt_lines WHERE transaction_id = ?")
-    .bind(txId)
-    .run();
+): D1PreparedStatement[] {
+  const stmts: D1PreparedStatement[] = [
+    env.DB.prepare("DELETE FROM cc_line_allocations WHERE transaction_id = ?").bind(txId),
+    env.DB.prepare("DELETE FROM cc_receipt_lines WHERE transaction_id = ?").bind(txId),
+  ];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -528,12 +541,12 @@ export async function replaceLines(
     }
     const isCoded = allocRows.length > 0 && roundCents(codedSum) === lineAmount ? 1 : 0;
 
-    await env.DB.prepare(
-      `INSERT INTO cc_receipt_lines
+    stmts.push(
+      env.DB.prepare(
+        `INSERT INTO cc_receipt_lines
          (id, transaction_id, receipt_id, line_index, kind, description, quantity, unit_price, amount, is_coded, created_at, updated_at)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-    )
-      .bind(
+      ).bind(
         lineId,
         txId,
         line.receipt_id ?? null,
@@ -546,19 +559,33 @@ export async function replaceLines(
         isCoded,
         at,
         at,
-      )
-      .run();
+      ),
+    );
 
     for (const ar of allocRows) {
-      await env.DB.prepare(
-        `INSERT INTO cc_line_allocations
+      stmts.push(
+        env.DB.prepare(
+          `INSERT INTO cc_line_allocations
            (id, line_id, transaction_id, entity_name, location, gl_category, amount, is_tax, created_at)
          VALUES (?,?,?,?,?,?,?,?,?)`,
-      )
-        .bind(uuid(), lineId, txId, ar.entity, ar.location, ar.gl, ar.amount, ar.isTax ? 1 : 0, at)
-        .run();
+        ).bind(uuid(), lineId, txId, ar.entity, ar.location, ar.gl, ar.amount, ar.isTax ? 1 : 0, at),
+      );
     }
   }
+  return stmts;
+}
+
+/**
+ * v1.9.3 fix (#6): DELETE + all re-inserts now run in a single `env.DB.batch`
+ * so a mid-loop failure can't leave the tx's lines/allocations half-written.
+ */
+export async function replaceLines(
+  env: Env,
+  txId: string,
+  lines: ReceiptLine[],
+  at: string,
+): Promise<void> {
+  await env.DB.batch(replaceLinesStmts(env, txId, lines, at));
 }
 
 /** Re-exported for the route so it can mirror the `validateSplits` derived check. */

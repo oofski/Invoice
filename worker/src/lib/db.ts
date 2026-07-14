@@ -3,6 +3,7 @@ import type {
   InvoiceRow,
   LineItemRow,
   ApprovalRow,
+  InvoiceAllocationRow,
   UserRow,
 } from "./types";
 import { uuid, parseJson, chunk } from "./util";
@@ -107,6 +108,21 @@ export async function getInvoiceWithRelations(
     .bind(id)
     .first<ApprovalRow>();
 
+  // v1.9.3 (Feature E): the invoice-level split allocations (QUICK_EVEN / CUSTOM),
+  // so a reviewer can see WHAT an approval's split was — not just that one exists.
+  // Tolerate a pre-migration DB with no invoice_allocations table (treat as none).
+  let allocations: InvoiceAllocationRow[] = [];
+  try {
+    const alloc = await env.DB.prepare(
+      "SELECT * FROM invoice_allocations WHERE invoice_id = ? ORDER BY created_at ASC",
+    )
+      .bind(id)
+      .all<InvoiceAllocationRow>();
+    allocations = alloc.results ?? [];
+  } catch {
+    allocations = [];
+  }
+
   let submitter = null;
   if (invoice.submitted_by) {
     submitter = await env.DB.prepare(
@@ -134,6 +150,7 @@ export async function getInvoiceWithRelations(
     ...hydrateInvoice(invoice),
     line_items: (lineItems.results ?? []).map((li) => hydrateLineItem(li, role)),
     approval: approval ?? null,
+    allocations,
     submitter,
     ...(includeAudit ? { audit_log: auditLog } : {}),
   };

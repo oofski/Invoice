@@ -194,6 +194,8 @@ export interface FactorResponse {
 export interface InvoiceWithRelations extends InvoiceRow {
   line_items: LineItemRow[];
   approval: ApprovalRow | null;
+  /** Invoice-level split slices (QUICK_EVEN / CUSTOM); [] when unsplit or per-line. */
+  allocations?: InvoiceAllocation[];
   audit_log?: AuditLogRow[];
   submitter?: Pick<UserRow, "id" | "name" | "email" | "role"> | null;
 }

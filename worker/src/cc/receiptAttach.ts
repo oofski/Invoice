@@ -24,8 +24,8 @@ import { roundCents, validateSplits } from "./ccRules";
 import {
   persistReceiptLines,
   validateLineCoding,
-  replaceLines,
-  deriveEntitySplits,
+  replaceLinesStmts,
+  deriveEntitySplitsStmts,
 } from "./ccLines";
 import { sendCcManagerAlert } from "./ccEmail";
 import type {
@@ -332,21 +332,27 @@ export async function applyPendingSplits(
     if (!valid.ok) return false; // amount mismatch / bad entity → leave for manager
 
     const at = nowIso();
-    await env.DB.prepare("DELETE FROM cc_entity_splits WHERE transaction_id = ?")
-      .bind(transactionId)
-      .run();
+    // v1.9.3 fix (#4): entity-only split supersedes any prior line coding — clear
+    // cc_receipt_lines / cc_line_allocations too so the two stores can't diverge.
+    // Batched so the replace-all is atomic (partial writes can't survive a fault).
+    const stmts = [
+      env.DB.prepare("DELETE FROM cc_line_allocations WHERE transaction_id = ?").bind(transactionId),
+      env.DB.prepare("DELETE FROM cc_receipt_lines WHERE transaction_id = ?").bind(transactionId),
+      env.DB.prepare("DELETE FROM cc_entity_splits WHERE transaction_id = ?").bind(transactionId),
+    ];
     for (const s of rows) {
       const amount = roundCents(typeof s.amount === "number" ? s.amount : Number(s.amount));
       if (amount === 0) continue;
-      await env.DB.prepare(
-        "INSERT INTO cc_entity_splits (id, transaction_id, entity_name, amount, created_at) VALUES (?,?,?,?,?)",
-      )
-        .bind(uuid(), transactionId, s.entity_name, amount, at)
-        .run();
+      stmts.push(
+        env.DB.prepare(
+          "INSERT INTO cc_entity_splits (id, transaction_id, entity_name, amount, created_at) VALUES (?,?,?,?,?)",
+        ).bind(uuid(), transactionId, s.entity_name, amount, at),
+      );
     }
-    await env.DB.prepare("UPDATE cc_transactions SET updated_at = ? WHERE id = ?")
-      .bind(at, transactionId)
-      .run();
+    stmts.push(
+      env.DB.prepare("UPDATE cc_transactions SET updated_at = ? WHERE id = ?").bind(at, transactionId),
+    );
+    await env.DB.batch(stmts);
     return true;
   } catch (e) {
     console.error("[cc] applyPendingSplits failed (leaving tx unsplit):", e);
@@ -388,12 +394,14 @@ export async function applyPendingLines(
 
     // Replace-all under one `at` timestamp: rewrite lines + allocations, then
     // re-derive cc_entity_splits from the same lines (ledger stays correct).
+    // v1.9.3 fix (#6): one atomic `env.DB.batch` so a mid-write failure can't
+    // leave lines coded but entity splits stale (or vice versa).
     const at = nowIso();
-    await replaceLines(env, transactionId, lines, at);
-    await deriveEntitySplits(env, transactionId, lines, at);
-    await env.DB.prepare("UPDATE cc_transactions SET updated_at = ? WHERE id = ?")
-      .bind(at, transactionId)
-      .run();
+    await env.DB.batch([
+      ...replaceLinesStmts(env, transactionId, lines, at),
+      ...deriveEntitySplitsStmts(env, transactionId, lines, at),
+      env.DB.prepare("UPDATE cc_transactions SET updated_at = ? WHERE id = ?").bind(at, transactionId),
+    ]);
     return true;
   } catch (e) {
     console.error("[cc] applyPendingLines failed (leaving tx uncoded):", e);

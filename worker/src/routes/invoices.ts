@@ -856,9 +856,11 @@ invoices.patch("/:id", async (c) => {
   return c.json({ invoice: updated && hydrateInvoice(updated) });
 });
 
-// ----- DELETE /:id (admin only) ---------------------------------------
+// ----- DELETE /:id (admin + accountant) -------------------------------
+// v1.9.3: the accountant can delete too — including flagged/unbalanced invoices
+// (delete has never been gated by any reconcile/review flag).
 invoices.delete("/:id", async (c) => {
-  if (!hasRole(c, ROLES.ADMIN)) return c.json({ error: "Forbidden" }, 403);
+  if (!hasRole(c, ROLES.ADMIN, ROLES.ACCOUNTANT)) return c.json({ error: "Forbidden" }, 403);
   const id = c.req.param("id");
   const inv = await getInvoice(c.env, id);
   if (!inv) return c.json({ error: "Not found" }, 404);
@@ -1189,6 +1191,10 @@ invoices.post("/:id/split-lines", async (c) => {
       );
   }
 
+  // v1.9.3 (#6): build every write and submit them in one `env.DB.batch` so a
+  // mid-loop failure can't leave the per-line split half-applied (some lines
+  // recoded, others not, and the split_type flag out of sync).
+  const stmts: D1PreparedStatement[] = [];
   for (const l of lines) {
     if (l.type) {
       // The exec set a Type; it drives item_type + GL so the accountant
@@ -1199,32 +1205,32 @@ invoices.post("/:id/split-lines", async (c) => {
       const glCategory =
         l.type in TYPE_GL ? TYPE_GL[l.type] : REQUIRES_MANUAL_REVIEW;
       const requiresReview = l.type in TYPE_GL ? 0 : 1;
-      await c.env.DB.prepare(
-        "UPDATE line_items SET business = ?, class = ?, item_type = ?, gl_category = ?, requires_review = ? WHERE id = ? AND invoice_id = ?",
-      )
-        .bind(
+      stmts.push(
+        c.env.DB.prepare(
+          "UPDATE line_items SET business = ?, class = ?, item_type = ?, gl_category = ?, requires_review = ? WHERE id = ? AND invoice_id = ?",
+        ).bind(
           l.business, l.class, itemType, glCategory, requiresReview,
           l.lineItemId, id,
-        )
-        .run();
+        ),
+      );
     } else {
       // No type provided — leave gl_category / item_type unchanged.
-      await c.env.DB.prepare(
-        "UPDATE line_items SET business = ?, class = ? WHERE id = ? AND invoice_id = ?",
-      )
-        .bind(l.business, l.class, l.lineItemId, id)
-        .run();
+      stmts.push(
+        c.env.DB.prepare(
+          "UPDATE line_items SET business = ?, class = ? WHERE id = ? AND invoice_id = ?",
+        ).bind(l.business, l.class, l.lineItemId, id),
+      );
     }
   }
 
   // Per-line splits supersede any quick-even allocations.
-  await c.env.DB.prepare(
-    "DELETE FROM invoice_allocations WHERE invoice_id = ?",
-  ).bind(id).run();
-
-  await c.env.DB.prepare("UPDATE invoices SET split_type = ? WHERE id = ?")
-    .bind("PER_LINE", id)
-    .run();
+  stmts.push(
+    c.env.DB.prepare("DELETE FROM invoice_allocations WHERE invoice_id = ?").bind(id),
+  );
+  stmts.push(
+    c.env.DB.prepare("UPDATE invoices SET split_type = ? WHERE id = ?").bind("PER_LINE", id),
+  );
+  await c.env.DB.batch(stmts);
 
   await audit(c.env, {
     invoiceId: id, userId: user(c).id, action: AUDIT_ACTION.INVOICE_SPLIT,

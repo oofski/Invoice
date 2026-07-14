@@ -43,7 +43,7 @@ export const uploads = new Hono<AppEnv>();
 
 /** Manager-role gate (mirrors §2.3). */
 function isManager(c: import("hono").Context<AppEnv>): boolean {
-  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN);
+  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT);
 }
 
 const BLANK_TEMPLATE_MESSAGE =

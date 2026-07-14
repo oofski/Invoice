@@ -763,7 +763,13 @@ export function isCategoryValidForEntity(
   const coa = ENTITY_COA[resolved];
   const legacy = ENTITY_COA_LEGACY[resolved];
   if (!coa && !legacy) return GL_CATEGORIES_FLAT.includes(category);
-  return Boolean(coa?.[category]) || Boolean(legacy?.[category]);
+  // v1.9.3: every institution may use any universal GL category (the picker now
+  // offers all of them); its own COA/legacy still resolve an account number.
+  return (
+    Boolean(coa?.[category]) ||
+    Boolean(legacy?.[category]) ||
+    GL_CATEGORIES_FLAT.includes(category)
+  );
 }
 
 // ---------------------------------------------------------------------------

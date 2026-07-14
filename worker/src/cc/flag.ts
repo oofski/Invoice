@@ -54,7 +54,12 @@ function isPinnedCardholder(u: AuthUser): boolean {
  * `hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN)`.)
  */
 export function isCcManager(u: AuthUser): boolean {
-  return u.role === ROLES.CREDIT_CARD_ACCOUNTANT || u.role === ROLES.ADMIN;
+  return (
+    u.role === ROLES.CREDIT_CARD_ACCOUNTANT ||
+    u.role === ROLES.ADMIN ||
+    // v1.9.3: the general accountant is a full CC manager too (delete/split/all).
+    u.role === ROLES.ACCOUNTANT
+  );
 }
 
 /**
@@ -94,7 +99,7 @@ export async function ccReady(env: Env): Promise<boolean> {
  * a `WHERE …` that already filters `cc_transactions`.
  */
 export function ccScopeClause(c: Context<AppEnv>): { clause: string; params: string[] } {
-  if (hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN)) {
+  if (hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT)) {
     return { clause: "", params: [] };
   }
   const u = user(c);

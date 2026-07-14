@@ -55,7 +55,7 @@ function cardLabel(capLast4: string | null, amexLast5: string | null): string {
 dashboard.get("/summary", async (c) => {
   if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
   if (!(await ccReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
-  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT))
     return c.json({ error: "Forbidden" }, 403);
 
   // ----- Resolve the cycle window -------------------------------------
@@ -269,7 +269,7 @@ interface CcMonthlyPoint {
 dashboard.get("/analytics", async (c) => {
   if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
   if (!(await ccReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
-  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT))
     return c.json({ error: "Forbidden" }, 403);
 
   // ----- Resolve the cycle window (identical to /summary) --------------

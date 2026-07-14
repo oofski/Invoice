@@ -19,16 +19,16 @@ import { isCcEnabled, ccReady } from "../../cc/flag";
 import { nowIso } from "../../lib/util";
 import {
   validateLineCoding,
-  replaceLines,
+  replaceLinesStmts,
   readLines,
-  deriveEntitySplits,
+  deriveEntitySplitsStmts,
 } from "../../cc/ccLines";
 import type { ReceiptLine, TxRow } from "../../cc/ccTypes";
 
 export const lines = new Hono<AppEnv>();
 
 function isManager(c: import("hono").Context<AppEnv>): boolean {
-  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN);
+  return hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT);
 }
 
 /**
@@ -103,12 +103,15 @@ lines.put("/transactions/:id/lines", async (c) => {
 
   // Replace-all: rewrite lines + allocations, re-derive cc_entity_splits, and
   // bump updated_at — all under one `at` timestamp. receipt_status is unchanged.
+  // v1.9.3 fix (#6): the whole rewrite is a single atomic `env.DB.batch` so a
+  // mid-write failure can't leave lines coded but entity splits stale (or vice
+  // versa) — the GET view and the ledger/export always agree.
   const at = nowIso();
-  await replaceLines(c.env, id, incoming, at);
-  await deriveEntitySplits(c.env, id, incoming, at);
-  await c.env.DB.prepare("UPDATE cc_transactions SET updated_at = ? WHERE id = ?")
-    .bind(at, id)
-    .run();
+  await c.env.DB.batch([
+    ...replaceLinesStmts(c.env, id, incoming, at),
+    ...deriveEntitySplitsStmts(c.env, id, incoming, at),
+    c.env.DB.prepare("UPDATE cc_transactions SET updated_at = ? WHERE id = ?").bind(at, id),
+  ]);
 
   return c.json(await readLines(c.env, id, tx.amount));
 });

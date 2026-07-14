@@ -124,6 +124,20 @@ export function SplitInvoiceModal({
     [rows],
   );
   const totalOk = Math.abs(total - 100) <= TOTAL_TOLERANCE;
+  // v1.9.3 (Feature D): a dollar reconcile alongside the percentages so a
+  // reviewer sees exactly what each slice is worth, not just its %. The dollars
+  // allocated track the entered percentages against the invoice total.
+  const invoiceTotal = Number(invoice.total_amount) || 0;
+  const dollarsAllocated = useMemo(
+    () =>
+      Math.round(
+        rows.reduce(
+          (sum, r) => sum + (invoiceTotal * (parseFloat(r.percent) || 0)) / 100,
+          0,
+        ) * 100,
+      ) / 100,
+    [rows, invoiceTotal],
+  );
   const rowsComplete = rows.every((r) => r.business && r.class);
   const canSaveAllocations = rows.length > 0 && totalOk && rowsComplete;
 
@@ -166,6 +180,27 @@ export function SplitInvoiceModal({
       setBusy(false);
     }
   }
+
+  // Feature D: per-line coverage — a line counts as "assigned" once it carries
+  // an explicit business + class (unset lines fall back to the invoice's on save).
+  const linesAssigned = useMemo(
+    () =>
+      lineItems.filter((li) => {
+        const s = lineState[li.id];
+        return !!(s?.business && s?.class);
+      }).length,
+    [lineItems, lineState],
+  );
+  const dollarsAssigned = useMemo(
+    () =>
+      Math.round(
+        lineItems.reduce((sum, li) => {
+          const s = lineState[li.id];
+          return s?.business && s?.class ? sum + Number(li.amount ?? 0) : sum;
+        }, 0) * 100,
+      ) / 100,
+    [lineItems, lineState],
+  );
 
   // -------------------------------------------------------- per-line helpers
   function setLine(id: string, patch: Partial<LineState>) {
@@ -310,6 +345,12 @@ export function SplitInvoiceModal({
                       %
                     </span>
                   </div>
+                  {/* Feature D: what this slice is worth in dollars. */}
+                  <div className="w-24 shrink-0 text-right text-sm tabular-nums text-ink-muted">
+                    {formatCurrency(
+                      (invoiceTotal * (parseFloat(row.percent) || 0)) / 100,
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => removeRow(idx)}
@@ -349,6 +390,10 @@ export function SplitInvoiceModal({
                   )}
                 />
                 Total {total.toFixed(2)}%
+                <span className="font-normal text-ink-muted">
+                  · {formatCurrency(dollarsAllocated)} of{" "}
+                  {formatCurrency(invoiceTotal)}
+                </span>
                 {!totalOk && (
                   <span className="font-normal text-warning">
                     (must be 100%)
@@ -534,13 +579,23 @@ export function SplitInvoiceModal({
               </table>
             </div>
 
-            <div className="flex shrink-0 justify-end gap-2">
-              <Button variant="secondary" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button onClick={splitLines} loading={busy}>
-                Save split
-              </Button>
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+              {/* Feature D: coverage readout — how many lines carry an explicit
+                  business/class (the rest default to the invoice's) + the dollars
+                  those assigned lines represent. */}
+              <span className="text-sm tabular-nums text-ink-muted">
+                {linesAssigned} of {lineItems.length} lines assigned ·{" "}
+                {formatCurrency(dollarsAssigned)} of{" "}
+                {formatCurrency(invoiceTotal)}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button onClick={splitLines} loading={busy}>
+                  Save split
+                </Button>
+              </div>
             </div>
           </div>
         )}

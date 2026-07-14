@@ -184,7 +184,7 @@ async function isFollowup(
 notifications.post("/send", async (c) => {
   if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
   if (!(await ccReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
-  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN))
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT))
     return c.json({ error: "Forbidden" }, 403);
 
   const body = (await c.req.json().catch(() => ({}))) as {
@@ -331,7 +331,7 @@ notifications.get("/", async (c) => {
   if (!isCcEnabled(user(c))) return c.json({ error: "Not found" }, 404);
   if (!(await ccReady(c.env))) return c.json({ error: MIGRATION_MSG }, 503);
 
-  const isManager = hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN);
+  const isManager = hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT);
 
   let sql = "SELECT * FROM cc_notifications WHERE 1=1";
   const params: string[] = [];
@@ -374,7 +374,7 @@ notifications.get("/:id", async (c) => {
     .first<NotificationRow>();
   if (!row) return c.json({ error: "Not found" }, 404);
 
-  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN)) {
+  if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT)) {
     // Scoped user may only read a notification they are the recipient of.
     const u = user(c);
     const first = (u.name || "").trim().split(/\s+/)[0] ?? "";

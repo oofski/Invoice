@@ -71,6 +71,20 @@ function manualKey(location: string, glCategory: string): string {
   return `${location}|${glCategory}`;
 }
 
+/**
+ * Do two allocation sets match cent-for-cent (by location · gl_category · amount)?
+ * Used at seed time to decide whether an existing coding is a clean auto
+ * even-split (keep auto) or a manual/uneven one that must be preserved verbatim
+ * (v1.9.3 — otherwise re-opening a receipt silently overwrites the coding).
+ */
+function sameAllocations(a: LineAllocation[], b: LineAllocation[]): boolean {
+  if (a.length !== b.length) return false;
+  const key = (x: LineAllocation) =>
+    `${x.location}|${x.gl_category}|${roundCents(x.amount).toFixed(2)}`;
+  const sa = new Set(a.map(key));
+  return b.every((x) => sa.has(key(x)));
+}
+
 export function LineCodingModal({
   open,
   onClose,
@@ -132,31 +146,59 @@ export function LineCodingModal({
         continue;
       }
       const itemAllocs = line.allocations.filter((a) => !a.is_tax);
-      const entity = itemAllocs[0]?.entity_name ?? "";
-      const locations = Array.from(
-        new Set(itemAllocs.map((a) => a.location)),
-      ).filter(Boolean);
-      // Infer the category choice from the existing allocations.
-      const hasBack = itemAllocs.some((a) => a.gl_category === CC_GL_BACK_BAR);
-      const hasRetail = itemAllocs.some((a) => a.gl_category === CC_GL_RETAIL);
-      const cat: CatChoice =
-        hasBack && hasRetail ? "HALF" : hasRetail ? "RETAIL" : "BACK_BAR";
-      const manualAmounts: Record<string, string> = {};
+      // v1.9.3 fix (#1): a single OCR line can carry allocations for MULTIPLE
+      // entities (mobile line-by-line / exec split). ItemState is one-entity, so
+      // partition the line into one ItemState per distinct entity — otherwise the
+      // first entity's tag was applied to every location, silently re-assigning
+      // (or making the modal un-saveable when a foreign location was involved).
+      const byEntity = new Map<string, LineAllocation[]>();
       for (const a of itemAllocs) {
-        manualAmounts[manualKey(a.location, a.gl_category)] =
-          a.amount.toFixed(2);
+        const list = byEntity.get(a.entity_name) ?? [];
+        list.push(a);
+        byEntity.set(a.entity_name, list);
       }
-      seededItems.push({
-        clientId: line.client_id || line.id || newClientId(),
-        receiptId: line.receipt_id ?? null,
-        description: line.description ?? "",
-        amount: roundCents(line.amount),
-        entity,
-        locations,
-        cat,
-        manual: false,
-        manualAmounts,
-      });
+      const groups: [string, LineAllocation[]][] =
+        byEntity.size > 0 ? [...byEntity.entries()] : [["", []]];
+      const isMulti = byEntity.size > 1;
+      for (const [entity, allocs] of groups) {
+        const locations = Array.from(
+          new Set(allocs.map((a) => a.location)),
+        ).filter(Boolean);
+        // Infer the category choice from this entity's allocations.
+        const hasBack = allocs.some((a) => a.gl_category === CC_GL_BACK_BAR);
+        const hasRetail = allocs.some((a) => a.gl_category === CC_GL_RETAIL);
+        const cat: CatChoice =
+          hasBack && hasRetail ? "HALF" : hasRetail ? "RETAIL" : "BACK_BAR";
+        // A multi-entity line's amount is split per entity; a single-entity line
+        // keeps the line amount.
+        const amount = isMulti
+          ? roundCents(allocs.reduce((s, a) => s + roundCents(a.amount), 0))
+          : roundCents(line.amount);
+        const manualAmounts: Record<string, string> = {};
+        for (const a of allocs) {
+          manualAmounts[manualKey(a.location, a.gl_category)] =
+            roundCents(a.amount).toFixed(2);
+        }
+        // v1.9.3 fix (#3): keep the exact seeded amounts/categories in Manual
+        // mode when they aren't the clean auto even-split — otherwise re-opening
+        // recomputes an even 50/50 and Save overwrites the real coding.
+        const auto =
+          entity && locations.length > 0
+            ? buildItemAllocations(entity, locations, amount, CAT_OF[cat])
+            : [];
+        const manual = allocs.length > 0 && !sameAllocations(auto, allocs);
+        seededItems.push({
+          clientId: (line.client_id || line.id || "") + (isMulti ? `:${entity}` : "") || newClientId(),
+          receiptId: line.receipt_id ?? null,
+          description: line.description ?? "",
+          amount,
+          entity,
+          locations,
+          cat,
+          manual,
+          manualAmounts,
+        });
+      }
     }
     setItems(seededItems);
     setTaxAmount(seededTax);
@@ -202,7 +244,14 @@ export function LineCodingModal({
       setQuickCat("HALF");
     }
     setQuickTaxMode("spend");
-    setTab("QUICK");
+    // v1.9.3 fix (#2): if the receipt is ALREADY coded, open the Line-by-line tab
+    // so the real coding is shown and edited — not the blank Quick tab, where a
+    // stray Save would replace the existing (possibly multi-entity) split. A
+    // fresh/uncoded receipt still opens on Quick for fast whole-charge coding.
+    const alreadyCoded = seededItems.some(
+      (it) => it.entity && it.locations.length > 0,
+    );
+    setTab(alreadyCoded ? "LINES" : "QUICK");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, transactionId]);
 

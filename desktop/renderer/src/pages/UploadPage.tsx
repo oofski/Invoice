@@ -123,6 +123,13 @@ export default function UploadPage() {
   }
 
   const pendingCount = items.filter((i) => i.status.state === "pending").length;
+  // v1.9.3 (Feature B): roll-up counts so a big batch reads at a glance instead
+  // of scrolling every card. Duplicates are collapsed by the backend (same
+  // vendor + invoice number → put out once); we surface how many were skipped.
+  const doneCount = items.filter((i) => i.status.state === "done").length;
+  const dupCount = items.filter((i) => i.status.state === "duplicate").length;
+  const errorCount = items.filter((i) => i.status.state === "error").length;
+  const processedAny = doneCount + dupCount + errorCount > 0;
 
   return (
     <div>
@@ -172,6 +179,32 @@ export default function UploadPage() {
             onChange={(e) => e.target.files && addFiles(e.target.files)}
           />
         </div>
+
+        {processedAny && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line bg-surface px-3 py-2 text-xs">
+            {doneCount > 0 && (
+              <span className="flex items-center gap-1.5 text-success">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {doneCount} processed
+              </span>
+            )}
+            {dupCount > 0 && (
+              <span className="flex items-center gap-1.5 text-warning-soft-fg">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {dupCount} duplicate{dupCount === 1 ? "" : "s"} skipped
+              </span>
+            )}
+            {errorCount > 0 && (
+              <span className="flex items-center gap-1.5 text-danger">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {errorCount} failed
+              </span>
+            )}
+            {pendingCount > 0 && (
+              <span className="text-ink-subtle">{pendingCount} remaining</span>
+            )}
+          </div>
+        )}
 
         {items.length > 0 && (
           <div className="flex items-center justify-between">

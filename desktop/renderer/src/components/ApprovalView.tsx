@@ -20,6 +20,7 @@ import {
 import { PdfPane } from "@/components/PdfPane";
 import { LineItemsTable } from "@/components/LineItemsTable";
 import { SplitInvoiceModal } from "@/components/SplitInvoiceModal";
+import { SplitSummary } from "@/components/SplitSummary";
 import { RemindApproversModal } from "@/components/RemindApproversModal";
 import { Button, Spinner, EmptyState } from "@/components/ui/primitives";
 import { Modal } from "@/components/ui/Modal";
@@ -366,19 +367,11 @@ function ApprovalDetail({
                 {formatDate(invoice.due_date)}
               </span>
             </div>
-            {invoice.split_type && (
-              <div className="mt-3 flex justify-center">
-                <span className="inline-flex items-center gap-1 rounded-full bg-selected-bg px-2.5 py-0.5 text-xs font-medium text-accent">
-                  <Split className="h-3 w-3" />
-                  {invoice.split_type === "QUICK_EVEN"
-                    ? "Split: even"
-                    : invoice.split_type === "PER_LINE"
-                      ? "Split: per line"
-                      : "Split"}
-                </span>
-              </div>
-            )}
           </div>
+
+          {/* v1.9.3 (Feature E): show WHAT the split was — per-target breakdown +
+              who approved it and when — not just a bare "Split" chip. */}
+          <SplitSummary invoice={invoice} />
 
           {/* Decision buttons */}
           {canDecide && isAssigned && isPending ? (

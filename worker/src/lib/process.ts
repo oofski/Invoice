@@ -633,7 +633,14 @@ export async function ingestInvoicePdf(
     data.total ?? data.line_items.reduce((s, l) => s + (l.amount ?? 0), 0);
 
   if (!override) {
-    const dup = await findDuplicate(env, vendor, invoiceNumber, total);
+    // v1.9.3 (Feature B): dedup by vendor + invoice number ALONE first, so a big
+    // batch that re-uploads the same invoice several times is collapsed to one
+    // even when OCR reads the total slightly differently each time (the schema's
+    // UNIQUE is on the vendor+number+total triple, which those varying totals
+    // would slip past). Fall back to the exact triple check for safety.
+    const dup =
+      (await findDuplicateByNumber(env, vendor, invoiceNumber)) ??
+      (await findDuplicate(env, vendor, invoiceNumber, total));
     if (dup)
       return {
         duplicate: true,
@@ -726,5 +733,35 @@ export async function findDuplicate(
     "SELECT * FROM invoices WHERE vendor = ? AND invoice_number = ? AND total_amount = ? LIMIT 1",
   )
     .bind(vendor, invoiceNumber, totalAmount)
+    .first<InvoiceRow>();
+}
+
+/** True for a synthetic "no invoice number" placeholder we mint when OCR finds
+ *  none (`NO-INV-<timestamp>`). Each is unique by design, so they must never
+ *  dedup against one another — two un-numbered invoices are not "the same". */
+function isSyntheticInvoiceNumber(n: string): boolean {
+  return /^NO-INV-\d+$/i.test((n || "").trim());
+}
+
+/**
+ * v1.9.3 (Feature B) — duplicate detection by vendor + invoice number ALONE
+ * (total ignored). Re-uploading the same invoice in a large batch is collapsed
+ * to one even when OCR reads the total slightly differently each time. Matches
+ * the DB's own case/whitespace-insensitive idiom (`UPPER(TRIM(...))`) so it lines
+ * up with what a human would call "the same number". Returns null for synthetic
+ * NO-INV placeholders (no real number to match on) and empty numbers.
+ */
+export async function findDuplicateByNumber(
+  env: Env,
+  vendor: string,
+  invoiceNumber: string,
+): Promise<InvoiceRow | null> {
+  if (isSyntheticInvoiceNumber(invoiceNumber)) return null;
+  const norm = (invoiceNumber || "").trim().toUpperCase();
+  if (!norm) return null;
+  return env.DB.prepare(
+    "SELECT * FROM invoices WHERE vendor = ? AND UPPER(TRIM(invoice_number)) = ? LIMIT 1",
+  )
+    .bind(vendor, norm)
     .first<InvoiceRow>();
 }

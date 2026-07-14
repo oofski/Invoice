@@ -33,10 +33,13 @@ function isPinnedCardholder(profile: CcProfile): boolean {
   return first === "lori";
 }
 
-/** Full manager dashboard: the credit_card_accountant role + admins. */
+/** Full manager dashboard: credit_card_accountant + admin + accountant (v1.9.3). */
 export function isCcManager(profile: CcProfile): boolean {
   return (
-    profile.role === ROLES.ADMIN || profile.role === ROLES.CREDIT_CARD_ACCOUNTANT
+    profile.role === ROLES.ADMIN ||
+    profile.role === ROLES.CREDIT_CARD_ACCOUNTANT ||
+    // v1.9.3: the general accountant is a full CC manager too.
+    profile.role === ROLES.ACCOUNTANT
   );
 }
 
