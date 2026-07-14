@@ -639,7 +639,7 @@ export async function ingestInvoicePdf(
     // UNIQUE is on the vendor+number+total triple, which those varying totals
     // would slip past). Fall back to the exact triple check for safety.
     const dup =
-      (await findDuplicateByNumber(env, vendor, invoiceNumber)) ??
+      (await findDuplicateByNumber(env, vendor, invoiceNumber, total)) ??
       (await findDuplicate(env, vendor, invoiceNumber, total));
     if (dup)
       return {
@@ -744,24 +744,39 @@ function isSyntheticInvoiceNumber(n: string): boolean {
 }
 
 /**
- * v1.9.3 (Feature B) — duplicate detection by vendor + invoice number ALONE
- * (total ignored). Re-uploading the same invoice in a large batch is collapsed
- * to one even when OCR reads the total slightly differently each time. Matches
+ * v1.9.3 (Feature B) — duplicate detection by vendor + invoice number, matching
  * the DB's own case/whitespace-insensitive idiom (`UPPER(TRIM(...))`) so it lines
- * up with what a human would call "the same number". Returns null for synthetic
- * NO-INV placeholders (no real number to match on) and empty numbers.
+ * up with what a human calls "the same number". This catches a re-upload of the
+ * SAME invoice even when OCR reads the total slightly differently each time.
+ *
+ * The total is NOT ignored: a candidate only counts as a duplicate when its
+ * amount is within a small tolerance of this upload's total (the greater of $1
+ * or 1% of the total). That guard is deliberate — a vendor that reuses a fixed
+ * reference in the invoice-number field (a monthly utility statement, a revised
+ * invoice with the same number but a new amount) has a materially different
+ * total, so it is treated as a distinct invoice and still ingests rather than
+ * being silently dropped. The exact-total case is still caught by `findDuplicate`.
+ *
+ * Ordered by closest-total then oldest so the reported `existingInvoiceId` is
+ * deterministic. Returns null for synthetic NO-INV placeholders and empty numbers.
  */
 export async function findDuplicateByNumber(
   env: Env,
   vendor: string,
   invoiceNumber: string,
+  totalAmount: number,
 ): Promise<InvoiceRow | null> {
   if (isSyntheticInvoiceNumber(invoiceNumber)) return null;
   const norm = (invoiceNumber || "").trim().toUpperCase();
   if (!norm) return null;
+  const total = Number.isFinite(totalAmount) ? totalAmount : 0;
+  const tolerance = Math.max(1, Math.abs(total) * 0.01);
   return env.DB.prepare(
-    "SELECT * FROM invoices WHERE vendor = ? AND UPPER(TRIM(invoice_number)) = ? LIMIT 1",
+    `SELECT * FROM invoices
+       WHERE vendor = ? AND UPPER(TRIM(invoice_number)) = ? AND ABS(total_amount - ?) <= ?
+       ORDER BY ABS(total_amount - ?) ASC, created_at ASC
+       LIMIT 1`,
   )
-    .bind(vendor, norm)
+    .bind(vendor, norm, total, tolerance, total)
     .first<InvoiceRow>();
 }

@@ -20,8 +20,12 @@ schema is untouched.
 - **Duplicate uploads collapse by invoice number.** When the same invoice lands
   several times in one batch, it's put out once even if the scan reads the total
   slightly differently each time — matching is now on vendor + invoice number
-  (invoices with no readable number are never merged). The upload screen shows a
-  roll-up: how many processed, how many duplicates were skipped, how many failed.
+  with the amount within a small tolerance, so a vendor that reuses a reference
+  number for a different bill (a recurring statement, a revised invoice) still
+  comes through instead of being dropped, and invoices with no readable number
+  are never merged. Duplicates are flagged with an "Upload anyway" override, and
+  the upload screen shows a roll-up: how many processed, how many duplicates were
+  skipped, how many failed.
 - **See what an approval was for.** An invoice that was split now shows the split
   itself on both the invoice detail and the approval view — each business/class
   and its dollar amount (and percentage), plus who approved it and when, and any
