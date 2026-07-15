@@ -11,6 +11,7 @@
  */
 
 import type { VendorAlias, VendorSuggestion } from "./types";
+import { emitInvoiceRefresh } from "./invoiceRefresh";
 
 const API_BASE_KEY = "iq_api_base";
 const TOKEN_KEY = "iq_token";
@@ -98,7 +99,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   let res: Response;
   try {
-    res = await fetch(buildUrl(path), { ...options, headers });
+    // `cache: "no-store"` — Electron's Chromium can heuristically cache API GETs
+    // that carry no Cache-Control, which made a remounted Dashboard/list serve
+    // stale data after a change made elsewhere. Always hit the network so every
+    // view reflects the current state (v1.9.6).
+    res = await fetch(buildUrl(path), { ...options, headers, cache: "no-store" });
   } catch (err) {
     throw new ApiError(
       err instanceof Error
@@ -122,7 +127,25 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       `Request failed (${res.status})`;
     throw new ApiError(message, res.status, body);
   }
+  // Cross-view live sync (v1.9.6): after a successful invoice-side mutation,
+  // announce it so any mounted Dashboard / Invoices / Approvals view refetches.
+  signalInvoiceMutation(path, options.method);
   return body as T;
+}
+
+/**
+ * Fire the invoice-refresh bus when a mutating request to an invoice-domain
+ * endpoint succeeds. Reads (GET/HEAD) never signal. Covers /api/invoices,
+ * /api/line-items and /api/export — so every AP mutation (delete, approve,
+ * route, split, line edits, accept-review, export, bulk-delete, …) keeps the
+ * other views in sync without each call site having to remember to emit.
+ */
+function signalInvoiceMutation(path: string, method?: string): void {
+  const m = (method ?? "GET").toUpperCase();
+  if (m === "GET" || m === "HEAD") return;
+  if (/^\/api\/(invoices|line-items|export)(\/|\?|$)/.test(path)) {
+    emitInvoiceRefresh();
+  }
 }
 
 // --------------------------------------------------- dashboard analytics
@@ -292,4 +315,47 @@ export const api = {
   /** Set this admin's audit-view cutoff (ADMIN only) — hides, never deletes. */
   clearAudit: () =>
     api.post<{ ok: true; cutoff_at: string }>(`/api/audit/clear`),
+
+  // ------------------------------------------- duplicate review scan (v1.9.6)
+  /**
+   * Admin/accountant "Review scan": groups of likely-duplicate active invoices
+   * (same vendor+invoice#, or same vendor+amount when un-numbered). Read-only.
+   */
+  scanDuplicates: () =>
+    api.get<{ groups: DuplicateGroup[]; scanned: number; capped: boolean }>(
+      `/api/invoices/scan-duplicates`,
+    ),
+  /** Hard-delete the given invoice ids (admin/accountant) — used by the scan. */
+  bulkDeleteInvoices: (invoiceIds: string[]) =>
+    api.post<{ ok: true; deleted: number; skipped: number; capped: boolean }>(
+      `/api/invoices/bulk-delete`,
+      { invoiceIds },
+    ),
 };
+
+/** One invoice row inside a duplicate group (subset of the invoice columns). */
+export interface DuplicateInvoice {
+  id: string;
+  vendor: string;
+  invoice_number: string;
+  total_amount: number;
+  inv_date: string | null;
+  business: string | null;
+  class: string | null;
+  status: string;
+  has_pdf: number;
+  exported_at: string | null;
+  created_at: string;
+}
+
+/** A cluster of likely-duplicate invoices returned by the review scan. */
+export interface DuplicateGroup {
+  id: string;
+  /** "number" = same vendor + invoice#; "amount" = same vendor + total. */
+  reason: "number" | "amount";
+  vendor: string;
+  invoice_number: string | null;
+  total_amount: number | null;
+  count: number;
+  invoices: DuplicateInvoice[];
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Check,
   X,
@@ -25,6 +25,7 @@ import { RemindApproversModal } from "@/components/RemindApproversModal";
 import { Button, Spinner, EmptyState } from "@/components/ui/primitives";
 import { Modal } from "@/components/ui/Modal";
 import { useApi } from "@/hooks/useApi";
+import { useInvoiceRefresh } from "@/lib/invoiceRefresh";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { useProfile } from "@/components/ProfileProvider";
@@ -51,10 +52,11 @@ export function ApprovalView({ initialId }: { initialId?: string }) {
     profile.role === ROLES.EXECUTIVE ||
     profile.role === ROLES.ADMIN;
 
-  useEffect(() => {
-    const id = setInterval(() => refetch(), 15000);
-    return () => clearInterval(id);
-  }, [refetch]);
+  // Live sync (v1.9.6): refetch on the invoice-refresh bus (fired after any AP
+  // mutation — including an approve/reject/return done right here), on focus,
+  // and on a 15s backstop, so the pending list never shows an already-decided one.
+  const refetchSilent = useCallback(() => refetch({ silent: true }), [refetch]);
+  useInvoiceRefresh(refetchSilent, 15000);
 
   return (
     <div className="flex h-screen flex-col lg:flex-row">

@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { Download, Archive } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { Download, Archive, CopyCheck } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Spinner, Input, Button } from "@/components/ui/primitives";
 import { InvoiceTable, type QueueInvoice } from "@/components/InvoiceTable";
+import { ReviewScanModal } from "@/components/ReviewScanModal";
 import { useApi } from "@/hooks/useApi";
+import { useInvoiceRefresh } from "@/lib/invoiceRefresh";
 import { useProfile } from "@/components/ProfileProvider";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
@@ -45,23 +47,17 @@ export default function InvoicesPage() {
   const [clearing, setClearing] = useState(false);
   const [unarchivingId, setUnarchivingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [scanOpen, setScanOpen] = useState(false);
 
   const { data, loading, error, refetch } = useApi<{ invoices: QueueInvoice[] }>(
     `/api/invoices?limit=${PAGE_LIMIT}${showArchived ? "&includeArchived=1" : ""}`,
   );
 
-  // Keep the list live: poll every 15s (mirrors the dashboard) and refetch when
-  // the window regains focus, so a deleted invoice or a finished review made
-  // elsewhere shows up without needing to leave and re-open the page.
-  useEffect(() => {
-    const id = setInterval(() => refetch(), 15000);
-    const onFocus = () => refetch();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      clearInterval(id);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [refetch]);
+  // Keep the list live (v1.9.6): refetch on the invoice-refresh bus (fired after
+  // any AP mutation, here or in another view), on window focus, and on a 15s
+  // backstop. `silent` avoids flashing the table's spinner every tick.
+  const refetchSilent = useCallback(() => refetch({ silent: true }), [refetch]);
+  useInvoiceRefresh(refetchSilent, 15000);
 
   const invoices = useMemo(() => data?.invoices ?? [], [data]);
   const filtered = useMemo(
@@ -209,6 +205,17 @@ export default function InvoicesPage() {
         subtitle="All invoices you can access"
         actions={
           <div className="flex items-center gap-2">
+            {isPrivileged && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setScanOpen(true)}
+                title="Scan for duplicate / look-alike invoices, then delete the extras"
+              >
+                <CopyCheck className="h-4 w-4" />
+                Review scan
+              </Button>
+            )}
             <Button
               variant="secondary"
               size="sm"
@@ -356,6 +363,17 @@ export default function InvoicesPage() {
           )}
         </Card>
       </div>
+
+      {/* Duplicate review scan (admin/accountant): find look-alike invoices,
+          then delete the extras. Deletes fire the invoice-refresh bus, so this
+          list + the dashboard update on their own; refetch here too for immediacy. */}
+      {isPrivileged && (
+        <ReviewScanModal
+          open={scanOpen}
+          onClose={() => setScanOpen(false)}
+          onDeleted={() => refetch({ silent: true })}
+        />
+      )}
     </div>
   );
 }

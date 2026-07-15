@@ -75,6 +75,46 @@ async function withReviewCounts(c: import("hono").Context<AppEnv>, rows: Invoice
   }));
 }
 
+// ----- helper: hard-delete one invoice --------------------------------
+// Best-effort R2 PDF removal (+ stamped sidecar), the row DELETE (children —
+// pdf_files / line_items / invoice_allocations / approvals — cascade via
+// ON DELETE CASCADE), and an INVOICE_DELETED audit row (audit_log does NOT
+// cascade, so the record of the deletion survives). Shared by DELETE /:id and
+// the bulk-delete used by the duplicate review scan. `inv` must be prefetched.
+async function deleteInvoiceRow(
+  env: AppEnv["Bindings"],
+  inv: InvoiceRow,
+  actor: { id: string; name: string },
+): Promise<void> {
+  const meta = await env.DB.prepare(
+    "SELECT r2_key FROM pdf_files WHERE invoice_id = ?",
+  )
+    .bind(inv.id)
+    .first<{ r2_key: string }>();
+  if (meta?.r2_key) {
+    try {
+      await deletePdf(env, meta.r2_key);
+      // Best-effort: remove the stamped sidecar if one was ever written.
+      await deletePdf(env, stampedKey(meta.r2_key));
+    } catch (e) {
+      console.error("[delete] R2 delete failed:", e);
+    }
+  }
+  await env.DB.prepare("DELETE FROM invoices WHERE id = ?").bind(inv.id).run();
+  await audit(env, {
+    invoiceId: inv.id,
+    userId: actor.id,
+    action: AUDIT_ACTION.INVOICE_DELETED,
+    prevValue: {
+      vendor: inv.vendor,
+      invoice_number: inv.invoice_number,
+      total_amount: inv.total_amount,
+      status: inv.status,
+    },
+    note: `Invoice deleted by ${actor.name}`,
+  });
+}
+
 // ----- POST /upload ----------------------------------------------------
 invoices.post("/upload", async (c) => {
   const u = user(c);
@@ -838,6 +878,155 @@ invoices.post("/archive", async (c) => {
   return c.json({ ok: true, archived });
 });
 
+// ----- GET /scan-duplicates (admin + accountant) ----------------------
+// v1.9.6: the "Review scan" — walks the active invoices and returns groups of
+// likely duplicates for a human to review + bulk-delete. Two precise rules
+// (mirroring the at-ingest dedup in process.ts, but table-wide + grouped):
+//   • NUMBER group  — same vendor + same normalized invoice_number (real
+//     numbers only; amount may drift, so a typo'd total is still caught).
+//   • AMOUNT group  — same vendor + same exact total, but ONLY among invoices
+//     with NO real number (synthetic `NO-INV-*` / blank). Numbered invoices are
+//     never amount-grouped, so genuine recurring same-amount bills (which carry
+//     distinct real numbers) are not flagged. Each invoice lands in at most one
+//     group. Registered BEFORE GET /:id so the literal path isn't shadowed.
+interface ScanRow {
+  id: string;
+  vendor: string;
+  invoice_number: string;
+  total_amount: number;
+  inv_date: string | null;
+  business: string | null;
+  class: string | null;
+  status: string;
+  has_pdf: number;
+  exported_at: string | null;
+  created_at: string;
+}
+invoices.get("/scan-duplicates", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN, ROLES.ACCOUNTANT))
+    return c.json({ error: "Forbidden" }, 403);
+
+  const includeArchived = c.req.query("includeArchived") === "1";
+  const hideArchived = !includeArchived && (await archiveReady(c.env));
+  const CAP = 4000;
+  const res = await c.env.DB.prepare(
+    `SELECT id, vendor, invoice_number, total_amount, inv_date, business, class,
+            status, has_pdf, exported_at, created_at
+       FROM invoices
+       ${hideArchived ? "WHERE archived_at IS NULL" : ""}
+      ORDER BY created_at ASC
+      LIMIT ${CAP + 1}`,
+  ).all<ScanRow>();
+  const all = res.results ?? [];
+  const capped = all.length > CAP;
+  const rows = capped ? all.slice(0, CAP) : all;
+
+  const normVendor = (v: string) =>
+    (v || "").trim().toUpperCase().replace(/\s+/g, " ");
+  const normNumber = (n: string) => (n || "").trim().toUpperCase();
+  const isSynthetic = (n: string) => /^NO-INV-\d+$/i.test((n || "").trim());
+
+  // Pass 1 — vendor + real invoice_number.
+  const numberGroups = new Map<string, ScanRow[]>();
+  for (const r of rows) {
+    const num = normNumber(r.invoice_number);
+    if (!num || isSynthetic(r.invoice_number)) continue;
+    const key = `${normVendor(r.vendor)}|${num}`;
+    (numberGroups.get(key) ?? numberGroups.set(key, []).get(key)!).push(r);
+  }
+  const claimed = new Set<string>();
+  for (const list of numberGroups.values())
+    if (list.length >= 2) for (const r of list) claimed.add(r.id);
+
+  // Pass 2 — vendor + exact total, un-numbered invoices only.
+  const amountGroups = new Map<string, ScanRow[]>();
+  for (const r of rows) {
+    if (claimed.has(r.id)) continue;
+    const num = normNumber(r.invoice_number);
+    if (num && !isSynthetic(r.invoice_number)) continue; // numbered → pass 1 only
+    const cents = Math.round((Number(r.total_amount) || 0) * 100);
+    const key = `${normVendor(r.vendor)}|${cents}`;
+    (amountGroups.get(key) ?? amountGroups.set(key, []).get(key)!).push(r);
+  }
+
+  const groups: {
+    id: string;
+    reason: "number" | "amount";
+    vendor: string;
+    invoice_number: string | null;
+    total_amount: number | null;
+    count: number;
+    invoices: ScanRow[];
+  }[] = [];
+  for (const [key, list] of numberGroups) {
+    if (list.length < 2) continue;
+    groups.push({
+      id: `n:${key}`,
+      reason: "number",
+      vendor: list[0].vendor,
+      invoice_number: list[0].invoice_number,
+      total_amount: null,
+      count: list.length,
+      invoices: list,
+    });
+  }
+  for (const [key, list] of amountGroups) {
+    if (list.length < 2) continue;
+    groups.push({
+      id: `a:${key}`,
+      reason: "amount",
+      vendor: list[0].vendor,
+      invoice_number: null,
+      total_amount: Number(list[0].total_amount),
+      count: list.length,
+      invoices: list,
+    });
+  }
+  // Strong (same-number) groups first, then the biggest groups, then vendor.
+  groups.sort((x, y) => {
+    if (x.reason !== y.reason) return x.reason === "number" ? -1 : 1;
+    if (y.count !== x.count) return y.count - x.count;
+    return x.vendor.localeCompare(y.vendor);
+  });
+
+  return c.json({ groups, scanned: rows.length, capped });
+});
+
+// ----- POST /bulk-delete (admin + accountant) -------------------------
+// v1.9.6: hard-delete a set of invoices selected in the review scan. Same
+// semantics as DELETE /:id, per id (R2 cleanup + cascade + INVOICE_DELETED
+// audit). Unknown ids are skipped, not fatal. Capped to a safety maximum.
+// Registered BEFORE GET /:id / DELETE /:id so the literal path isn't shadowed.
+invoices.post("/bulk-delete", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN, ROLES.ACCOUNTANT))
+    return c.json({ error: "Forbidden" }, 403);
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    invoiceIds?: string[];
+  };
+  const ids = Array.isArray(body.invoiceIds)
+    ? body.invoiceIds.filter((x): x is string => typeof x === "string" && !!x)
+    : [];
+  if (ids.length === 0)
+    return c.json({ error: "invoiceIds (non-empty array) is required" }, 400);
+
+  const MAX = 200; // guardrail against an accidental huge sweep
+  const slice = ids.slice(0, MAX);
+  const u = user(c);
+  let deleted = 0;
+  let skipped = 0;
+  for (const id of slice) {
+    const inv = await getInvoice(c.env, id);
+    if (!inv) {
+      skipped++;
+      continue;
+    }
+    await deleteInvoiceRow(c.env, inv, u);
+    deleted++;
+  }
+  return c.json({ ok: true, deleted, skipped, capped: ids.length > MAX });
+});
+
 // ----- POST /:id/archive (admin only) ---------------------------------
 // F3: archive a single invoice (reversible). Registered BEFORE GET /:id.
 invoices.post("/:id/archive", async (c) => {
@@ -950,36 +1139,7 @@ invoices.delete("/:id", async (c) => {
   const inv = await getInvoice(c.env, id);
   if (!inv) return c.json({ error: "Not found" }, 404);
 
-  // Remove the PDF from R2 (best effort), then delete the invoice row. The
-  // pdf_files / line_items / approvals rows cascade via ON DELETE CASCADE.
-  const meta = await c.env.DB.prepare(
-    "SELECT r2_key FROM pdf_files WHERE invoice_id = ?",
-  )
-    .bind(id)
-    .first<{ r2_key: string }>();
-  if (meta?.r2_key) {
-    try {
-      await deletePdf(c.env, meta.r2_key);
-      // Best-effort: remove the F2 stamped sidecar if one was ever written.
-      await deletePdf(c.env, stampedKey(meta.r2_key));
-    } catch (e) {
-      console.error("[delete] R2 delete failed:", e);
-    }
-  }
-  await c.env.DB.prepare("DELETE FROM invoices WHERE id = ?").bind(id).run();
-
-  await audit(c.env, {
-    invoiceId: id,
-    userId: user(c).id,
-    action: AUDIT_ACTION.INVOICE_DELETED,
-    prevValue: {
-      vendor: inv.vendor,
-      invoice_number: inv.invoice_number,
-      total_amount: inv.total_amount,
-      status: inv.status,
-    },
-    note: `Invoice deleted by ${user(c).name}`,
-  });
+  await deleteInvoiceRow(c.env, inv, user(c));
   return c.json({ ok: true });
 });
 

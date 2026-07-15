@@ -5,6 +5,32 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.6] — 2026-07-15
+
+Live cross-view sync + a duplicate "Review scan." **Additive** — no schema
+change; deletion keeps the same permissions and behavior it already had.
+
+### Fixed
+- **Every view now reflects the same live state.** A change made in one place —
+  approving, routing, deleting, splitting, editing line items, "these are fine,"
+  exporting — now updates the **Dashboard**, the **Invoices** list, and the
+  **Approvals** list right away, instead of the Dashboard lagging behind until a
+  slow poll or a manual reload. Under the hood: an invoice-refresh signal fires
+  after any AP change and every live view re-pulls on it (also on window focus).
+  API reads are also forced fresh (no stale desktop cache), so a re-opened tab
+  never shows old numbers. Background refreshes no longer flash a spinner.
+
+### Added
+- **Review scan for duplicate invoices (admin / accountant).** A new
+  **Review scan** button on the Invoices page finds look-alike invoices and
+  groups them — same **vendor + invoice number**, or same **vendor + amount**
+  when an invoice has no number. The oldest in each group is tagged as the one to
+  keep; tick the extras and delete them in one step (with a one-click
+  "select the extras, keep the oldest" per group). Genuine recurring bills (same
+  amount but different real invoice numbers) are intentionally **not** flagged,
+  and already-exported invoices are called out and never auto-selected, so you
+  don't delete a filed record by accident.
+
 ## [1.9.5] — 2026-07-15
 
 Credit-card split parity for accountants. **Additive** — nothing that works

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import {
   Clock,
   AlertTriangle,
@@ -24,6 +24,7 @@ import {
   formatCount,
 } from "@/components/charts";
 import { useApi } from "@/hooks/useApi";
+import { useInvoiceRefresh } from "@/lib/invoiceRefresh";
 import { api, ApiError, type DashboardAnalytics } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { useProfile } from "@/components/ProfileProvider";
@@ -143,16 +144,17 @@ export default function DashboardPage() {
   const [reminding, setReminding] = useState(false);
   const [remindOpen, setRemindOpen] = useState(false);
 
-  // No realtime — poll every 15s (Brief §08 adapted for the desktop app).
-  useEffect(() => {
-    const id = setInterval(() => {
-      refetch();
-      refetchStats();
-      refetchAnalytics();
-      refetchOverdue();
-    }, 15000);
-    return () => clearInterval(id);
+  // Live sync (v1.9.6): refetch all four dashboard feeds on the invoice-refresh
+  // bus (fired after any AP mutation, in this view or another), on window focus,
+  // and on a 15s backstop poll. `silent` keeps the KPIs/charts on screen instead
+  // of flashing spinners every tick.
+  const refreshAll = useCallback(() => {
+    refetch({ silent: true });
+    refetchStats({ silent: true });
+    refetchAnalytics({ silent: true });
+    refetchOverdue({ silent: true });
   }, [refetch, refetchStats, refetchAnalytics, refetchOverdue]);
+  useInvoiceRefresh(refreshAll, 15000);
 
   const invoices = useMemo(() => invData?.invoices ?? [], [invData]);
 

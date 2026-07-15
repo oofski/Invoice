@@ -10,19 +10,25 @@ export function useApi<T>(url: string | null) {
   const [loading, setLoading] = useState<boolean>(!!url);
   const [error, setError] = useState<string | null>(null);
 
-  const refetch = useCallback(async () => {
-    if (!url) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.get<T>(url);
-      setData(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  }, [url]);
+  const refetch = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!url) return;
+      // `silent` keeps the current data on screen during background refreshes
+      // (polls, focus, cross-view refresh events) so the page doesn't flash a
+      // spinner every tick. The initial mount fetch is never silent.
+      if (!opts?.silent) setLoading(true);
+      setError(null);
+      try {
+        const result = await api.get<T>(url);
+        setData(result);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load");
+      } finally {
+        if (!opts?.silent) setLoading(false);
+      }
+    },
+    [url],
+  );
 
   useEffect(() => {
     refetch();
