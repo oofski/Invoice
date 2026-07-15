@@ -5,6 +5,22 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.5] — 2026-07-15
+
+Credit-card split parity for accountants. **Additive** — nothing that works
+today changes, and the schema is untouched.
+
+### Added
+- **Change the business entity _and_ the class when you split.** When an admin or
+  an accountant opens a credit-card transaction and splits it, the split now
+  gives them the same **entity + location/class** picker an executive gets — pick
+  the business, pick the location(s), and Back bar / Retail / 50-50, over the
+  whole charge (Quick split) or line by line. Previously the manager's split on a
+  transaction with no itemized receipt lines only let them enter amounts per
+  business; the location/class was hard to reach. The whole-charge
+  **Amounts by business** grid is still there as a secondary option for a quick
+  multi-business split.
+
 ## [1.9.4] — 2026-07-15
 
 Workflow-control release for busy upload days. **Additive** — every change adds

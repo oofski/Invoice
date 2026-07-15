@@ -1039,20 +1039,38 @@ export default function CcTransactionsPage() {
                       </div>
                     ) : (
                       <div>
-                        <div className="mb-1 flex items-center justify-between">
+                        <div className="mb-1 flex items-center justify-between gap-2">
                           <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">
-                            Entity split
+                            Split &amp; coding
                           </p>
-                          <button
-                            onClick={() => setSplitOpen(true)}
-                            className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
-                          >
-                            <Pencil className="h-3 w-3" />
-                            Edit
-                          </button>
+                          <div className="flex items-center gap-3">
+                            {/* Primary: the same entity + class (location) split an
+                                executive gets — LineCodingModal's Quick split
+                                synthesizes a whole-charge line even with no OCR
+                                lines, so a manager can set the business AND the
+                                location/class here. */}
+                            <button
+                              onClick={() => setLinesOpen(true)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+                            >
+                              <Pencil className="h-3 w-3" />
+                              Split by entity &amp; class
+                            </button>
+                            {/* Secondary: the whole-charge amounts-across-businesses
+                                grid (multi-entity + optional overall GL). */}
+                            <button
+                              onClick={() => setSplitOpen(true)}
+                              className="text-xs font-medium text-ink-muted hover:underline"
+                            >
+                              Amounts by business
+                            </button>
+                          </div>
                         </div>
                         {detail.splits.length === 0 ? (
-                          <p className="text-xs text-ink-muted">No split yet.</p>
+                          <p className="text-xs text-ink-muted">
+                            No split yet. “Split by entity &amp; class” lets you set
+                            the business and the location, just like an executive.
+                          </p>
                         ) : (
                           <ul className="rounded-lg border border-line text-sm">
                             {detail.splits.map((s) => (
@@ -1172,8 +1190,15 @@ export default function CcTransactionsPage() {
         />
       )}
 
-      {/* Line-coding modal (manager edits the OCR-line coding) */}
-      {detail && lines.length > 0 && (
+      {/* Line-coding modal — the manager's entity + class (location) split, with
+          exec parity. Available whether or not the receipt has OCR lines: with
+          lines it opens Line-by-line; with none it opens Quick split, which
+          synthesizes a whole-charge line so a manager can pick the business AND
+          the location just like an executive. Saved via PUT /lines (receiptless
+          lines allowed), which re-derives cc_entity_splits. */}
+      {detail &&
+        (detail.transaction.source === "AMEX" ||
+          detail.transaction.source === "CAPITAL_ONE") && (
         <LineCodingModal
           open={linesOpen}
           onClose={() => setLinesOpen(false)}
