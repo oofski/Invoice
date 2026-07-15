@@ -41,6 +41,7 @@ export default function UploadPage() {
   const isStaff = profile.role === ROLES.STAFF;
   const [items, setItems] = useState<UploadItem[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback((files: FileList | File[]) => {
@@ -114,11 +115,34 @@ export default function UploadPage() {
     }
   }
 
+  // "Process all" blasts the whole batch straight through (fast path). Kept for
+  // clean batches where you trust the routing.
   async function processAll() {
-    for (const item of items) {
-      if (item.status.state === "pending") {
-        await processItem(item);
+    if (busy) return;
+    setBusy(true);
+    try {
+      for (const item of items) {
+        if (item.status.state === "pending") {
+          await processItem(item);
+        }
       }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // v1.9.4: one-at-a-time. Processes only the NEXT pending invoice, then stops so
+  // you can review where it routed (and open it to fix) before continuing —
+  // instead of the whole batch rushing through at once.
+  async function processNext() {
+    if (busy) return;
+    const next = items.find((i) => i.status.state === "pending");
+    if (!next) return;
+    setBusy(true);
+    try {
+      await processItem(next);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -216,15 +240,27 @@ export default function UploadPage() {
                 variant="secondary"
                 size="sm"
                 onClick={() => setItems([])}
+                disabled={busy}
               >
                 Clear
+              </Button>
+              {/* v1.9.4: step through the batch one invoice at a time so you can
+                  review where each routed before continuing. */}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={processNext}
+                disabled={busy || pendingCount === 0}
+                title="Process just the next invoice, then pause so you can review it"
+              >
+                {processedAny ? `Next (${pendingCount})` : "One at a time"}
               </Button>
               <Button
                 size="sm"
                 onClick={processAll}
-                disabled={pendingCount === 0}
+                disabled={busy || pendingCount === 0}
               >
-                Process {pendingCount > 0 ? `(${pendingCount})` : "all"}
+                Process all {pendingCount > 0 ? `(${pendingCount})` : ""}
               </Button>
             </div>
           </div>

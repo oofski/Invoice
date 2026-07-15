@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   Trash2,
   Download,
+  Check,
 } from "lucide-react";
 import { PdfPane } from "@/components/PdfPane";
 import { InvoiceDataPanel } from "@/components/InvoiceDataPanel";
@@ -55,6 +56,7 @@ export default function InvoiceDetailPage() {
   const [rescanning, setRescanning] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [acceptingReview, setAcceptingReview] = useState(false);
 
   const invoice = data?.invoice;
   const lineItems = useMemo(() => invoice?.line_items ?? [], [invoice]);
@@ -90,6 +92,38 @@ export default function InvoiceDetailPage() {
     !!invoice &&
     (profile.role === ROLES.ACCOUNTANT || profile.role === ROLES.ADMIN) &&
     invoice.status !== INVOICE_STATUS.EXPORTED;
+
+  // v1.9.4: a one-click "these are fine, proceed" for review-flagged invoices.
+  // Admin / accountant / CC-accountant, on a non-exported invoice.
+  const isNeedsReview = invoice?.status === INVOICE_STATUS.NEEDS_REVIEW;
+  const canAcceptReview =
+    !!invoice &&
+    invoice.status !== INVOICE_STATUS.EXPORTED &&
+    (profile.role === ROLES.ADMIN ||
+      profile.role === ROLES.ACCOUNTANT ||
+      profile.role === ROLES.CREDIT_CARD_ACCOUNTANT);
+  const showReviewBanner = reviewCount > 0 || isNeedsReview;
+
+  async function acceptReview() {
+    setAcceptingReview(true);
+    try {
+      const res = await api.post<{ cleared: number; advanced: boolean }>(
+        `/api/invoices/${id}/accept-review`,
+      );
+      toast.success(
+        res.advanced
+          ? "Marked reviewed — re-sent for approval"
+          : res.cleared > 0
+            ? `Marked reviewed — ${res.cleared} line${res.cleared === 1 ? "" : "s"} accepted`
+            : "Marked reviewed",
+      );
+      refetch();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to accept review");
+    } finally {
+      setAcceptingReview(false);
+    }
+  }
 
   async function reprocess() {
     setReprocessing(true);
@@ -267,14 +301,47 @@ export default function InvoiceDetailPage() {
               it was (per-target breakdown) + who approved it and when. */}
           <SplitSummary invoice={invoice} />
 
-          {reviewCount > 0 && (
-            <div className="mt-4 flex items-center gap-2 rounded-lg border border-danger-soft-fg/30 bg-danger-soft-bg p-3 text-sm text-danger-soft-fg">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              <span>
-                <strong>{reviewCount}</strong> line item
-                {reviewCount === 1 ? " is" : "s are"} flagged for review. Export
-                will warn until resolved.
-              </span>
+          {showReviewBanner && (
+            <div className="mt-4 rounded-lg border border-danger-soft-fg/30 bg-danger-soft-bg p-3 text-sm text-danger-soft-fg">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <span>
+                    {isNeedsReview ? (
+                      <>
+                        This invoice was sent back for review.
+                        {reviewCount > 0 && (
+                          <>
+                            {" "}
+                            <strong>{reviewCount}</strong> line
+                            {reviewCount === 1 ? " is" : "s are"} flagged.
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <strong>{reviewCount}</strong> line item
+                        {reviewCount === 1 ? " is" : "s are"} flagged for review.
+                        Export will warn until resolved.
+                      </>
+                    )}
+                  </span>
+                  {canAcceptReview && (
+                    <div className="mt-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={acceptReview}
+                        loading={acceptingReview}
+                        title="Accept the current coding and move this invoice forward"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        These are fine — proceed
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -290,6 +357,7 @@ export default function InvoiceDetailPage() {
                   onChange={refetch}
                   invoiceBusiness={invoice.business}
                   canAdd={canAdd}
+                  canDelete={canAdd}
                   invoiceId={invoice.id}
                 />
               </Card>

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "./helpers";
-import { user, canViewInvoice } from "./helpers";
+import { user, hasRole, canViewInvoice } from "./helpers";
 import { audit, getInvoice } from "../lib/db";
 import { recomputeReconciliation } from "../lib/process";
 import { uuid } from "../lib/util";
@@ -10,6 +10,7 @@ import {
   CONFIDENCE_LEVEL,
   REQUIRES_MANUAL_REVIEW,
   INVOICE_STATUS,
+  ROLES,
   isCategoryValidForEntity,
 } from "../lib/constants";
 import type { LineItemRow, InvoiceRow } from "../lib/types";
@@ -64,6 +65,46 @@ lineItems.patch("/:id", async (c) => {
     newValue: { gl_category: category },
     note: `${user(c).name} set "${li.description}" to ${category}`,
   });
+  return c.json({ ok: true });
+});
+
+// DELETE /:id — remove a line item (v1.9.4). Accountant/admin, non-exported.
+// Deleting a split parent takes its children with it (the split no longer makes
+// sense without the parent). Reconciliation is recomputed so the header banner
+// reflects the new line total. Atomic (parent + children in one batch).
+lineItems.delete("/:id", async (c) => {
+  // Destructive — restrict to accountant/admin (mirrors the desktop gate), a
+  // tighter bar than the PATCH/split edit routes.
+  if (!hasRole(c, ROLES.ADMIN, ROLES.ACCOUNTANT))
+    return c.json({ error: "Forbidden" }, 403);
+  const loaded = await loadEditable(c, c.req.param("id"));
+  if ("error" in loaded) return c.json({ error: loaded.error }, loaded.status);
+  const { li } = loaded;
+
+  // A split CHILD can't be deleted on its own — its siblings must still sum to
+  // the parent. Clear the whole split from the parent instead.
+  if (li.split_parent_id)
+    return c.json(
+      { error: "This is part of a split — delete or re-split the parent line instead." },
+      400,
+    );
+
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM line_items WHERE split_parent_id = ?").bind(li.id),
+    c.env.DB.prepare("DELETE FROM line_items WHERE id = ?").bind(li.id),
+  ]);
+
+  await audit(c.env, {
+    invoiceId: li.invoice_id,
+    userId: user(c).id,
+    action: AUDIT_ACTION.LINE_ITEM_DELETED,
+    prevValue: { description: li.description, amount: li.amount, gl_category: li.gl_category },
+    note: `${user(c).name} deleted line "${li.description ?? "(no description)"}"`,
+  });
+
+  // Keep the reconciliation banner honest now that a line is gone.
+  await recomputeReconciliation(c.env, li.invoice_id);
+
   return c.json({ ok: true });
 });
 

@@ -5,6 +5,29 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.4] — 2026-07-15
+
+Workflow-control release for busy upload days. **Additive** — every change adds
+a new action or a slower option; nothing that works today changes, and the
+schema is untouched.
+
+### Added
+- **Delete a line item.** On an invoice's line-item table, accountants and admins
+  now get a delete button on each line (non-exported invoices). Deleting a line
+  updates the invoice total; deleting a line that was split removes its split
+  pieces too. It's logged in the audit trail.
+- **Handle a batch one at a time.** The upload screen no longer has to blast a
+  whole batch through at once. Alongside **Process all**, there's now a **One at
+  a time** button that processes just the next invoice and then pauses — so you
+  can see where it routed (and open it to fix) before continuing. Process all is
+  still there when you trust the batch.
+- **"These are fine — proceed."** When an invoice is flagged with a review issue
+  (line items flagged for review, or one sent back for routing review), an admin,
+  accountant, or credit-card accountant can click one button to accept the
+  current coding and move it forward — clearing the soft review flags and, if it
+  was bounced back, re-sending it to its approver. Lines with no real GL account
+  keep their flag (there's nothing to file them under), so export stays honest.
+
 ## [1.9.3] — 2026-07-14
 
 A batch-review release aimed at large upload days. **Additive** — every change

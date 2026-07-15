@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Split, PencilLine, Plus } from "lucide-react";
+import { Split, PencilLine, Plus, Trash2 } from "lucide-react";
 import { ConfidenceBadge } from "@/components/ui/Badges";
 import { GLCategorySelect } from "@/components/GLCategorySelect";
 import { SplitModal } from "@/components/SplitModal";
@@ -21,6 +21,7 @@ export function LineItemsTable({
   onChange,
   invoiceBusiness,
   canAdd = false,
+  canDelete = false,
   invoiceId,
 }: {
   lineItems: LineItemRow[];
@@ -34,11 +35,18 @@ export function LineItemsTable({
    * ApprovalView never pass this (GL is never theirs to add).
    */
   canAdd?: boolean;
+  /**
+   * Accountant/admin only — when true (and a non-exported invoice), each root
+   * line shows a delete affordance. Kept separate from `editable` so the
+   * ApprovalView's exec editing never exposes destructive line deletes.
+   */
+  canDelete?: boolean;
   /** Required when `canAdd` — target invoice for the add-line POST. */
   invoiceId?: string;
 }) {
   const [splitTarget, setSplitTarget] = useState<LineItemRow | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
 
   // Group split children beneath their parent for display.
@@ -67,6 +75,26 @@ export function LineItemsTable({
       toast.error(err instanceof ApiError ? err.message : "Failed to update");
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function deleteLine(li: LineItemRow) {
+    const label = li.description ? `"${li.description}"` : "this line item";
+    if (
+      !window.confirm(
+        `Delete ${label}? This removes it from the invoice and updates the total. This cannot be undone.`,
+      )
+    )
+      return;
+    setDeletingId(li.id);
+    try {
+      await api.del(`/api/line-items/${li.id}`);
+      toast.success("Line item deleted");
+      onChange();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to delete line");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -126,12 +154,27 @@ export function LineItemsTable({
           <ConfidenceBadge level={li.confidence_level} />
         </td>
         <td className="px-4 py-3 text-right">
-          {editable && !isChild && !isSplitParent && (
-            <Button variant="ghost" size="sm" onClick={() => setSplitTarget(li)}>
-              <Split className="h-3.5 w-3.5" />
-              Split
-            </Button>
-          )}
+          <div className="flex items-center justify-end gap-1">
+            {editable && !isChild && !isSplitParent && (
+              <Button variant="ghost" size="sm" onClick={() => setSplitTarget(li)}>
+                <Split className="h-3.5 w-3.5" />
+                Split
+              </Button>
+            )}
+            {canDelete && !isChild && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => deleteLine(li)}
+                loading={deletingId === li.id}
+                disabled={deletingId === li.id}
+                title="Delete this line item"
+                className="text-ink-subtle hover:text-danger"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
         </td>
       </tr>
     );

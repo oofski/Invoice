@@ -409,6 +409,91 @@ invoices.post("/:id/reroute", async (c) => {
   });
 });
 
+// ----- POST /:id/accept-review ----------------------------------------
+// v1.9.4: a one-click "these are fine, proceed" for invoices flagged with a
+// review issue. Admin / accountant / credit-card-accountant only. It:
+//   • clears the SOFT line-item review flags (accepting the current coding) on
+//     every flagged line that already carries a real GL category — lines still
+//     coded to the manual-review sentinel keep their flag, since there is no
+//     account to file them under and "fine" can't invent one; and
+//   • if the invoice was bounced to NEEDS_REVIEW, re-sends it to its approver
+//     (status → PENDING_APPROVAL, approvals row rebuilt to PENDING).
+// Never touches an EXPORTED invoice. Registered before GET/PATCH /:id.
+invoices.post("/:id/accept-review", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN, ROLES.ACCOUNTANT, ROLES.CREDIT_CARD_ACCOUNTANT))
+    return c.json({ error: "Forbidden" }, 403);
+  const id = c.req.param("id");
+  const inv = await getInvoice(c.env, id);
+  if (!inv) return c.json({ error: "Not found" }, 404);
+  if (!canViewInvoice(c, inv)) return c.json({ error: "Forbidden" }, 403);
+  if (inv.status === INVOICE_STATUS.EXPORTED)
+    return c.json({ error: "Invoice already exported" }, 409);
+
+  // Accept every softly-flagged line that has a real category (not the sentinel).
+  const clearRes = await c.env.DB.prepare(
+    `UPDATE line_items SET requires_review = 0
+       WHERE invoice_id = ? AND requires_review = 1
+         AND gl_category IS NOT NULL AND gl_category != ?`,
+  )
+    .bind(id, REQUIRES_MANUAL_REVIEW)
+    .run();
+  const cleared = clearRes.meta?.changes ?? 0;
+
+  // If it was bounced back for review, send it forward again to its approver.
+  let advanced = false;
+  if (inv.status === INVOICE_STATUS.NEEDS_REVIEW && inv.approved_by) {
+    const approverUser = await resolveApproverUser(c.env, inv.approved_by);
+    await c.env.DB.batch([
+      c.env.DB.prepare("UPDATE invoices SET status = ? WHERE id = ?").bind(
+        INVOICE_STATUS.PENDING_APPROVAL,
+        id,
+      ),
+      c.env.DB.prepare("DELETE FROM approvals WHERE invoice_id = ?").bind(id),
+      c.env.DB.prepare(
+        "INSERT INTO approvals (id, invoice_id, assigned_to, assigned_to_name, status) VALUES (?,?,?,?,?)",
+      ).bind(uuid(), id, approverUser?.id ?? null, inv.approved_by, APPROVAL_STATUS.PENDING),
+    ]);
+    advanced = true;
+    if (approverUser?.email) {
+      try {
+        await sendApprovalEmail(c.env, approverUser.email, {
+          invoiceId: id,
+          vendor: inv.vendor,
+          totalAmount: inv.total_amount,
+          business: inv.business,
+          dueDate: inv.due_date,
+          invoiceNumber: inv.invoice_number,
+        });
+      } catch (e) {
+        console.error("[accept-review] approval email failed:", e);
+      }
+    }
+  }
+
+  const u = user(c);
+  await audit(c.env, {
+    invoiceId: id,
+    userId: u.id,
+    action: AUDIT_ACTION.MANUAL_REVIEW_RESOLVED,
+    prevValue: { status: inv.status },
+    newValue: {
+      status: advanced ? INVOICE_STATUS.PENDING_APPROVAL : inv.status,
+      cleared_review_lines: cleared,
+    },
+    note: `${u.name} accepted the review${cleared ? ` (${cleared} line${cleared === 1 ? "" : "s"})` : ""}${advanced ? " and re-sent it for approval" : ""}.`,
+  });
+
+  // Keep the reconciliation banner honest.
+  await recomputeReconciliation(c.env, id);
+
+  return c.json({
+    ok: true,
+    cleared,
+    advanced,
+    status: advanced ? INVOICE_STATUS.PENDING_APPROVAL : inv.status,
+  });
+});
+
 // ----- GET /approvers/pending-counts ----------------------------------
 // Exec/admin digest support: how many PENDING_APPROVAL invoices each distinct
 // approver name carries, plus whether that name maps to an active, emailable
