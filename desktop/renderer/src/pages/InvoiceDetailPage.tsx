@@ -19,7 +19,7 @@ import { useApi } from "@/hooks/useApi";
 import { useInvoiceRefresh } from "@/lib/invoiceRefresh";
 import { useProfile } from "@/components/ProfileProvider";
 import { api, ApiError } from "@/lib/api";
-import { downloadBlob } from "@/lib/utils";
+import { downloadBlob, formatDate } from "@/lib/utils";
 import { toast } from "@/components/ui/Toast";
 import { INVOICE_STATUS, ROLES } from "@/lib/constants";
 import type { InvoiceWithRelations } from "@/lib/types";
@@ -108,18 +108,29 @@ export default function InvoiceDetailPage() {
     (profile.role === ROLES.ADMIN ||
       profile.role === ROLES.ACCOUNTANT ||
       profile.role === ROLES.CREDIT_CARD_ACCOUNTANT);
-  // v1.9.7 (bug #11): a location-only review flag (no flagged lines, not
-  // NEEDS_REVIEW) still parks the invoice in the Manual Review Queue — surface
-  // the banner so "These are fine — proceed" can clear it.
+  // v1.9.8: "These are fine — proceed" is available on any still-actionable
+  // (non-exported) flagged invoice, INCLUDING an already-approved one — accepting
+  // the flags post-approval is exactly what makes it cleanly Export Ready. The
+  // flags that keep it out of clean Export-Ready are: flagged lines, a
+  // location-ambiguity, or a reconciliation gap.
+  const notExported = invoice?.status !== INVOICE_STATUS.EXPORTED;
+  const hasReconcileGap = invoice?.reconciliation_delta != null;
+  // "…only" = no flagged lines and not sent-back — used to word the banner.
   const locationOnlyReview =
-    !!invoice?.location_ambiguous &&
+    !!invoice?.location_ambiguous && reviewCount === 0 && !isNeedsReview && notExported;
+  const reconcileOnlyReview =
+    hasReconcileGap &&
     reviewCount === 0 &&
     !isNeedsReview &&
-    // Only on a still-actionable invoice: an APPROVED/EXPORTED one can't be
-    // accept-reviewed or rerouted, so the banner would have no way to clear it.
-    invoice?.status !== INVOICE_STATUS.APPROVED &&
-    invoice?.status !== INVOICE_STATUS.EXPORTED;
-  const showReviewBanner = reviewCount > 0 || isNeedsReview || locationOnlyReview;
+    !invoice?.location_ambiguous &&
+    notExported;
+  const showReviewBanner =
+    !!invoice &&
+    notExported &&
+    (reviewCount > 0 ||
+      isNeedsReview ||
+      !!invoice.location_ambiguous ||
+      hasReconcileGap);
 
   // v1.9.7 (bug #4): reprocess/rescan rebuild the AI coding + approval, so they
   // must not be offered on an already-approved or exported invoice (the Worker
@@ -138,10 +149,10 @@ export default function InvoiceDetailPage() {
       );
       toast.success(
         res.advanced
-          ? "Marked reviewed — re-sent for approval"
+          ? "Manual review registered — re-sent for approval"
           : res.cleared > 0
-            ? `Marked reviewed — ${res.cleared} line${res.cleared === 1 ? "" : "s"} accepted`
-            : "Marked reviewed",
+            ? `Manual review registered — ${res.cleared} line${res.cleared === 1 ? "" : "s"} accepted`
+            : "Manual review registered",
       );
       refetch();
     } catch (err) {
@@ -352,6 +363,21 @@ export default function InvoiceDetailPage() {
                         evidence and needs confirmation. Confirm the routing (or
                         edit it) to clear this flag.
                       </>
+                    ) : reconcileOnlyReview ? (
+                      <>
+                        The line items don&apos;t add up to the invoice total
+                        {invoice.reconciliation_delta != null && (
+                          <>
+                            {" "}
+                            (off by{" "}
+                            <strong>
+                              ${Math.abs(invoice.reconciliation_delta).toFixed(2)}
+                            </strong>
+                            )
+                          </>
+                        )}
+                        . Confirm it&apos;s correct to clear this flag.
+                      </>
                     ) : (
                       <>
                         <strong>{reviewCount}</strong> line item
@@ -376,6 +402,22 @@ export default function InvoiceDetailPage() {
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* v1.9.8: the registered manual review check — persists after the
+              flags are cleared so there's an accountable record that a human
+              accepted this invoice before it was cleared for export. */}
+          {invoice.manually_reviewed_at && (
+            <div className="mt-4 flex items-center gap-2 rounded-lg border border-success-soft-fg/30 bg-success-soft-bg p-3 text-sm text-success-soft-fg">
+              <Check className="h-4 w-4 shrink-0" />
+              <span>
+                Manually reviewed
+                {invoice.manually_reviewed_by
+                  ? ` by ${invoice.manually_reviewed_by}`
+                  : ""}{" "}
+                · {formatDate(invoice.manually_reviewed_at)}
+              </span>
             </div>
           )}
 

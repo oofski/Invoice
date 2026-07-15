@@ -65,6 +65,10 @@ export interface InvoiceRow {
   location_ambiguous: number;
   /** Signed gap total − (leaf lines + tax), 2dp; NULL = reconciled (v1.6.0 FIX-8). */
   reconciliation_delta: number | null;
+  /** v1.9.8: when a human accepted the review flags ("these are fine"); NULL = never. */
+  manually_reviewed_at?: string | null;
+  /** v1.9.8: the name of the user who registered the manual review check. */
+  manually_reviewed_by?: string | null;
 }
 
 export interface LineItemRow {

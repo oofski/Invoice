@@ -5,6 +5,33 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.8] — 2026-07-15
+
+Makes "These are fine — proceed" a real, recorded **manual review check** and
+lets it fully clear an invoice for export. Additive; one small migration
+(two nullable columns).
+
+### Added / Changed
+- **A manual review is now registered.** When an admin/accountant clicks
+  **"These are fine — proceed,"** the app records **who** accepted the flags and
+  **when**, shows it on the invoice ("Manually reviewed by … · date") and on the
+  Export page row, and logs it in the audit trail — an accountable record that a
+  human checked it before it was cleared for export.
+- **"These are fine" now clears a reconciliation gap too.** Previously it cleared
+  flagged lines and the location warning but re-flagged a "line items ≠ total"
+  gap; now, since a human explicitly accepted it, that flag is acknowledged and
+  cleared (a later edit to the amounts re-checks it). So an approved invoice you've
+  marked good is genuinely **Export Ready**, with no lingering warnings.
+- **The banner (and the button) now surface for a reconciliation-only or
+  location-only flag, and after approval** — so you can accept those from the
+  invoice even once it's approved. (Reminder: an invoice still becomes
+  **Export Ready** only after it's **Approved**; "These are fine" clears the flags,
+  it doesn't approve.)
+
+Note: a line with **no GL account** (an explicit "needs coding" line) still can't
+be "these are fine"-d away — it must be given a category first, so nothing exports
+to a blank account.
+
 ## [1.9.7] — 2026-07-15
 
 A full-lifecycle bug sweep of the invoice pipeline (upload → OCR → code → split

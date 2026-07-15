@@ -215,6 +215,11 @@ export async function ensureSchema(env: Env): Promise<void> {
   if (!(await addColumnTolerant(env, "ALTER TABLE invoices ADD COLUMN shipping REAL", "add shipping"))) return;
   if (!(await addColumnTolerant(env, "ALTER TABLE invoices ADD COLUMN location_ambiguous INTEGER NOT NULL DEFAULT 0", "add location_ambiguous"))) return;
   if (!(await addColumnTolerant(env, "ALTER TABLE invoices ADD COLUMN reconciliation_delta REAL", "add reconciliation_delta"))) return;
+  // v1.9.8 — register the manual review check: who accepted the flags ("these are
+  // fine") and when. Persists an accountable record that a human manually reviewed
+  // a flagged invoice before it was cleared for export.
+  if (!(await addColumnTolerant(env, "ALTER TABLE invoices ADD COLUMN manually_reviewed_at TEXT", "add manually_reviewed_at"))) return;
+  if (!(await addColumnTolerant(env, "ALTER TABLE invoices ADD COLUMN manually_reviewed_by TEXT", "add manually_reviewed_by"))) return;
   // 2) Index + cutoff table + vendor_aliases — all naturally idempotent
   //    (CREATE … IF NOT EXISTS). vendor_aliases canonicalizes OCR vendor spelling
   //    variants onto a vendor_mappings row (additive + reversible).

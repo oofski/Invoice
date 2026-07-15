@@ -562,25 +562,53 @@ invoices.post("/:id/accept-review", async (c) => {
   }
 
   const u = user(c);
+
+  // v1.9.8: register the manual review check — record WHO accepted the flags and
+  // WHEN, and acknowledge (clear) any reconciliation gap, since a human has now
+  // explicitly said "these are fine". This is what makes an approved-but-flagged
+  // invoice cleanly Export Ready while keeping an accountable record. (A later
+  // edit to line amounts will re-derive reconciliation_delta and re-flag it.)
+  const at = nowIso();
+  await c.env.DB.prepare(
+    "UPDATE invoices SET reconciliation_delta = NULL WHERE id = ?",
+  )
+    .bind(id)
+    .run();
+  // The manually_reviewed_* columns are additive (v1.9.8 migration). Guard the
+  // write so a not-yet-migrated DB still accepts the review (best-effort record).
+  try {
+    await c.env.DB.prepare(
+      "UPDATE invoices SET manually_reviewed_at = ?, manually_reviewed_by = ? WHERE id = ?",
+    )
+      .bind(at, u.name, id)
+      .run();
+  } catch (e) {
+    console.error("[accept-review] manual-review columns not ready:", e);
+  }
+
   await audit(c.env, {
     invoiceId: id,
     userId: u.id,
     action: AUDIT_ACTION.MANUAL_REVIEW_RESOLVED,
-    prevValue: { status: inv.status },
+    prevValue: {
+      status: inv.status,
+      reconciliation_delta: inv.reconciliation_delta ?? null,
+    },
     newValue: {
       status: advanced ? INVOICE_STATUS.PENDING_APPROVAL : inv.status,
       cleared_review_lines: cleared,
+      manually_reviewed_by: u.name,
+      manually_reviewed_at: at,
     },
-    note: `${u.name} accepted the review${cleared ? ` (${cleared} line${cleared === 1 ? "" : "s"})` : ""}${advanced ? " and re-sent it for approval" : ""}.`,
+    note: `${u.name} registered a manual review check${cleared ? ` (accepted ${cleared} flagged line${cleared === 1 ? "" : "s"})` : ""}${advanced ? " and re-sent it for approval" : ""}.`,
   });
-
-  // Keep the reconciliation banner honest.
-  await recomputeReconciliation(c.env, id);
 
   return c.json({
     ok: true,
     cleared,
     advanced,
+    manually_reviewed_at: at,
+    manually_reviewed_by: u.name,
     status: advanced ? INVOICE_STATUS.PENDING_APPROVAL : inv.status,
   });
 });

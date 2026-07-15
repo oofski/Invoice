@@ -7,6 +7,7 @@ import {
   History,
   FileSpreadsheet,
   FileArchive,
+  Check,
 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Button, Spinner, EmptyState } from "@/components/ui/primitives";
@@ -460,6 +461,16 @@ export default function ExportPage() {
                           <span className="ml-2 inline-flex items-center gap-0.5 text-xs font-medium text-warning">
                             <AlertTriangle className="h-3 w-3" />
                             {flags.join(" · ")}
+                          </span>
+                        )}
+                        {/* v1.9.8: show the registered manual review check. */}
+                        {inv.manually_reviewed_at && (
+                          <span
+                            className="ml-2 inline-flex items-center gap-0.5 text-xs font-medium text-success"
+                            title={`Manually reviewed${inv.manually_reviewed_by ? ` by ${inv.manually_reviewed_by}` : ""} · ${formatDate(inv.manually_reviewed_at)}`}
+                          >
+                            <Check className="h-3 w-3" />
+                            Reviewed
                           </span>
                         )}
                       </td>
