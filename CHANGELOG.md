@@ -5,6 +5,54 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.7] — 2026-07-15
+
+A full-lifecycle bug sweep of the invoice pipeline (upload → OCR → code → split
+→ review → approve → export). 37 confirmed defects fixed. **No schema change.**
+
+### Fixed — splitting & location
+- **A split now clears "location needs confirmation."** The #1 complaint (e.g.
+  the SALESCOMM invoice that still said the location was unknown after a split):
+  every split path — even split, custom %, and per-line — now resolves the
+  location flag, so the amber warning and the export "Location?" prompt clear the
+  moment you split. "These are fine — proceed" clears a location-only flag too.
+- **Split modals no longer show stale or another invoice's numbers.** Re-opening
+  a split (or switching invoices) re-seeds fresh, closing a path that could
+  mis-allocate one invoice using another's split.
+- **Per-line split can't silently drop lines.** If a line has no business/class
+  it now blocks the save and tells you, instead of quietly leaving it uncoded.
+- **The Split button works for single-class businesses** (Chicago/Admin/Nala) —
+  it was greyed out even though cross-entity and per-line splits are supported.
+- **Clearing a split, or rerouting to another entity, cleans up after itself** —
+  no stale allocations or line coding pointing at the old entity, and per-line
+  coding is re-derived so nothing gets stuck.
+
+### Fixed — coding, totals & export
+- **Auto-coding never invents a blank GL account** — a line the entity has no
+  account for goes to manual review instead of exporting with an empty account.
+- **QBO Bills export includes header sales tax** on ordinary invoices (the bill
+  total was short by the tax); reconciliation no longer double-counts an
+  itemized tax line; a whole-invoice split no longer trips a spurious export
+  review flag; single-line split pieces keep their entity so they aren't dropped.
+
+### Fixed — approvals, reprocessing & uploads
+- **No accidental double-decisions:** approve/reject only act on a
+  pending invoice, and a missing split-migration no longer freezes the approval
+  queue. Editing/reprocessing a finalized invoice is blocked.
+- **Reprocess/Re-scan no longer silently un-approves** an approved/exported
+  invoice, and a rescan now actually corrects a mis-read total/tax/date.
+- **Uploads:** "Upload anyway" can force through an intentional duplicate; a
+  duplicate always offers "View existing"; re-uploads are caught despite
+  vendor-name casing drift; and a failed AI run no longer leaves a stuck ghost
+  invoice that blocks the retry.
+
+### Fixed — live views & review scan
+- **The detail and approval pages stop flashing/reloading the PDF** on every
+  inline edit; the Export and detail pages now refresh live like the others.
+- **The duplicate Review scan no longer flags legitimate recurring bills** (same
+  vendor + amount, different months), scans the most recent invoices, and its
+  delete completes the whole selection rather than stopping at 200.
+
 ## [1.9.6] — 2026-07-15
 
 Live cross-view sync + a duplicate "Review scan." **Additive** — no schema

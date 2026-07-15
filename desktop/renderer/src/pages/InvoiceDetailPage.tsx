@@ -112,7 +112,13 @@ export default function InvoiceDetailPage() {
   // NEEDS_REVIEW) still parks the invoice in the Manual Review Queue — surface
   // the banner so "These are fine — proceed" can clear it.
   const locationOnlyReview =
-    !!invoice?.location_ambiguous && reviewCount === 0 && !isNeedsReview;
+    !!invoice?.location_ambiguous &&
+    reviewCount === 0 &&
+    !isNeedsReview &&
+    // Only on a still-actionable invoice: an APPROVED/EXPORTED one can't be
+    // accept-reviewed or rerouted, so the banner would have no way to clear it.
+    invoice?.status !== INVOICE_STATUS.APPROVED &&
+    invoice?.status !== INVOICE_STATUS.EXPORTED;
   const showReviewBanner = reviewCount > 0 || isNeedsReview || locationOnlyReview;
 
   // v1.9.7 (bug #4): reprocess/rescan rebuild the AI coding + approval, so they
