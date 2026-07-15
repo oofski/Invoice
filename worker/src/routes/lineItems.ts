@@ -152,13 +152,19 @@ lineItems.post("/:id/split", async (c) => {
   const base = li.sort_order ?? 0;
   const stmts = resolved.map((r, idx) =>
     c.env.DB.prepare(
-      `INSERT INTO line_items (id, invoice_id, description, amount, gl_category,
+      // v1.9.7 (bug #33): children inherit the parent leaf's business/class.
+      // Without it they are NULL, and on a per-line-split invoice the PER_LINE
+      // QBO export (which only emits leaves where business && class) drops the
+      // parent's dollars entirely. NULL parent (header-coded invoice) → NULL
+      // children, which correctly keeps it out of per-line export mode.
+      `INSERT INTO line_items (id, invoice_id, description, business, class, amount, gl_category,
          confidence_level, logic_path, requires_review, manually_overridden,
          overridden_by, split_parent_id, split_percentage, sort_order)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).bind(
       uuid(), li.invoice_id,
       `${li.description ?? "Line item"} (split ${idx + 1}/${resolved.length})`,
+      li.business, li.class,
       r.amount, r.gl_category, CONFIDENCE_LEVEL.HIGH, "SPLIT", 0, 1,
       user(c).id, li.id,
       typeof r.percentage === "number" ? r.percentage : Math.round((r.amount / parentAmount) * 10000) / 100,

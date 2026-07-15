@@ -109,10 +109,19 @@ export function ReviewScanModal({
     if (!window.confirm(msg)) return;
     setDeleting(true);
     try {
-      const res = await api.bulkDeleteInvoices(ids);
+      // v1.9.7 (bug #37): the backend caps each call at 200 ids. Chunk the whole
+      // selection client-side so one click actually deletes everything selected,
+      // instead of silently leaving the overflow behind with a success toast.
+      let deleted = 0;
+      let skipped = 0;
+      for (let i = 0; i < ids.length; i += 200) {
+        const res = await api.bulkDeleteInvoices(ids.slice(i, i + 200));
+        deleted += res.deleted;
+        skipped += res.skipped;
+      }
       toast.success(
-        `Deleted ${res.deleted} invoice${res.deleted === 1 ? "" : "s"}` +
-          (res.skipped > 0 ? ` · ${res.skipped} already gone` : ""),
+        `Deleted ${deleted} invoice${deleted === 1 ? "" : "s"}` +
+          (skipped > 0 ? ` · ${skipped} already gone` : ""),
       );
       onDeleted?.();
       await runScan(); // re-scan so the groups reflect what's left

@@ -158,6 +158,19 @@ invoices.post("/process", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const invoiceId = (body as { invoiceId?: string }).invoiceId;
   if (!invoiceId) return c.json({ error: "invoiceId required" }, 400);
+  // v1.9.7 (bug #4): reprocessing rewrites status to PENDING_APPROVAL and rebuilds
+  // the approval — that must never silently undo an already-decided invoice. Refuse
+  // to reprocess/rescan an APPROVED or EXPORTED one (reject/reroute exist for that).
+  const target = await getInvoice(c.env, invoiceId);
+  if (!target) return c.json({ error: "Invoice not found" }, 404);
+  if (
+    target.status === INVOICE_STATUS.EXPORTED ||
+    target.status === INVOICE_STATUS.APPROVED
+  )
+    return c.json(
+      { error: `Cannot reprocess a ${target.status.toLowerCase()} invoice` },
+      409,
+    );
   // `rescan` (v1.2.1) forces a fresh OCR read of the PDF (re-bills the parser)
   // instead of re-running the rules over the cached extraction.
   const rescan = (body as { rescan?: boolean }).rescan === true;
@@ -388,9 +401,39 @@ invoices.post("/:id/reroute", async (c) => {
 
   const approverUser = await resolveApproverUser(c.env, approvedBy);
 
+  // v1.9.7 (bug #30): rerouting to a DIFFERENT entity must not leave the old
+  // entity's split behind. The export layer books from invoice_allocations /
+  // per-line business+class, not invoice.business, so a stale split would send
+  // the money to the previous entity's classes/GL accounts. Clear the split
+  // artifacts (allocations + per-line entity coding + split_type); for a
+  // per-line split also re-code the leaves under the NEW entity so no
+  // old-entity category lingers.
+  const clearSplit = business !== inv.business && inv.split_type != null;
+  if (clearSplit) {
+    await c.env.DB.prepare(
+      "DELETE FROM invoice_allocations WHERE invoice_id = ?",
+    )
+      .bind(id)
+      .run();
+    await c.env.DB.prepare(
+      "UPDATE line_items SET business = NULL, class = NULL WHERE invoice_id = ?",
+    )
+      .bind(id)
+      .run();
+    if (inv.split_type === "PER_LINE") {
+      await recodeLeafLines(
+        c.env,
+        id,
+        business,
+        inv.vendor,
+        (inv.sales_tax ?? 0) > 0,
+      );
+    }
+  }
+
   // FIX-8b (v1.6.0): a human confirmed routing here — clear location_ambiguous.
   await c.env.DB.prepare(
-    "UPDATE invoices SET business = ?, class = ?, approved_by = ?, status = ?, location_ambiguous = 0 WHERE id = ?",
+    `UPDATE invoices SET business = ?, class = ?, approved_by = ?, status = ?, location_ambiguous = 0${clearSplit ? ", split_type = NULL" : ""} WHERE id = ?`,
   )
     .bind(business, klass, approvedBy, INVOICE_STATUS.PENDING_APPROVAL, id)
     .run();
@@ -478,6 +521,14 @@ invoices.post("/:id/accept-review", async (c) => {
     .bind(id, REQUIRES_MANUAL_REVIEW)
     .run();
   const cleared = clearRes.meta?.changes ?? 0;
+
+  // "These are fine" also confirms routing — clear the location-ambiguous flag
+  // so a location-only review reason is fully resolved (v1.9.7 — bug #11).
+  await c.env.DB.prepare(
+    "UPDATE invoices SET location_ambiguous = 0 WHERE id = ?",
+  )
+    .bind(id)
+    .run();
 
   // If it was bounced back for review, send it forward again to its approver.
   let advanced = false;
@@ -914,12 +965,16 @@ invoices.get("/scan-duplicates", async (c) => {
             status, has_pdf, exported_at, created_at
        FROM invoices
        ${hideArchived ? "WHERE archived_at IS NULL" : ""}
-      ORDER BY created_at ASC
+      ORDER BY created_at DESC
       LIMIT ${CAP + 1}`,
   ).all<ScanRow>();
   const all = res.results ?? [];
   const capped = all.length > CAP;
-  const rows = capped ? all.slice(0, CAP) : all;
+  // Keep the most-recent CAP invoices (where accidental re-uploads happen —
+  // an ASC cap would blind the scan to everything after the oldest 4000), then
+  // restore oldest-first so group.invoices[0] stays the canonical keeper
+  // (v1.9.7 — bug #25).
+  const rows = (capped ? all.slice(0, CAP) : all).reverse();
 
   const normVendor = (v: string) =>
     (v || "").trim().toUpperCase().replace(/\s+/g, " ");
@@ -945,7 +1000,11 @@ invoices.get("/scan-duplicates", async (c) => {
     const num = normNumber(r.invoice_number);
     if (num && !isSynthetic(r.invoice_number)) continue; // numbered → pass 1 only
     const cents = Math.round((Number(r.total_amount) || 0) * 100);
-    const key = `${normVendor(r.vendor)}|${cents}`;
+    // Include the invoice date: two true re-uploads share it, but distinct-month
+    // recurring bills (un-numbered rent/utilities, same vendor + amount) differ,
+    // so they must NOT be grouped as duplicates (v1.9.7 — bug #6).
+    const period = (r.inv_date || "").slice(0, 10);
+    const key = `${normVendor(r.vendor)}|${cents}|${period}`;
     (amountGroups.get(key) ?? amountGroups.set(key, []).get(key)!).push(r);
   }
 
@@ -1095,8 +1154,18 @@ invoices.patch("/:id", async (c) => {
   const existing = await getInvoice(c.env, id);
   if (!existing) return c.json({ error: "Not found" }, 404);
   if (!canViewInvoice(c, existing)) return c.json({ error: "Forbidden" }, 403);
+  // v1.9.7 (bug #32): don't mutate a finalized invoice, matching every other
+  // mutating route; and never write an arbitrary/misspelled status that would
+  // make the invoice vanish from every status-filtered queue.
+  if (existing.status === INVOICE_STATUS.EXPORTED)
+    return c.json({ error: "Invoice already exported" }, 409);
 
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  if (
+    "status" in body &&
+    !(Object.values(INVOICE_STATUS) as unknown[]).includes(body.status)
+  )
+    return c.json({ error: "Invalid status" }, 400);
   const allowed = ["vendor", "subtotal", "sales_tax", "total_amount", "inv_date", "due_date", "business", "class", "approved_by", "status"];
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -1154,8 +1223,12 @@ invoices.post("/:id/approve", async (c) => {
     return c.json({ error: "Only the assigned executive can approve" }, 403);
   if (inv.status === INVOICE_STATUS.EXPORTED)
     return c.json({ error: "Invoice already exported" }, 409);
-  if (!(await splitReady(c.env)))
-    return c.json({ error: "Splitting needs a one-time database setup — run the migration." }, 503);
+  // Only a currently-pending invoice can be approved — blocks double-approval
+  // and approving one that was rejected / sent back to review (v1.9.7). (No
+  // splitReady gate here: approve touches only invoices/approvals/audit, never
+  // invoice_allocations, so a missing split migration must not freeze approvals.)
+  if (inv.status !== INVOICE_STATUS.PENDING_APPROVAL)
+    return c.json({ error: "Invoice is not pending approval" }, 409);
 
   const body = await c.req.json().catch(() => ({}));
   const comment = (body as { comment?: string }).comment?.trim();
@@ -1199,6 +1272,69 @@ async function splitReady(env: AppEnv["Bindings"]): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Re-derive AI coding (gl_category / item_type / requires_review) for every
+ * non-overridden leaf line of an invoice, under `entity`. Used when a PER_LINE
+ * split is cleared or a rerouted split changes entity: the per-line split had
+ * overwritten each line's gl_category/item_type (and possibly parked it on the
+ * REQUIRES_MANUAL_REVIEW sentinel), so re-coding restores the true AI category
+ * instead of leaving a stale/blocking value (v1.9.7 — bugs #13/#30). Manual
+ * overrides are preserved. Only call for PER_LINE splits, so ordinary
+ * (allocation) splits — whose line coding was never touched — are not re-flagged.
+ */
+async function recodeLeafLines(
+  env: AppEnv["Bindings"],
+  invoiceId: string,
+  entity: string | null,
+  vendor: string,
+  salesTaxPresent: boolean,
+): Promise<void> {
+  const rows = (
+    await env.DB.prepare(
+      "SELECT id, description, amount, manually_overridden, split_parent_id FROM line_items WHERE invoice_id = ?",
+    )
+      .bind(invoiceId)
+      .all<{
+        id: string;
+        description: string | null;
+        amount: number | null;
+        manually_overridden: number | null;
+        split_parent_id: string | null;
+      }>()
+  ).results ?? [];
+  const parentIds = new Set(
+    rows.map((r) => r.split_parent_id).filter((x): x is string => !!x),
+  );
+  const leaves = rows.filter((r) => !parentIds.has(r.id));
+  const vendorMapping = findVendorMapping(vendor, await loadVendorMappings(env));
+  const stmts: D1PreparedStatement[] = [];
+  for (const r of leaves) {
+    if (r.manually_overridden) continue; // never clobber a human override
+    const coded = codeLineItem({
+      description: r.description ?? "",
+      vendor,
+      vendorMapping,
+      business: (entity ?? "Admin") as BusinessEntity,
+      salesTaxPresent,
+      amount: r.amount,
+    });
+    const stillReview = coded.category === REQUIRES_MANUAL_REVIEW;
+    stmts.push(
+      env.DB.prepare(
+        "UPDATE line_items SET gl_category = ?, item_type = ?, requires_review = ?, confidence_level = ?, logic_path = ? WHERE id = ?",
+      ).bind(
+        coded.category,
+        coded.itemType ?? null,
+        stillReview ? 1 : 0,
+        stillReview ? CONFIDENCE_LEVEL.MANUAL_REVIEW : coded.confidence,
+        coded.logic,
+        r.id,
+      ),
+    );
+  }
+  if (stmts.length) await env.DB.batch(stmts);
 }
 
 /** True once the archive migration (invoices.archived_at column) has been run. */
@@ -1252,22 +1388,28 @@ invoices.post("/:id/split-even", async (c) => {
   const n = classes.length;
   const total = inv.total_amount;
   const per = roundCents(total / n);
-  const pct = roundCents(100 / n);
+  const perPct = roundCents(100 / n);
 
   const allocations: InvoiceAllocationRow[] = [];
   let runningSum = 0;
+  let runningPct = 0;
   const at = nowIso();
   for (let i = 0; i < n; i++) {
     const isLast = i === n - 1;
     // Last row absorbs the rounding remainder so the sum equals total exactly.
     const amount = isLast ? roundCents(total - runningSum) : per;
     runningSum = roundCents(runningSum + amount);
+    // v1.9.7 (bug #35): the last row's PERCENTAGE also absorbs the remainder, so
+    // the stored percentages sum to exactly 100 and the last row's label matches
+    // its remainder-corrected amount (33.34 ↔ 33.34%, not 33.33%).
+    const percentage = isLast ? roundCents(100 - runningPct) : perPct;
+    runningPct = roundCents(runningPct + percentage);
     const row: InvoiceAllocationRow = {
       id: uuid(),
       invoice_id: id,
       business: inv.business ?? "",
       class: classes[i],
-      percentage: pct,
+      percentage,
       amount,
       gl_account: glAccount,
       source: "QUICK_EVEN",
@@ -1286,7 +1428,11 @@ invoices.post("/:id/split-even", async (c) => {
       .run();
   }
 
-  await c.env.DB.prepare("UPDATE invoices SET split_type = ? WHERE id = ?")
+  // A split is an explicit human routing decision, so clear the ingest-time
+  // "location needs confirmation" flag, mirroring reroute/PATCH (v1.9.7).
+  await c.env.DB.prepare(
+    "UPDATE invoices SET split_type = ?, location_ambiguous = 0 WHERE id = ?",
+  )
     .bind("QUICK_EVEN", id)
     .run();
 
@@ -1388,7 +1534,11 @@ invoices.post("/:id/split-allocations", async (c) => {
       .run();
   }
 
-  await c.env.DB.prepare("UPDATE invoices SET split_type = ? WHERE id = ?")
+  // Clear the "location needs confirmation" flag — a custom split explicitly
+  // assigns entity/class, so routing is resolved (v1.9.7).
+  await c.env.DB.prepare(
+    "UPDATE invoices SET split_type = ?, location_ambiguous = 0 WHERE id = ?",
+  )
     .bind("CUSTOM", id)
     .run();
 
@@ -1473,7 +1623,11 @@ invoices.post("/:id/split-lines", async (c) => {
     c.env.DB.prepare("DELETE FROM invoice_allocations WHERE invoice_id = ?").bind(id),
   );
   stmts.push(
-    c.env.DB.prepare("UPDATE invoices SET split_type = ? WHERE id = ?").bind("PER_LINE", id),
+    // Per-line split assigns entity/class to every line — routing resolved,
+    // so clear the "location needs confirmation" flag (v1.9.7).
+    c.env.DB.prepare(
+      "UPDATE invoices SET split_type = ?, location_ambiguous = 0 WHERE id = ?",
+    ).bind("PER_LINE", id),
   );
   await c.env.DB.batch(stmts);
 
@@ -1504,6 +1658,20 @@ invoices.delete("/:id/split", async (c) => {
   await c.env.DB.prepare(
     "UPDATE line_items SET business = NULL, class = NULL WHERE invoice_id = ?",
   ).bind(id).run();
+  // A per-line split overwrote each line's gl_category/item_type/requires_review
+  // (an "Other" type parks the line on the manual-review sentinel). Nulling only
+  // business/class would leave that stale coding behind — a line stuck at the
+  // sentinel blocks export and can't be cleared via accept-review. Re-code the
+  // leaves so they revert to their true AI category (v1.9.7 — bug #13).
+  if (inv.split_type === "PER_LINE") {
+    await recodeLeafLines(
+      c.env,
+      id,
+      inv.business,
+      inv.vendor,
+      (inv.sales_tax ?? 0) > 0,
+    );
+  }
   await c.env.DB.prepare("UPDATE invoices SET split_type = NULL WHERE id = ?")
     .bind(id)
     .run();
@@ -1532,8 +1700,11 @@ invoices.post("/:id/reject", async (c) => {
     return c.json({ error: "Only the assigned executive can reject" }, 403);
   if (inv.status === INVOICE_STATUS.EXPORTED)
     return c.json({ error: "Invoice already exported" }, 409);
-  if (!(await splitReady(c.env)))
-    return c.json({ error: "Splitting needs a one-time database setup — run the migration." }, 503);
+  // Only a currently-pending invoice can be rejected — blocks a stale tab from
+  // overwriting an already-approved/rejected decision (v1.9.7). (No splitReady
+  // gate: reject never touches invoice_allocations.)
+  if (inv.status !== INVOICE_STATUS.PENDING_APPROVAL)
+    return c.json({ error: "Invoice is not pending approval" }, 409);
 
   await c.env.DB.prepare("UPDATE invoices SET status = ? WHERE id = ?")
     .bind(INVOICE_STATUS.REJECTED, id)

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Download,
@@ -11,6 +11,7 @@ import {
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Button, Spinner, EmptyState } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
+import { useInvoiceRefresh } from "@/lib/invoiceRefresh";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { formatCurrency, formatDate, cn, downloadBlob } from "@/lib/utils";
@@ -98,6 +99,15 @@ export default function ExportPage() {
   const { data: historyData, refetch: refetchHistory } = useApi<{
     exports: (ExportRow & { exported_by_name: string })[];
   }>("/api/export");
+
+  // v1.9.7 (bug #36): keep "Export Ready" live — an approval made in another
+  // session/window now surfaces here on focus + poll + the refresh bus, instead
+  // of only after navigating away and back.
+  const refreshAll = useCallback(() => {
+    refetch({ silent: true });
+    refetchHistory({ silent: true });
+  }, [refetch, refetchHistory]);
+  useInvoiceRefresh(refreshAll, 15000);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);

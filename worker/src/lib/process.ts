@@ -5,7 +5,7 @@ import {
   normalizeExtract,
   type ExtractedInvoice,
 } from "./extract";
-import { getPdf, putPdf, pdfKey, putReductoRaw } from "./storage";
+import { getPdf, putPdf, deletePdf, pdfKey, putReductoRaw } from "./storage";
 import { runRulesPipeline } from "./pipeline";
 import { audit, resolveApproverUser, getInvoice } from "./db";
 import { sendApprovalEmail } from "./email";
@@ -68,19 +68,27 @@ export async function recomputeReconciliation(
     const rows =
       (
         await env.DB.prepare(
-          "SELECT id, amount, split_parent_id FROM line_items WHERE invoice_id = ?",
+          "SELECT id, amount, split_parent_id, gl_category FROM line_items WHERE invoice_id = ?",
         )
           .bind(invoiceId)
-          .all<{ id: string; amount: number | null; split_parent_id: string | null }>()
+          .all<{
+            id: string;
+            amount: number | null;
+            split_parent_id: string | null;
+            gl_category: string | null;
+          }>()
       ).results ?? [];
     const parentIds = new Set(
       rows.map((r) => r.split_parent_id).filter((x): x is string => !!x),
     );
     const round2 = (n: number) => Math.round(n * 100) / 100;
-    const leafSum = rows
-      .filter((r) => !parentIds.has(r.id))
-      .reduce((s, r) => s + (r.amount ?? 0), 0);
-    const expected = round2(leafSum + (inv.sales_tax ?? 0));
+    const leafRows = rows.filter((r) => !parentIds.has(r.id));
+    const leafSum = leafRows.reduce((s, r) => s + (r.amount ?? 0), 0);
+    // v1.9.7 (bug #19): when sales tax is ALSO itemized as a leaf line, it is
+    // already in leafSum — don't add the header sales_tax again (that produced a
+    // phantom reconciliation gap of −tax). Mirrors the export tax-dedup guard.
+    const hasTaxLine = leafRows.some((r) => r.gl_category === "Sales/Use Tax");
+    const expected = round2(leafSum + (hasTaxLine ? 0 : inv.sales_tax ?? 0));
     const delta = round2((inv.total_amount ?? 0) - expected);
     const reconciliationDelta = Math.abs(delta) > 0.02 ? delta : null;
 
@@ -288,19 +296,35 @@ export async function processInvoiceAI(
       }
     }
 
-    const subtotal =
-      inv.subtotal == null && result.prompt1.Subtotal
+    // v1.9.7 (bug #20): a rescan re-bills the OCR specifically to correct a
+    // mis-read header, so PREFER the freshly extracted header values on rescan
+    // (falling back to the stored value only when the fresh field is absent). A
+    // normal reprocess keeps the "adopt only when empty" behavior so it never
+    // clobbers a value the first pass already captured.
+    const subtotal = opts.rescan
+      ? result.prompt1.Subtotal
+        ? parseAmount(result.prompt1.Subtotal)
+        : inv.subtotal
+      : inv.subtotal == null && result.prompt1.Subtotal
         ? parseAmount(result.prompt1.Subtotal)
         : inv.subtotal;
-    const salesTax =
-      (inv.sales_tax == null || inv.sales_tax === 0) && result.prompt1.SalesTax
+    const salesTax = opts.rescan
+      ? result.prompt1.SalesTax
+        ? parseAmount(result.prompt1.SalesTax)
+        : inv.sales_tax
+      : (inv.sales_tax == null || inv.sales_tax === 0) && result.prompt1.SalesTax
         ? parseAmount(result.prompt1.SalesTax)
         : inv.sales_tax;
-    const invDate = inv.inv_date ?? toIsoDate(result.prompt1.InvDate);
-    const dueDate =
-      inv.due_date ??
-      toIsoDate(result.prompt1.DueDate) ??
-      toIsoDate(result.prompt1.InvDate);
+    const invDate = opts.rescan
+      ? toIsoDate(result.prompt1.InvDate) ?? inv.inv_date
+      : inv.inv_date ?? toIsoDate(result.prompt1.InvDate);
+    const dueDate = opts.rescan
+      ? toIsoDate(result.prompt1.DueDate) ??
+        toIsoDate(result.prompt1.InvDate) ??
+        inv.due_date
+      : inv.due_date ??
+        toIsoDate(result.prompt1.DueDate) ??
+        toIsoDate(result.prompt1.InvDate);
 
     await env.DB.prepare(
       `UPDATE invoices SET business=?, class=?, approved_by=?, status=?,
@@ -652,8 +676,8 @@ export async function ingestInvoicePdf(
   }
 
   const id = uuid();
-  try {
-    await env.DB.prepare(
+  const insertInvoice = (invNum: string) =>
+    env.DB.prepare(
       `INSERT INTO invoices (id, vendor, invoice_number, subtotal, sales_tax, total_amount,
          inv_date, due_date, business, class, status, has_pdf, submitted_by, submission_type,
          textract_raw, shipping)
@@ -662,7 +686,7 @@ export async function ingestInvoicePdf(
       .bind(
         id,
         vendor,
-        invoiceNumber,
+        invNum,
         data.subtotal,
         data.sales_tax ?? 0,
         total,
@@ -678,16 +702,28 @@ export async function ingestInvoicePdf(
         data.shipping ?? null, // FIX-9: persist header shipping at ingest
       )
       .run();
+  try {
+    await insertInvoice(invoiceNumber);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("UNIQUE"))
+    if (!msg.includes("UNIQUE")) throw e;
+    // The DB's UNIQUE(vendor, invoice_number, total_amount) fired.
+    if (override) {
+      // v1.9.7 (bug #26): "Upload anyway" must be able to force an intentional
+      // exact duplicate through — disambiguate the number so it lands.
+      await insertInvoice(`${invoiceNumber}~dup-${id.slice(0, 8)}`);
+    } else {
+      // v1.9.7 (bug #27): include the existing invoice id so the Upload card can
+      // still show the "View existing" link on a UNIQUE-constraint duplicate.
+      const dup = await findDuplicate(env, vendor, invoiceNumber, total);
       return {
         duplicate: true,
+        existingInvoiceId: dup?.id,
         vendor,
         invoice_number: invoiceNumber,
         total_amount: total,
       };
-    throw e;
+    }
   }
 
   const key = pdfKey(id);
@@ -718,8 +754,27 @@ export async function ingestInvoicePdf(
     note: source ? `Ingested ${fileName} from ${source}` : `Uploaded ${fileName}`,
   });
 
-  const result = await processInvoiceAI(env, id, submittedBy);
-  return { duplicate: false, invoiceId: id, ...result };
+  // v1.9.7 (bug #29): the row/PDF/audit are already committed. If AI coding
+  // throws, roll them back so the invoice isn't left orphaned in PROCESSING
+  // (invisible to the approval queue) — otherwise the Upload-page Retry re-reads
+  // the same vendor+number+total and is bounced as a "duplicate" against the ghost.
+  try {
+    const result = await processInvoiceAI(env, id, submittedBy);
+    return { duplicate: false, invoiceId: id, ...result };
+  } catch (err) {
+    try {
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM approvals WHERE invoice_id = ?").bind(id),
+        env.DB.prepare("DELETE FROM line_items WHERE invoice_id = ?").bind(id),
+        env.DB.prepare("DELETE FROM pdf_files WHERE invoice_id = ?").bind(id),
+        env.DB.prepare("DELETE FROM invoices WHERE id = ?").bind(id),
+      ]);
+      await deletePdf(env, key);
+    } catch (cleanupErr) {
+      console.error("[ingest] orphan cleanup after AI failure failed:", cleanupErr);
+    }
+    throw err;
+  }
 }
 
 /** Duplicate detection (vendor + invoice# + total) — Brief §13. */
@@ -729,8 +784,10 @@ export async function findDuplicate(
   invoiceNumber: string,
   totalAmount: number,
 ): Promise<InvoiceRow | null> {
+  // v1.9.7 (bug #28): normalize vendor + number case/whitespace so a re-upload
+  // whose OCR read the vendor as "SalesComm" still matches stored "SALESCOMM".
   return env.DB.prepare(
-    "SELECT * FROM invoices WHERE vendor = ? AND invoice_number = ? AND total_amount = ? LIMIT 1",
+    "SELECT * FROM invoices WHERE UPPER(TRIM(vendor)) = UPPER(TRIM(?)) AND UPPER(TRIM(invoice_number)) = UPPER(TRIM(?)) AND total_amount = ? LIMIT 1",
   )
     .bind(vendor, invoiceNumber, totalAmount)
     .first<InvoiceRow>();
@@ -772,8 +829,10 @@ export async function findDuplicateByNumber(
   const total = Number.isFinite(totalAmount) ? totalAmount : 0;
   const tolerance = Math.max(1, Math.abs(total) * 0.01);
   return env.DB.prepare(
+    // v1.9.7 (bug #28): normalize the vendor case/whitespace too — OCR casing
+    // drift ("SALESCOMM" vs "SalesComm") otherwise defeats this dedup entirely.
     `SELECT * FROM invoices
-       WHERE vendor = ? AND UPPER(TRIM(invoice_number)) = ? AND ABS(total_amount - ?) <= ?
+       WHERE UPPER(TRIM(vendor)) = UPPER(TRIM(?)) AND UPPER(TRIM(invoice_number)) = ? AND ABS(total_amount - ?) <= ?
        ORDER BY ABS(total_amount - ?) ASC, created_at ASC
        LIMIT 1`,
   )

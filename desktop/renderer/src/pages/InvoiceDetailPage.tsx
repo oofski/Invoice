@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -16,6 +16,7 @@ import { AuditTimeline } from "@/components/AuditTimeline";
 import { SplitSummary } from "@/components/SplitSummary";
 import { Card, Button, Spinner } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
+import { useInvoiceRefresh } from "@/lib/invoiceRefresh";
 import { useProfile } from "@/components/ProfileProvider";
 import { api, ApiError } from "@/lib/api";
 import { downloadBlob } from "@/lib/utils";
@@ -57,6 +58,11 @@ export default function InvoiceDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [acceptingReview, setAcceptingReview] = useState(false);
+
+  // v1.9.7 (bug #36): keep this page live under changes made elsewhere (another
+  // window/session approving, etc.) — subscribe to the refresh bus + focus + poll.
+  const refreshSilent = useCallback(() => refetch({ silent: true }), [refetch]);
+  useInvoiceRefresh(refreshSilent, 15000);
 
   const invoice = data?.invoice;
   const lineItems = useMemo(() => invoice?.line_items ?? [], [invoice]);
@@ -102,7 +108,21 @@ export default function InvoiceDetailPage() {
     (profile.role === ROLES.ADMIN ||
       profile.role === ROLES.ACCOUNTANT ||
       profile.role === ROLES.CREDIT_CARD_ACCOUNTANT);
-  const showReviewBanner = reviewCount > 0 || isNeedsReview;
+  // v1.9.7 (bug #11): a location-only review flag (no flagged lines, not
+  // NEEDS_REVIEW) still parks the invoice in the Manual Review Queue — surface
+  // the banner so "These are fine — proceed" can clear it.
+  const locationOnlyReview =
+    !!invoice?.location_ambiguous && reviewCount === 0 && !isNeedsReview;
+  const showReviewBanner = reviewCount > 0 || isNeedsReview || locationOnlyReview;
+
+  // v1.9.7 (bug #4): reprocess/rescan rebuild the AI coding + approval, so they
+  // must not be offered on an already-approved or exported invoice (the Worker
+  // now 409s too). Reject/reroute exist for changing a decided invoice.
+  const canReprocess =
+    !!invoice &&
+    (profile.role === ROLES.ACCOUNTANT || profile.role === ROLES.ADMIN) &&
+    invoice.status !== INVOICE_STATUS.EXPORTED &&
+    invoice.status !== INVOICE_STATUS.APPROVED;
 
   async function acceptReview() {
     setAcceptingReview(true);
@@ -198,7 +218,10 @@ export default function InvoiceDetailPage() {
     }
   }
 
-  if (loading) {
+  // v1.9.7 (bug #24): first-load only. `loading` also toggles on background/
+  // silent refetches; blanking the page then unmounts the PDF pane (re-download
+  // + lost scroll) on every inline edit. With data present, stay on screen.
+  if (loading && !data) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
         <Spinner />
@@ -242,8 +265,7 @@ export default function InvoiceDetailPage() {
               Download PDF
             </Button>
           )}
-          {(profile.role === ROLES.ACCOUNTANT ||
-            profile.role === ROLES.ADMIN) && (
+          {canReprocess && (
             <>
               <Button
                 variant="secondary"
@@ -317,6 +339,12 @@ export default function InvoiceDetailPage() {
                             {reviewCount === 1 ? " is" : "s are"} flagged.
                           </>
                         )}
+                      </>
+                    ) : locationOnlyReview ? (
+                      <>
+                        The location for this invoice was decided on shared
+                        evidence and needs confirmation. Confirm the routing (or
+                        edit it) to clear this flag.
                       </>
                     ) : (
                       <>

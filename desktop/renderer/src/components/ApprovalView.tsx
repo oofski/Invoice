@@ -30,7 +30,7 @@ import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { useProfile } from "@/components/ProfileProvider";
 import { formatCurrency, formatDate, ageLabel, cn, sameName } from "@/lib/utils";
-import { INVOICE_STATUS, ROLES, BUSINESS_CLASSES } from "@/lib/constants";
+import { INVOICE_STATUS, ROLES } from "@/lib/constants";
 import type { InvoiceRow, InvoiceWithRelations } from "@/lib/types";
 
 interface DetailResponse {
@@ -238,10 +238,11 @@ function ApprovalDetail({
   const isAssigned =
     sameName(invoice?.approved_by, profile.name) || profile.role === ROLES.ADMIN;
   const isExec = profile.role === ROLES.EXECUTIVE;
-  const classes = invoice?.business
-    ? (BUSINESS_CLASSES[invoice.business] ?? [])
-    : [];
-  const canSplit = classes.length >= 2;
+  // v1.9.7 (bugs #16/#18): the Split modal supports cross-entity and per-line
+  // allocation, so it does NOT require the invoice's OWN business to have ≥2
+  // classes — that gate wrongly greyed out Split for single-class entities
+  // (Chicago/Admin/Nala). Only gate on not-yet-exported.
+  const canSplit = invoice?.status !== INVOICE_STATUS.EXPORTED;
 
   async function approve() {
     setBusy(true);
@@ -300,10 +301,28 @@ function ApprovalDetail({
     }
   }
 
-  if (loading || !invoice) {
+  // v1.9.7 (bug #24): guard on first-load only (loading AND no data yet).
+  // `loading` also toggles on every background/silent refetch; blanking the
+  // whole panel then unmounts the PDF pane, forcing a re-download and losing
+  // scroll position on each inline edit. With data present, stay on screen.
+  if (loading && !invoice) {
     return (
       <div className="flex h-full items-center justify-center">
         <Spinner />
+      </div>
+    );
+  }
+  // Loaded but nothing to show (e.g. load error / removed) — narrows `invoice`.
+  if (!invoice) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-ink-muted">
+        Couldn&apos;t load this invoice.{" "}
+        <button
+          onClick={() => refetch()}
+          className="ml-1 font-medium text-accent hover:underline"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -393,11 +412,6 @@ function ApprovalDetail({
                   size="lg"
                   onClick={() => setSplitOpen(true)}
                   disabled={!canSplit}
-                  title={
-                    canSplit
-                      ? undefined
-                      : "This business has a single class — nothing to split."
-                  }
                   className="py-4 text-base"
                 >
                   <Split className="h-5 w-5" /> Split

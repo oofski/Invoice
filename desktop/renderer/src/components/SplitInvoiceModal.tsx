@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Plus, Trash2, CheckSquare } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button, Input } from "@/components/ui/primitives";
@@ -68,6 +68,24 @@ export function SplitInvoiceModal({
   const [bulkClass, setBulkClass] = useState("");
   const [bulkType, setBulkType] = useState("");
   const [bulkCustomType, setBulkCustomType] = useState("");
+
+  // v1.9.7 (bug #1): the state above is seeded once via lazy useState, but this
+  // modal stays mounted across opens and across invoice switches (the approvals
+  // detail isn't keyed by id), so without this it would show the LAST invoice's
+  // (or last-edited) allocation — a silent cross-invoice mis-allocation. Re-seed
+  // every time it (re)opens or the invoice changes.
+  useEffect(() => {
+    if (!open) return;
+    setRows(seedRows(invoice));
+    setLineState(seedLineState(invoice));
+    setMode("even");
+    setSelectedIds(new Set());
+    setBulkBusiness("");
+    setBulkClass("");
+    setBulkType("");
+    setBulkCustomType("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, invoice.id]);
 
   const lineItems = useMemo(
     () => invoice.line_items.filter((li) => !li.split_parent_id),
@@ -214,26 +232,36 @@ export function SplitInvoiceModal({
   }
 
   async function splitLines() {
-    const lines: SplitLineInput[] = lineItems
-      .map((li) => {
-        const state = lineState[li.id];
-        const business = state?.business || invoice.business || "";
-        const klass = state?.class || invoice.class || "";
-        const line: SplitLineInput = {
-          lineItemId: li.id,
-          business,
-          class: klass,
-        };
-        if (state?.type) {
-          line.type = state.type;
-          if (state.type === "Other" && state.customType.trim()) {
-            line.customType = state.customType.trim();
-          }
+    const lines: SplitLineInput[] = lineItems.map((li) => {
+      const state = lineState[li.id];
+      const business = state?.business || invoice.business || "";
+      const klass = state?.class || invoice.class || "";
+      const line: SplitLineInput = {
+        lineItemId: li.id,
+        business,
+        class: klass,
+      };
+      if (state?.type) {
+        line.type = state.type;
+        if (state.type === "Other" && state.customType.trim()) {
+          line.customType = state.customType.trim();
         }
-        return line;
-      })
-      .filter((l) => l.business && l.class);
+      }
+      return line;
+    });
 
+    // v1.9.7 (bug #10): don't silently DROP lines that resolve to an empty
+    // business/class. For a location-ambiguous invoice (invoice.class is null),
+    // any line the reviewer didn't explicitly code would otherwise be filtered
+    // out and left uncoded — contradicting the modal's own "unset lines default
+    // to the invoice's business/class" promise. Block the save and name them.
+    const unassigned = lines.filter((l) => !(l.business && l.class));
+    if (unassigned.length) {
+      toast.error(
+        `${unassigned.length} line${unassigned.length === 1 ? "" : "s"} still need a business and class — assign them before saving.`,
+      );
+      return;
+    }
     if (lines.length === 0) {
       toast.error("Assign a business and class to at least one line");
       return;
@@ -422,8 +450,9 @@ export function SplitInvoiceModal({
           <div className="flex min-h-0 flex-1 flex-col gap-3">
             <p className="shrink-0 text-sm text-ink-muted">
               Assign a business, class and type to each line item. Lines left
-              unset default to the invoice&apos;s business/class. Select
-              multiple rows to bulk-apply settings.
+              unset fall back to the invoice&apos;s business/class when it has
+              one; if the invoice&apos;s location isn&apos;t set, every line must
+              be assigned before saving. Select multiple rows to bulk-apply settings.
             </p>
 
             {/* Bulk-apply bar — visible when ≥1 row is checked */}

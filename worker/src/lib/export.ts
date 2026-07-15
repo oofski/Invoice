@@ -312,6 +312,28 @@ export function generateQboBillsCsv(invoices: ExportInvoice[]): {
         memo(invoice),
       ]);
     }
+    // v1.9.7 (bug #5): sales tax is a header value, not a leaf line, so the rows
+    // above foot to (total − tax) and the imported bill was short by the tax.
+    // Emit a Sales/Use Tax line — mirroring the factor path and the PER_LINE CSV
+    // branch. Guard on real leaves (the total_amount fallback already includes
+    // tax) and skip when tax is already itemized as a leaf.
+    const hasTaxLine = leaf.some((li) => li.gl_category === "Sales/Use Tax");
+    if (leaf.length > 0 && (invoice.sales_tax ?? 0) > 0 && !hasTaxLine) {
+      pushRow([
+        invoice.invoice_number,
+        invoice.vendor,
+        toQboDate(invoice.inv_date),
+        toQboDate(invoice.due_date),
+        "Net 30",
+        formatCategoryAccount(invoice.business, "Sales/Use Tax"),
+        "Sales/Use Tax",
+        (invoice.sales_tax ?? 0).toFixed(2),
+        invoice.class && invoice.class !== "None"
+          ? `${invoice.business}:${invoice.class}`
+          : (invoice.business ?? ""),
+        memo(invoice),
+      ]);
+    }
   }
   return { csv: rows.join("\r\n"), rowCount };
 }

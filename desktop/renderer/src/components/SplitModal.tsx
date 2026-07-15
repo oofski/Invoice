@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button, Input } from "@/components/ui/primitives";
@@ -42,6 +42,15 @@ export function SplitModal({
       { amount: "", gl_category: "" },
     ]);
   }
+
+  // v1.9.7 (bugs #15/#34): this modal stays mounted across opens, and reset()
+  // only ran on a successful submit — so Cancel/backdrop left the prior line's
+  // amounts + GL categories in state, leaking them (and their entity-specific
+  // categories) onto the next line opened. Re-seed on every open / line change.
+  useEffect(() => {
+    if (open) reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, lineItem?.id]);
 
   async function submit() {
     if (!lineItem) return;

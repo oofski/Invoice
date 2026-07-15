@@ -79,6 +79,16 @@ async function assembleExportInvoices(
   // flags (concrete-category requires_review, ambiguity, reconciliation) only WARN.
   // Batch the id list (one `?` per id + the gl_category param). Each invoice_id
   // lives in exactly one batch, so the per-batch GROUP BY rows just concatenate.
+  // v1.9.7 (bug #14): allocation-based splits (QUICK_EVEN / CUSTOM) export
+  // entirely from invoice_allocations, not per-line coding — so stale line-level
+  // review flags / sentinel categories on those invoices don't affect the output
+  // and must not block or warn the export. Exclude them from the line guards.
+  const allocSplit = new Set(
+    invoices
+      .filter((i) => i.split_type === "QUICK_EVEN" || i.split_type === "CUSTOM")
+      .map((i) => i.id),
+  );
+
   const blockingRows: { invoice_id: string; c: number }[] = [];
   for (const batch of chunk(invoiceIds)) {
     const ph = batch.map(() => "?").join(",");
@@ -87,7 +97,9 @@ async function assembleExportInvoices(
          WHERE gl_category = ? AND invoice_id IN (${ph})
          GROUP BY invoice_id`,
     ).bind(REQUIRES_MANUAL_REVIEW, ...batch).all<{ invoice_id: string; c: number }>();
-    blockingRows.push(...(blocking.results ?? []));
+    blockingRows.push(
+      ...(blocking.results ?? []).filter((r) => !allocSplit.has(r.invoice_id)),
+    );
   }
   if (blockingRows.length) {
     const blockingMap: Record<string, number> = {};
@@ -122,7 +134,9 @@ async function assembleExportInvoices(
            WHERE requires_review = 1 AND gl_category != ? AND invoice_id IN (${ph})
            GROUP BY invoice_id`,
       ).bind(REQUIRES_MANUAL_REVIEW, ...batch).all<{ invoice_id: string; c: number }>();
-      flagRows.push(...(flags.results ?? []));
+      flagRows.push(
+        ...(flags.results ?? []).filter((r) => !allocSplit.has(r.invoice_id)),
+      );
     }
     const flaggedLines: Record<string, number> = {};
     for (const r of flagRows) flaggedLines[r.invoice_id] = r.c;

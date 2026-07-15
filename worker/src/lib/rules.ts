@@ -15,6 +15,7 @@ import {
   BONNIE_KEYWORDS,
   LISA_INVENTORY_KEYWORDS,
   isCategoryValidForEntity,
+  glAccountNumber,
   type Approver,
   type BusinessEntity,
   type ClassName,
@@ -719,13 +720,20 @@ export function codeLineItem(opts: {
   // level — never code a line to a category the entity can't export with a number.
   // `itemType` (v1.1.8 N) is set only by the L2.5 default-tax branches so the
   // auto-tagged Retail/Backbar Type persists (drives per-line export tax + exec split).
+  // v1.9.7 (bugs #2/#3): AUTO-coding must resolve to a REAL account for this
+  // entity. isCategoryValidForEntity was loosened (v1.9.3) to let the manual
+  // picker offer every category, but that let auto-coding pick a category the
+  // entity has no COA account for — which then exported with a blank account.
+  // Require a non-empty glAccountNumber here so account-less categories fall
+  // through to manual review instead (the manual picker stays permissive).
   const gated = (
     category: string,
     confidence: ConfidenceLevel,
     logic: string,
     itemType?: ItemType,
   ): Coded | null =>
-    isCategoryValidForEntity(business, category)
+    isCategoryValidForEntity(business, category) &&
+    glAccountNumber(business, category) !== ""
       ? { category, confidence, logic, ...(itemType ? { itemType } : {}) }
       : null;
 
@@ -764,7 +772,7 @@ export function codeLineItem(opts: {
   // L2 — absolute vendor → category match (entity-gated). If the mapped category
   // is not valid for this entity, fall through rather than force an invalid one.
   const vCat = vendorCategory(vendor);
-  if (vCat && isCategoryValidForEntity(business, vCat))
+  if (vCat && isCategoryValidForEntity(business, vCat) && glAccountNumber(business, vCat) !== "")
     return { category: vCat, confidence: CONFIDENCE_LEVEL.HIGH, logic: "LEVEL 2 VENDOR" };
 
   // L2 — admin vendor mapping. An explicit gl_override to a NON-product category
@@ -870,7 +878,8 @@ export function codeLineItem(opts: {
     sugg &&
     sugg !== REQUIRES_MANUAL_REVIEW &&
     !PRODUCT_CATEGORIES.has(sugg) &&
-    isCategoryValidForEntity(business, sugg)
+    isCategoryValidForEntity(business, sugg) &&
+    glAccountNumber(business, sugg) !== "" // v1.9.7: don't auto-code to a blank account
   )
     return { category: sugg, confidence: CONFIDENCE_LEVEL.MEDIUM, logic: "REDUCTO" };
 
