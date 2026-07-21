@@ -191,7 +191,9 @@ export function validateLineCoding(
       if (roundCents(amt) < 0) {
         return { ok: false, error: `Amounts cannot be negative (${a.entity_name})` };
       }
-      lineSum += amt;
+      // v1.9.11 (M9): sum the ROUNDED per-row value so validation matches the
+      // per-row roundCents() applied on insert.
+      lineSum += roundCents(amt);
     }
     // Per-line reconcile: allocations must sum to the line amount, exact-to-cent.
     if (roundCents(lineSum) !== roundCents(lineAmt)) {

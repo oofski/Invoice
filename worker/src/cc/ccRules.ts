@@ -53,7 +53,10 @@ export function validateSplits(amount: number, rows: EntitySplitInput[]): SplitV
     if (roundCents(a) < 0) {
       return { ok: false, error: `Amounts cannot be negative (${r.entity_name})` };
     }
-    sum += a;
+    // v1.9.11 (M9): sum the ROUNDED per-row value so validation matches what
+    // storage persists (each row is roundCents'd on insert) — otherwise a payload
+    // like 0.334/0.333/0.333 for $1.00 passes here yet stores as $0.99.
+    sum += roundCents(a);
   }
   if (roundCents(sum) !== roundCents(amount)) {
     const diff = roundCents(Math.abs(roundCents(amount) - roundCents(sum)));

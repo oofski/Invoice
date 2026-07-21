@@ -121,6 +121,25 @@ export function sniffBytes(head: Uint8Array): SniffedType {
   return "unknown";
 }
 
+/** "%PDF-" as bytes — the PDF header, which may appear a little after offset 0. */
+const PDF_SIG = [0x25, 0x50, 0x44, 0x46, 0x2d];
+
+/** True if `bytes` contains the "%PDF-" header anywhere in the scanned window. */
+export function containsPdfHeader(bytes: Uint8Array): boolean {
+  const limit = bytes.length - PDF_SIG.length;
+  for (let i = 0; i <= limit; i++) {
+    let ok = true;
+    for (let j = 0; j < PDF_SIG.length; j++) {
+      if (bytes[i + j] !== PDF_SIG[j]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
 export interface NormalizedAttachment {
   /** Bytes to persist to R2. */
   bytes: Uint8Array;
@@ -168,7 +187,14 @@ export async function normalizeToStorable(
   buf: ArrayBuffer,
 ): Promise<NormalizedAttachment> {
   const head = new Uint8Array(buf.slice(0, 16));
-  const t = sniffBytes(head);
+  let t = sniffBytes(head);
+
+  // v1.9.11 (L13): a valid PDF may carry a few bytes before the "%PDF-" header
+  // (readers scan the first ~1KB). If the leading-byte magic missed, scan the
+  // first 1KB before giving up — otherwise a real PDF gets stored as ".bin".
+  if (t === "unknown" && containsPdfHeader(new Uint8Array(buf.slice(0, 1024)))) {
+    t = "pdf";
+  }
 
   if (t === "pdf") {
     return {

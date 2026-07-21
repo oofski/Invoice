@@ -48,8 +48,15 @@ export interface ExportInvoice {
   vendorMapping?: VendorMappingRow | null;
 }
 
-function field(value: string | number | null | undefined): string {
-  const s = value == null ? "" : String(value);
+export function field(value: string | number | null | undefined): string {
+  if (value == null) return "";
+  const isNumber = typeof value === "number";
+  let s = String(value);
+  // CSV formula-injection guard (v1.9.11 — L6): a TEXT cell beginning with
+  // = + - @ (or a leading tab/CR) is evaluated as a formula by Excel/Sheets.
+  // Neutralize by prefixing a single quote. Numbers pass through untouched so a
+  // real negative amount (-5.00) is not mangled.
+  if (!isNumber && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

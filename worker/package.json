@@ -9,6 +9,8 @@
     "predeploy": "npm run build:mobile",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:init": "wrangler d1 execute invoiceiq --file=./src/db/schema.sql",
     "db:init:local": "wrangler d1 execute invoiceiq --local --file=./src/db/schema.sql"
   },
@@ -19,6 +21,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
     "typescript": "^5.6.0",
+    "vitest": "^2.1.9",
     "wrangler": "^3.95.0"
   }
 }

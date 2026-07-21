@@ -26,12 +26,21 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
-/** Parses a money string like "$1,234.56" into a number. */
+/**
+ * Parses a money string like "$1,234.56" into a number. Handles accounting-style
+ * negatives so credits/refunds aren't mis-signed as positive spend (v1.9.11):
+ * parentheses "(10.00)", a trailing minus "10.00-", and a trailing "CR" all mean
+ * a negative amount.
+ */
 export function parseAmount(value: string | number | null | undefined): number {
   if (typeof value === "number") return value;
   if (!value) return 0;
-  const n = parseFloat(String(value).replace(/[^0-9.\-]/g, ""));
-  return Number.isFinite(n) ? n : 0;
+  const raw = String(value).trim();
+  const negative =
+    /^\(.*\)$/.test(raw) || /-\s*$/.test(raw) || /\bCR\b/i.test(raw);
+  const n = parseFloat(raw.replace(/[^0-9.\-]/g, ""));
+  if (!Number.isFinite(n)) return 0;
+  return negative ? -Math.abs(n) : n;
 }
 
 /** MM/DD/YYYY or ISO -> YYYY-MM-DD. */
