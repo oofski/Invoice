@@ -78,3 +78,24 @@ export async function ccDelete(env: Env, key: string, withSidecar = true): Promi
     }
   }
 }
+
+/**
+ * v1.9.10 (H5): refcount-guarded object delete. Removes the R2 object ONLY when
+ * no cc_receipts AND no cc_receipt_inbox row still references the key — so a
+ * legacy SHARED key (older receipts reused the inbox drop's key) isn't yanked out
+ * from under a row that still points at it. Call AFTER deleting the owning DB
+ * row(s) so this refcount doesn't count them. Best-effort: never throws.
+ */
+export async function ccMaybeDeleteObject(env: Env, key: string): Promise<void> {
+  if (!key) return;
+  try {
+    const r = await env.DB.prepare(
+      "SELECT (SELECT COUNT(*) FROM cc_receipts WHERE r2_key = ?1) + (SELECT COUNT(*) FROM cc_receipt_inbox WHERE r2_key = ?1) AS n",
+    )
+      .bind(key)
+      .first<{ n: number }>();
+    if ((r?.n ?? 0) === 0) await ccDelete(env, key);
+  } catch (e) {
+    console.error("[cc] ccMaybeDeleteObject failed:", e);
+  }
+}

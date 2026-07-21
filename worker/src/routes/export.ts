@@ -212,24 +212,60 @@ async function assembleExportInvoices(
   return { ok: true, invoices, invoiceIds, exportInvoices };
 }
 
-/** Marks invoices EXPORTED + writes an audit entry for the given export. */
-async function finalizeExport(
+/**
+ * Atomically CLAIMS the batch for export: flips each still-APPROVED invoice to
+ * EXPORTED and stamps our unique exportId, guarded by `AND status='APPROVED'` so
+ * two concurrent exports (or Export + Factor on the same selection) can't both
+ * win. If we didn't claim every id (someone else exported one first), we roll
+ * back only OUR rows (matched by exportId, race-safe) and report the conflict.
+ * (v1.9.10 — H1: previously an unguarded UPDATE let the same batch book twice.)
+ */
+async function claimInvoicesForExport(
+  c: Context<AppEnv>,
+  invoiceIds: string[],
+  exportId: string,
+  at: string,
+): Promise<{ ok: true } | { ok: false; response: Response }> {
+  let claimed = 0;
+  for (const batch of chunk(invoiceIds)) {
+    const ph = batch.map(() => "?").join(",");
+    const res = await c.env.DB.prepare(
+      `UPDATE invoices SET status=?, exported_at=?, export_id=?
+         WHERE id IN (${ph}) AND status=?`,
+    )
+      .bind(INVOICE_STATUS.EXPORTED, at, exportId, ...batch, INVOICE_STATUS.APPROVED)
+      .run();
+    claimed += res.meta?.changes ?? 0;
+  }
+  if (claimed !== invoiceIds.length) {
+    // Lost the race on at least one invoice — undo the ones WE just claimed
+    // (only rows carrying our exportId) and tell the caller to refresh.
+    await c.env.DB.prepare(
+      "UPDATE invoices SET status=?, exported_at=NULL, export_id=NULL WHERE export_id=?",
+    )
+      .bind(INVOICE_STATUS.APPROVED, exportId)
+      .run();
+    return {
+      ok: false,
+      response: c.json(
+        {
+          error:
+            "One or more invoices were exported by another action. Refresh and retry.",
+        },
+        409,
+      ),
+    };
+  }
+  return { ok: true };
+}
+
+/** Writes the EXPORTED audit entry for each invoice in a completed export. */
+async function auditExports(
   c: Context<AppEnv>,
   invoices: InvoiceRow[],
-  invoiceIds: string[],
   exportId: string,
   fileName: string,
 ): Promise<void> {
-  const at = nowIso();
-  // Batch the id list (one `?` per id + the 3 fixed SET params) so the UPDATE
-  // never exceeds D1's bound-param cap.
-  for (const batch of chunk(invoiceIds)) {
-    const ph = batch.map(() => "?").join(",");
-    await c.env.DB.prepare(
-      `UPDATE invoices SET status=?, exported_at=?, export_id=? WHERE id IN (${ph})`,
-    ).bind(INVOICE_STATUS.EXPORTED, at, exportId, ...batch).run();
-  }
-
   for (const invoice of invoices) {
     await audit(c.env, {
       invoiceId: invoice.id, userId: user(c).id, action: AUDIT_ACTION.EXPORTED,
@@ -298,14 +334,18 @@ exportRoutes.post("/", async (c) => {
   if (!assembled.ok) return assembled.response;
   const { invoices, invoiceIds, exportInvoices } = assembled;
 
+  // Generate first (pure, no writes), then CLAIM the batch atomically before we
+  // persist anything — so a lost race aborts with 409 instead of double-booking.
   const { csv, rowCount } = generateQboBillsCsv(exportInvoices);
   const fileName = buildExportFilename();
   const exportId = uuid();
+  const claim = await claimInvoicesForExport(c, invoiceIds, exportId, nowIso());
+  if (!claim.ok) return claim.response;
   await c.env.DB.prepare(
     "INSERT INTO exports (id, exported_by, invoice_ids, file_name, row_count, content) VALUES (?,?,?,?,?,?)",
   ).bind(exportId, user(c).id, JSON.stringify(invoiceIds), fileName, rowCount, csv).run();
 
-  await finalizeExport(c, invoices, invoiceIds, exportId, fileName);
+  await auditExports(c, invoices, exportId, fileName);
 
   return c.json({ exportId, fileName, rowCount, invoiceCount: invoices.length, csv }, 201);
 });
@@ -331,11 +371,14 @@ exportRoutes.post("/factor", async (c) => {
     exportId,
   };
 
+  // Claim the batch atomically before persisting anything (see POST /).
+  const claim = await claimInvoicesForExport(c, invoiceIds, exportId, nowIso());
+  if (!claim.ok) return claim.response;
   await c.env.DB.prepare(
     "INSERT INTO exports (id, exported_by, invoice_ids, file_name, row_count, content) VALUES (?,?,?,?,?,?)",
   ).bind(exportId, user(c).id, JSON.stringify(invoiceIds), fileName, totalRowCount, JSON.stringify(payload)).run();
 
-  await finalizeExport(c, invoices, invoiceIds, exportId, fileName);
+  await auditExports(c, invoices, exportId, fileName);
 
   return c.json(payload, 201);
 });

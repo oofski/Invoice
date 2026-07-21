@@ -32,7 +32,7 @@ import {
   ccPut,
   ccPutReductoRaw,
   ccGet,
-  ccDelete,
+  ccMaybeDeleteObject,
 } from "../../cc/ccStorage";
 import { extractReceiptBytes, normalizeReceipt } from "../../cc/receiptExtract";
 import { matchReceiptToTransaction } from "../../cc/receiptMatch";
@@ -889,13 +889,11 @@ inbox.delete("/:id", async (c) => {
   if (!isManager(c) && !(owner && row.status === "PENDING_MATCH"))
     return c.json({ error: "Forbidden" }, 403);
 
-  // Best-effort R2 delete (bytes + reducto sidecar), then delete the row.
-  try {
-    await ccDelete(c.env, row.r2_key);
-  } catch (e) {
-    console.error("[cc] inbox R2 delete failed:", e);
-  }
+  // v1.9.10 (H5): delete the row FIRST, then refcount-guard the object delete so
+  // a legacy shared key still referenced by a cc_receipts row isn't destroyed
+  // out from under the live receipt.
   await c.env.DB.prepare("DELETE FROM cc_receipt_inbox WHERE id = ?").bind(id).run();
+  await ccMaybeDeleteObject(c.env, row.r2_key);
 
   return c.body(null, 204);
 });

@@ -15,7 +15,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../helpers";
 import { user, hasRole } from "../helpers";
 import { ROLES } from "../../lib/constants";
-import { isCcEnabled, ccReady } from "../../cc/flag";
+import { isCcEnabled, ccReady, ownsCardholder } from "../../cc/flag";
 import { nowIso } from "../../lib/util";
 import {
   validateLineCoding,
@@ -41,20 +41,8 @@ async function ownsOrManages(
   c: import("hono").Context<AppEnv>,
   tx: TxRow,
 ): Promise<boolean> {
-  if (isManager(c)) return true;
-  if (!tx.cardholder_id) return false;
-  const u = user(c);
-  const first = (u.name || "").trim().split(/\s+/)[0] ?? "";
-  try {
-    const row = await c.env.DB.prepare(
-      "SELECT id FROM cc_cardholders WHERE id = ? AND (user_id = ? OR lower(first_name) = lower(?))",
-    )
-      .bind(tx.cardholder_id, u.id, first)
-      .first<{ id: string }>();
-    return !!row;
-  } catch {
-    return false;
-  }
+  // v1.9.10 (H3): shared, unique-name-guarded owns-check.
+  return ownsCardholder(c, tx.cardholder_id);
 }
 
 function fetchTx(env: AppEnv["Bindings"], id: string): Promise<TxRow | null> {

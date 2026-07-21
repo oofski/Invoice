@@ -19,7 +19,7 @@ import { ROLES } from "../../lib/constants";
 import { isCcEnabled, ccReady } from "../../cc/flag";
 import { uuid, nowIso, parseJson, chunk } from "../../lib/util";
 import { roundCents } from "../../cc/ccRules";
-import { ccRawUploadKey, ccPut, ccDelete } from "../../cc/ccStorage";
+import { ccRawUploadKey, ccPut, ccDelete, ccMaybeDeleteObject } from "../../cc/ccStorage";
 import {
   loadCapOneRegistry,
   normalizeCapOneRow,
@@ -512,7 +512,10 @@ uploads.delete("/:id", async (c) => {
     // completes across all chunks before the next begins, preserving the
     // children-first (FK-safe) ordering of the single-statement version.
 
-    // 1. Receipts: best-effort R2 delete of each object, then drop the rows.
+    // 1. Receipts: drop the ROWS first, then refcount-guard each object delete
+    // (v1.9.10 H5) — a legacy key shared with a re-queued inbox row (step 5) is
+    // still referenced, so ccMaybeDeleteObject skips it and its bytes survive;
+    // a receipt's own copied key has no other reference and is removed.
     const receiptRows: { id: string; r2_key: string }[] = [];
     for (const batch of chunk(txIds)) {
       const ph = batch.map(() => "?").join(",");
@@ -523,21 +526,15 @@ uploads.delete("/:id", async (c) => {
         .all<{ id: string; r2_key: string }>();
       receiptRows.push(...(receipts.results ?? []));
     }
-    for (const rcpt of receiptRows) {
-      if (rcpt.r2_key) {
-        try {
-          await ccDelete(c.env, rcpt.r2_key);
-        } catch (e) {
-          console.error("[cc] batch-delete receipt R2 delete failed:", e);
-        }
-      }
-    }
     receiptsRemoved = receiptRows.length;
     for (const batch of chunk(txIds)) {
       const ph = batch.map(() => "?").join(",");
       await c.env.DB.prepare(`DELETE FROM cc_receipts WHERE transaction_id IN (${ph})`)
         .bind(...batch)
         .run();
+    }
+    for (const rcpt of receiptRows) {
+      await ccMaybeDeleteObject(c.env, rcpt.r2_key);
     }
 
     // 2-4. Remaining tx-keyed coding children (allocations → lines → splits).

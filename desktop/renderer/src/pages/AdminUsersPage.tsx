@@ -214,7 +214,12 @@ export default function AdminUsersPage() {
                       <td className="px-4 py-3">
                         <Select
                           value={u.role}
-                          disabled={busyId === u.id}
+                          disabled={busyId === u.id || u.id === profile.id}
+                          title={
+                            u.id === profile.id
+                              ? "You can't change your own role"
+                              : undefined
+                          }
                           onChange={(e) =>
                             patchUser(u.id, { role: e.target.value as Role })
                           }
@@ -258,8 +263,13 @@ export default function AdminUsersPage() {
                           onClick={() =>
                             patchUser(u.id, { is_active: !u.is_active })
                           }
-                          disabled={busyId === u.id}
-                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                          disabled={busyId === u.id || u.id === profile.id}
+                          title={
+                            u.id === profile.id
+                              ? "You can't deactivate your own account"
+                              : undefined
+                          }
+                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
                             u.is_active
                               ? "bg-success-soft-bg text-success-soft-fg"
                               : "bg-surface-2 text-ink-muted"

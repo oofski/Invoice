@@ -21,7 +21,12 @@ import type { AppEnv } from "../helpers";
 import { user, hasRole } from "../helpers";
 import { ROLES } from "../../lib/constants";
 import { uuid, chunk } from "../../lib/util";
-import { isCcEnabled, ccReady } from "../../cc/flag";
+import {
+  isCcEnabled,
+  ccReady,
+  ownsCardholder,
+  cardholderScopeSubquery,
+} from "../../cc/flag";
 import { sendCcReminder, renderCcReminder } from "../../cc/ccEmail";
 import type {
   Tx,
@@ -340,11 +345,9 @@ notifications.get("/", async (c) => {
     // Scoped cardholder: own notifications only — by cardholder_id linkage OR by
     // the recipient email matching their login email.
     const u = user(c);
-    const first = (u.name || "").trim().split(/\s+/)[0] ?? "";
-    sql +=
-      ` AND (cardholder_id IN (SELECT id FROM cc_cardholders WHERE user_id = ? OR lower(first_name) = lower(?))
-            OR lower(email_to) = lower(?))`;
-    params.push(u.id, first, (u.email || "").toLowerCase());
+    const scope = cardholderScopeSubquery(u); // v1.9.10 (H3): unique-name guarded
+    sql += ` AND (cardholder_id IN (${scope.sql}) OR lower(email_to) = lower(?))`;
+    params.push(...scope.params, (u.email || "").toLowerCase());
   }
 
   const cardholderId = c.req.query("cardholder_id");
@@ -377,13 +380,7 @@ notifications.get("/:id", async (c) => {
   if (!hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT)) {
     // Scoped user may only read a notification they are the recipient of.
     const u = user(c);
-    const first = (u.name || "").trim().split(/\s+/)[0] ?? "";
-    const owns = await c.env.DB.prepare(
-      `SELECT 1 FROM cc_cardholders
-        WHERE id = ? AND (user_id = ? OR lower(first_name) = lower(?))`,
-    )
-      .bind(row.cardholder_id, u.id, first)
-      .first();
+    const owns = await ownsCardholder(c, row.cardholder_id); // v1.9.10 (H3)
     const emailMatch = (row.email_to || "").toLowerCase() === (u.email || "").toLowerCase();
     if (!owns && !emailMatch) return c.json({ error: "Forbidden" }, 403);
   }

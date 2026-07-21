@@ -28,6 +28,7 @@ import {
   deriveEntitySplitsStmts,
 } from "./ccLines";
 import { sendCcManagerAlert } from "./ccEmail";
+import { ccGet, ccPut, ccReceiptKey, ccExtForType } from "./ccStorage";
 import type {
   CcSource,
   CcUploadMethod,
@@ -212,6 +213,26 @@ export async function attachReceiptToTx(
   const receiptId = uuid();
   const at = nowIso();
 
+  // v1.9.10 (H5): give the attached receipt its OWN R2 object. The inbox drop
+  // and the cc_receipts row used to share one key, so deleting either (batch
+  // delete, inbox delete) destroyed the other's bytes. Copy the stored bytes to
+  // a receipt-keyed object; on any failure fall back to sharing the source key
+  // (best-effort — never block the attach). The refcount-guarded deletes
+  // (`ccMaybeDeleteObject`) keep legacy shared keys safe too.
+  let receiptR2Key = r2Key;
+  try {
+    const copyKey = ccReceiptKey(receiptId, ccExtForType(fileType));
+    if (copyKey !== r2Key) {
+      const src = await ccGet(env, r2Key);
+      if (src) {
+        await ccPut(env, copyKey, await src.arrayBuffer(), fileType || undefined);
+        receiptR2Key = copyKey;
+      }
+    }
+  } catch (e) {
+    console.error("[cc attach] receipt object copy failed; sharing source key:", e);
+  }
+
   const ocrData: ReceiptOcrData = {
     merchant_name: normalized.merchant_name,
     transaction_date: normalized.transaction_date,
@@ -236,7 +257,7 @@ export async function attachReceiptToTx(
       txId,
       uploadedBy,
       uploadMethod,
-      r2Key,
+      receiptR2Key, // v1.9.10 (H5): the receipt's own copied key
       fileName,
       fileType || null,
       sizeBytes,

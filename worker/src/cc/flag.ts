@@ -98,15 +98,59 @@ export async function ccReady(env: Env): Promise<boolean> {
  * `scopeClause`'s name-tolerant fallback). The clause is meant to be appended to
  * a `WHERE …` that already filters `cc_transactions`.
  */
+/**
+ * The subquery selecting the cc_cardholders ids a scoped user may access.
+ *
+ * v1.9.10 (H3): ownership matches on `user_id` first. The first-name fallback is
+ * kept for cardholders not yet linked to a login, but ONLY when that first name
+ * is UNIQUE across cc_cardholders — otherwise two executives sharing a first name
+ * (or an unlinked row whose name collides) would cross-access each other's
+ * transactions/receipts. When a name is ambiguous, name-matching is disabled and
+ * access requires a real `user_id` link (fail closed, never cross-access).
+ */
+export function cardholderScopeSubquery(u: AuthUser): {
+  sql: string;
+  params: string[];
+} {
+  const first = (u.name || "").trim().split(/\s+/)[0] ?? "";
+  return {
+    sql:
+      "SELECT id FROM cc_cardholders WHERE user_id = ?" +
+      " OR (user_id IS NULL AND lower(first_name) = lower(?)" +
+      " AND (SELECT COUNT(*) FROM cc_cardholders x WHERE lower(x.first_name) = lower(?)) = 1)",
+    params: [u.id, first, first],
+  };
+}
+
 export function ccScopeClause(c: Context<AppEnv>): { clause: string; params: string[] } {
   if (hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT)) {
     return { clause: "", params: [] };
   }
-  const u = user(c);
-  const first = (u.name || "").trim().split(/\s+/)[0] ?? "";
-  return {
-    clause:
-      " AND cardholder_id IN (SELECT id FROM cc_cardholders WHERE user_id = ? OR lower(first_name) = lower(?))",
-    params: [u.id, first],
-  };
+  const { sql, params } = cardholderScopeSubquery(user(c));
+  return { clause: ` AND cardholder_id IN (${sql})`, params };
+}
+
+/**
+ * True if the current user manages CC (sees everything) or owns the given
+ * cardholder row (via `cardholderScopeSubquery`). The single shared owns-check
+ * behind every route's local `ownsTx` / `ownsOrManages` so they can't drift.
+ */
+export async function ownsCardholder(
+  c: Context<AppEnv>,
+  cardholderId: string | null | undefined,
+): Promise<boolean> {
+  if (hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT))
+    return true;
+  if (!cardholderId) return false;
+  const { sql, params } = cardholderScopeSubquery(user(c));
+  try {
+    const row = await c.env.DB.prepare(
+      `SELECT 1 FROM cc_cardholders WHERE id = ? AND id IN (${sql})`,
+    )
+      .bind(cardholderId, ...params)
+      .first();
+    return !!row;
+  } catch {
+    return false;
+  }
 }

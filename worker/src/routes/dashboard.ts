@@ -222,6 +222,7 @@ dashboard.get("/analytics", async (c) => {
        FROM line_items li
        JOIN invoices i ON i.id = li.invoice_id
       WHERE 1=1${glPeriod.and}
+        AND li.id NOT IN (SELECT split_parent_id FROM line_items WHERE split_parent_id IS NOT NULL)
       GROUP BY category
       ORDER BY spend DESC`,
   )

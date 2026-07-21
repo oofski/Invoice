@@ -77,7 +77,46 @@ users.patch("/:id", async (c) => {
     sets.push("email = ?"); params.push(email);
   }
   if (!sets.length) return c.json({ error: "No updatable fields" }, 400);
-  params.push(c.req.param("id"));
+
+  // v1.9.10 (H2): PATCH must carry the same self / last-admin protection DELETE
+  // has — otherwise the sole admin can deactivate or demote themselves and be
+  // permanently locked out (login requires is_active; bootstrap is disabled once
+  // any user exists).
+  const targetId = c.req.param("id");
+  const wantsDeactivate = "is_active" in b && !b.is_active;
+  const wantsRoleChange = "role" in b;
+  if (wantsDeactivate || wantsRoleChange) {
+    const target = await c.env.DB.prepare(
+      "SELECT id, role FROM users WHERE id = ?",
+    )
+      .bind(targetId)
+      .first<{ id: string; role: string }>();
+    if (!target) return c.json({ error: "Not found" }, 404);
+    const demotesFromAdmin =
+      wantsRoleChange && target.role === ROLES.ADMIN && b.role !== ROLES.ADMIN;
+    const stripsOwnAdmin =
+      target.id === user(c).id && (wantsDeactivate || demotesFromAdmin);
+    if (stripsOwnAdmin)
+      return c.json(
+        { error: "You can't deactivate or change the role of your own account" },
+        400,
+      );
+    // Deactivating or demoting the last active admin (anyone) is blocked.
+    if ((wantsDeactivate || demotesFromAdmin) && target.role === ROLES.ADMIN) {
+      const admins = await c.env.DB.prepare(
+        "SELECT COUNT(*) as n FROM users WHERE role = ? AND is_active = 1",
+      )
+        .bind(ROLES.ADMIN)
+        .first<{ n: number }>();
+      if ((admins?.n ?? 0) <= 1)
+        return c.json(
+          { error: "Can't deactivate or demote the last active admin" },
+          400,
+        );
+    }
+  }
+
+  params.push(targetId);
   try {
     await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...params).run();
   } catch (e) {

@@ -327,33 +327,36 @@ export async function processInvoiceAI(
         toIsoDate(result.prompt1.DueDate) ??
         toIsoDate(result.prompt1.InvDate);
 
-    await env.DB.prepare(
+    // v1.9.10 (H4): the header update, the line-items DELETE, and every re-insert
+    // are prepared here and committed together in ONE atomic D1 batch below (a
+    // batch runs in a single transaction). Previously these ran as separate
+    // awaited statements, so a mid-way failure could strand a previously-good
+    // invoice with zero (or partial) line items and no restore on reprocess.
+    const updateInvoiceStmt = env.DB.prepare(
       `UPDATE invoices SET business=?, class=?, approved_by=?, status=?,
          ai_processed_at=?, subtotal=?, sales_tax=?, inv_date=?, due_date=?,
          shipping=?, location_ambiguous=?
        WHERE id=?`,
-    )
-      .bind(
-        result.prompt1.Business ?? inv.business,
-        result.prompt1.Class ?? inv.class,
-        result.finalApprover,
-        INVOICE_STATUS.PENDING_APPROVAL,
-        nowIso(),
-        subtotal ?? null,
-        salesTax ?? 0,
-        invDate ?? null,
-        dueDate ?? null,
-        extracted.shipping ?? null, // FIX-9: persist header shipping
-        result.locationAmbiguous ? 1 : 0, // FIX-8b: persist location ambiguity
-        invoiceId,
-      )
-      .run();
+    ).bind(
+      result.prompt1.Business ?? inv.business,
+      result.prompt1.Class ?? inv.class,
+      result.finalApprover,
+      INVOICE_STATUS.PENDING_APPROVAL,
+      nowIso(),
+      subtotal ?? null,
+      salesTax ?? 0,
+      invDate ?? null,
+      dueDate ?? null,
+      extracted.shipping ?? null, // FIX-9: persist header shipping
+      result.locationAmbiguous ? 1 : 0, // FIX-8b: persist location ambiguity
+      invoiceId,
+    );
 
     // Replace line items (idempotent on reprocess). Each fresh line is persisted
     // per its planned action; split subtrees and overrides are re-applied in slot.
-    await env.DB.prepare("DELETE FROM line_items WHERE invoice_id = ?")
-      .bind(invoiceId)
-      .run();
+    const deleteLinesStmt = env.DB
+      .prepare("DELETE FROM line_items WHERE invoice_id = ?")
+      .bind(invoiceId);
     const stmts: D1PreparedStatement[] = [];
     let insertedCount = 0;
     for (const f of fresh) {
@@ -471,39 +474,44 @@ export async function processInvoiceAI(
         insertedCount++;
       }
     }
-    if (stmts.length) await env.DB.batch(stmts);
-
     // Re-insert the preserved MANUAL ADD lines after the AI lines. business/class
     // are forced NULL so the header-coded reprocess output keeps the export
     // invariant ("all leaves carry business/class, or none do").
-    if (preservedManual.length) {
-      const base = result.prompt3.length;
-      const manualStmts = preservedManual.map((m, i) =>
-        env.DB.prepare(
-          `INSERT INTO line_items (id, invoice_id, description, amount, business, class,
+    const base = result.prompt3.length;
+    const manualStmts = preservedManual.map((m, i) =>
+      env.DB.prepare(
+        `INSERT INTO line_items (id, invoice_id, description, amount, business, class,
              gl_category, item_type, confidence_level, logic_path, requires_review,
              manually_overridden, overridden_by, sort_order)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        ).bind(
-          uuid(),
-          invoiceId,
-          m.description,
-          m.amount,
-          null,
-          null,
-          m.gl_category,
-          m.item_type,
-          m.confidence_level,
-          "MANUAL ADD",
-          m.requires_review ?? 0,
-          1,
-          m.overridden_by,
-          base + i,
-        ),
-      );
-      await env.DB.batch(manualStmts);
-      insertedCount += preservedManual.length;
-    }
+      ).bind(
+        uuid(),
+        invoiceId,
+        m.description,
+        m.amount,
+        null,
+        null,
+        m.gl_category,
+        m.item_type,
+        m.confidence_level,
+        "MANUAL ADD",
+        m.requires_review ?? 0,
+        1,
+        m.overridden_by,
+        base + i,
+      ),
+    );
+    insertedCount += manualStmts.length;
+
+    // v1.9.10 (H4): commit the header update + line DELETE + all inserts as ONE
+    // atomic batch. Either the invoice's whole coding is replaced or nothing
+    // changes — a failure can no longer leave partial/empty line items.
+    await env.DB.batch([
+      updateInvoiceStmt,
+      deleteLinesStmt,
+      ...stmts,
+      ...manualStmts,
+    ]);
 
     // FIX-8: recompute reconciliation now that every line (AI + preserved) is in.
     await recomputeReconciliation(env, invoiceId);
@@ -519,23 +527,23 @@ export async function processInvoiceAI(
       });
     }
 
-    // Create/refresh the approval routed to the final approver.
+    // Create/refresh the approval routed to the final approver. v1.9.10 (H4):
+    // delete + insert atomically so a failure can't leave the invoice with no
+    // approval row (invisible to the approval queue).
     const approver = await resolveApproverUser(env, result.finalApprover);
-    await env.DB.prepare("DELETE FROM approvals WHERE invoice_id = ?")
-      .bind(invoiceId)
-      .run();
-    await env.DB.prepare(
-      `INSERT INTO approvals (id, invoice_id, assigned_to, assigned_to_name, status)
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM approvals WHERE invoice_id = ?").bind(invoiceId),
+      env.DB.prepare(
+        `INSERT INTO approvals (id, invoice_id, assigned_to, assigned_to_name, status)
        VALUES (?,?,?,?,?)`,
-    )
-      .bind(
+      ).bind(
         uuid(),
         invoiceId,
         approver?.id ?? null,
         result.finalApprover,
         APPROVAL_STATUS.PENDING,
-      )
-      .run();
+      ),
+    ]);
 
     await audit(env, {
       invoiceId,

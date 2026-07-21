@@ -16,7 +16,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../helpers";
 import { user, hasRole } from "../helpers";
 import { ROLES } from "../../lib/constants";
-import { isCcEnabled, ccReady, ccScopeClause } from "../../cc/flag";
+import { isCcEnabled, ccReady, ccScopeClause, ownsCardholder } from "../../cc/flag";
 import {
   CC_RECEIPT_STATUSES,
   CC_SOURCES,
@@ -139,17 +139,8 @@ async function ownsTx(
   c: import("hono").Context<AppEnv>,
   txCardholderId: string | null,
 ): Promise<boolean> {
-  if (hasRole(c, ROLES.CREDIT_CARD_ACCOUNTANT, ROLES.ADMIN, ROLES.ACCOUNTANT)) return true;
-  if (!txCardholderId) return false;
-  const u = user(c);
-  const first = (u.name || "").trim().split(/\s+/)[0] ?? "";
-  const row = await c.env.DB.prepare(
-    `SELECT 1 FROM cc_cardholders
-      WHERE id = ? AND (user_id = ? OR lower(first_name) = lower(?))`,
-  )
-    .bind(txCardholderId, u.id, first)
-    .first();
-  return !!row;
+  // v1.9.10 (H3): delegate to the shared, unique-name-guarded owns-check.
+  return ownsCardholder(c, txCardholderId);
 }
 
 // ----- GET / (list) ----------------------------------------------------

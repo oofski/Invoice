@@ -156,8 +156,12 @@ ledger.get("/", async (c) => {
   }
 
   const cycleParams = [cycleStart, cycleEnd];
+  // v1.9.10 (H7): exclude archived (soft-deleted) transactions so the ledger
+  // reconciles with the dashboard, which already filters them. Without this,
+  // "Download Excel + Clear" archives a cycle but the ledger keeps showing those
+  // charges and they never leave the workbook. (`t.` qualifies both usages.)
   const inCycle =
-    "transaction_date >= ? AND transaction_date <= ? AND is_payment = 0";
+    "transaction_date >= ? AND transaction_date <= ? AND is_payment = 0 AND t.archived_at IS NULL";
 
   // v1.9.0: select the overall GL category only when the additive column exists
   // (a stale isolate without it would otherwise 500 the whole ledger).

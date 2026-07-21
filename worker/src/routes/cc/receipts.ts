@@ -18,7 +18,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../helpers";
 import { user, hasRole } from "../helpers";
 import { ROLES } from "../../lib/constants";
-import { isCcEnabled, ccReady } from "../../cc/flag";
+import { isCcEnabled, ccReady, ownsCardholder } from "../../cc/flag";
 import { uuid } from "../../lib/util";
 import {
   ccReceiptKey,
@@ -26,7 +26,7 @@ import {
   ccPut,
   ccPutReductoRaw,
   ccGet,
-  ccDelete,
+  ccMaybeDeleteObject,
 } from "../../cc/ccStorage";
 import { extractReceiptBytes, normalizeReceipt, matchCardholder } from "../../cc/receiptExtract";
 import { attachReceiptToTx } from "../../cc/receiptAttach";
@@ -61,20 +61,8 @@ async function ownsOrManages(
   c: import("hono").Context<AppEnv>,
   tx: TxRow,
 ): Promise<boolean> {
-  if (isManager(c)) return true;
-  if (!tx.cardholder_id) return false;
-  const u = user(c);
-  const first = (u.name || "").trim().split(/\s+/)[0] ?? "";
-  try {
-    const row = await c.env.DB.prepare(
-      "SELECT id FROM cc_cardholders WHERE id = ? AND (user_id = ? OR lower(first_name) = lower(?))",
-    )
-      .bind(tx.cardholder_id, u.id, first)
-      .first<{ id: string }>();
-    return !!row;
-  } catch {
-    return false;
-  }
+  // v1.9.10 (H3): shared, unique-name-guarded owns-check.
+  return ownsCardholder(c, tx.cardholder_id);
 }
 
 function fetchTx(env: AppEnv["Bindings"], id: string): Promise<TxRow | null> {
@@ -280,19 +268,18 @@ receipts.delete("/receipts/:id", async (c) => {
     .first<ReceiptRow>();
   if (!receipt) return c.json({ error: "Not found" }, 404);
 
-  // Best-effort R2 delete (bytes + reducto sidecar), then delete the row.
-  try {
-    await ccDelete(c.env, receipt.r2_key);
-  } catch (e) {
-    console.error("[cc] receipt R2 delete failed:", e);
-  }
+  // v1.9.10 (H5): delete the row FIRST, then refcount-guard the R2 object delete
+  // so a legacy shared inbox key isn't destroyed out from under the inbox row.
   await c.env.DB.prepare("DELETE FROM cc_receipts WHERE id = ?").bind(id).run();
+  await ccMaybeDeleteObject(c.env, receipt.r2_key);
 
-  // Best-effort: if this tx now has zero receipts, revert its status to PENDING so
-  // it doesn't show a stale UPLOADED/RECEIVED with nothing attached. Guarded to
-  // UPLOADED/RECEIVED only — NOT_REQUIRED/WAIVED are deliberate manager states
-  // unrelated to a file being attached, and PENDING is already correct. The single
-  // guarded UPDATE avoids a read-modify-write race. Never break the delete.
+  // If this tx now has zero receipts, cascade its coding children and revert
+  // status. v1.9.10 (H6): the single-delete previously left cc_receipt_lines /
+  // cc_line_allocations / cc_entity_splits orphaned (the batch-delete cascades
+  // them; this path didn't), so the ledger kept counting a deleted receipt's
+  // splits and a re-upload doubled the line rows. NOT_REQUIRED/WAIVED are
+  // deliberate manager states, so the status revert stays guarded to
+  // UPLOADED/RECEIVED. Never break the delete.
   try {
     const txId = receipt.transaction_id;
     const remaining = await c.env.DB.prepare(
@@ -301,14 +288,25 @@ receipts.delete("/receipts/:id", async (c) => {
       .bind(txId)
       .first<{ n: number }>();
     if ((remaining?.n ?? 0) === 0) {
-      await c.env.DB.prepare(
-        "UPDATE cc_transactions SET receipt_status = 'PENDING', updated_at = ? WHERE id = ? AND receipt_status IN ('UPLOADED','RECEIVED')",
-      )
-        .bind(new Date().toISOString(), txId)
-        .run();
+      await c.env.DB.batch([
+        c.env.DB
+          .prepare("DELETE FROM cc_line_allocations WHERE transaction_id = ?")
+          .bind(txId),
+        c.env.DB
+          .prepare("DELETE FROM cc_receipt_lines WHERE transaction_id = ?")
+          .bind(txId),
+        c.env.DB
+          .prepare("DELETE FROM cc_entity_splits WHERE transaction_id = ?")
+          .bind(txId),
+        c.env.DB
+          .prepare(
+            "UPDATE cc_transactions SET receipt_status = 'PENDING', updated_at = ? WHERE id = ? AND receipt_status IN ('UPLOADED','RECEIVED')",
+          )
+          .bind(new Date().toISOString(), txId),
+      ]);
     }
   } catch (e) {
-    console.error("[cc] receipt_status revert after delete failed:", e);
+    console.error("[cc] receipt delete cascade/revert failed:", e);
   }
 
   return c.body(null, 204);
