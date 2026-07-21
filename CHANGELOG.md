@@ -5,6 +5,40 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.10] — 2026-07-21
+
+Fixes the eight High-severity issues found in the full end-to-end audit. Every
+fix was put through two rounds of independent adversarial review before shipping.
+
+### Fixed
+- **Export could double-book a batch into QuickBooks.** Exporting the same
+  selection twice (Export then Factor, or two windows at once) could book it
+  twice. Export now atomically *claims* each invoice (guarded on APPROVED) and
+  aborts with a "refresh and retry" message if anything was already exported — and
+  rolls the claim back if writing the export file fails.
+- **An admin could lock everyone out.** Deactivating or demoting your own account
+  (or the last active admin) is now blocked on the server and disabled in the UI —
+  matching how delete already worked. (Already-inactive admins can still be
+  reclassified.)
+- **Credit-card data could leak between executives who share a first name.**
+  Ownership now matches on the linked user first; a first-name match is only used
+  when that name is unique, so two people named the same can no longer see or edit
+  each other's transactions and receipts.
+- **A failed re-scan could corrupt a good invoice.** Reprocessing now replaces an
+  invoice's line items and approval in single all-or-nothing steps, so an
+  interrupted re-scan can no longer leave an invoice with missing lines.
+- **Deleting a credit-card upload or receipt could destroy a still-attached
+  receipt's file.** Each attached receipt now keeps its own copy of the image, and
+  file deletes are reference-counted so one delete can't remove another's bytes.
+- **Deleting the last receipt on a transaction left stale line coding.** It now
+  cleans up that receipt's own line items so a re-upload can't double them —
+  while preserving any entity split an accountant entered by hand.
+- **The credit-card accountant ledger disagreed with the dashboard.** The ledger
+  now excludes archived (cleared) transactions, so the two views reconcile and
+  cleared charges stop reappearing.
+- **The dashboard "Spend by GL category" chart double-counted split invoices.**
+  Split parent lines are now excluded so each split amount is counted once.
+
 ## [1.9.9] — 2026-07-21
 
 Fixes the "zip export gives me text, not the approved PDFs" bug. Root cause: the
