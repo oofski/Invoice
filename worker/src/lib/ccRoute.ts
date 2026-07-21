@@ -235,6 +235,7 @@ export async function maybeRouteInvoiceToCc(env: Env, invoiceId: string): Promis
         uploadMethod: "MANAGER_UPLOAD",
         uploadedBy,
         fireAlert: false,
+        sourceIsShared: true, // shared mobile inbox-drop key (H5)
       });
       await env.DB.prepare(
         `INSERT INTO cc_receipt_inbox

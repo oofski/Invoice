@@ -220,6 +220,20 @@ async function assembleExportInvoices(
  * back only OUR rows (matched by exportId, race-safe) and report the conflict.
  * (v1.9.10 — H1: previously an unguarded UPDATE let the same batch book twice.)
  */
+/**
+ * Reverts a claim we made but did not finalize — only rows carrying our unique
+ * exportId (race-safe). Used both on a lost race and if persisting the export
+ * fails after a successful claim, so invoices never strand EXPORTED with no
+ * matching exports row (v1.9.10 — H1).
+ */
+async function unclaimExport(c: Context<AppEnv>, exportId: string): Promise<void> {
+  await c.env.DB.prepare(
+    "UPDATE invoices SET status=?, exported_at=NULL, export_id=NULL WHERE export_id=?",
+  )
+    .bind(INVOICE_STATUS.APPROVED, exportId)
+    .run();
+}
+
 async function claimInvoicesForExport(
   c: Context<AppEnv>,
   invoiceIds: string[],
@@ -240,11 +254,7 @@ async function claimInvoicesForExport(
   if (claimed !== invoiceIds.length) {
     // Lost the race on at least one invoice — undo the ones WE just claimed
     // (only rows carrying our exportId) and tell the caller to refresh.
-    await c.env.DB.prepare(
-      "UPDATE invoices SET status=?, exported_at=NULL, export_id=NULL WHERE export_id=?",
-    )
-      .bind(INVOICE_STATUS.APPROVED, exportId)
-      .run();
+    await unclaimExport(c, exportId);
     return {
       ok: false,
       response: c.json(
@@ -341,11 +351,17 @@ exportRoutes.post("/", async (c) => {
   const exportId = uuid();
   const claim = await claimInvoicesForExport(c, invoiceIds, exportId, nowIso());
   if (!claim.ok) return claim.response;
-  await c.env.DB.prepare(
-    "INSERT INTO exports (id, exported_by, invoice_ids, file_name, row_count, content) VALUES (?,?,?,?,?,?)",
-  ).bind(exportId, user(c).id, JSON.stringify(invoiceIds), fileName, rowCount, csv).run();
-
-  await auditExports(c, invoices, exportId, fileName);
+  // If persisting fails after the claim, roll the claim back so the batch stays
+  // APPROVED + retryable instead of stranded EXPORTED (v1.9.10 — H1).
+  try {
+    await c.env.DB.prepare(
+      "INSERT INTO exports (id, exported_by, invoice_ids, file_name, row_count, content) VALUES (?,?,?,?,?,?)",
+    ).bind(exportId, user(c).id, JSON.stringify(invoiceIds), fileName, rowCount, csv).run();
+    await auditExports(c, invoices, exportId, fileName);
+  } catch (e) {
+    await unclaimExport(c, exportId);
+    throw e;
+  }
 
   return c.json({ exportId, fileName, rowCount, invoiceCount: invoices.length, csv }, 201);
 });
@@ -374,11 +390,15 @@ exportRoutes.post("/factor", async (c) => {
   // Claim the batch atomically before persisting anything (see POST /).
   const claim = await claimInvoicesForExport(c, invoiceIds, exportId, nowIso());
   if (!claim.ok) return claim.response;
-  await c.env.DB.prepare(
-    "INSERT INTO exports (id, exported_by, invoice_ids, file_name, row_count, content) VALUES (?,?,?,?,?,?)",
-  ).bind(exportId, user(c).id, JSON.stringify(invoiceIds), fileName, totalRowCount, JSON.stringify(payload)).run();
-
-  await auditExports(c, invoices, exportId, fileName);
+  try {
+    await c.env.DB.prepare(
+      "INSERT INTO exports (id, exported_by, invoice_ids, file_name, row_count, content) VALUES (?,?,?,?,?,?)",
+    ).bind(exportId, user(c).id, JSON.stringify(invoiceIds), fileName, totalRowCount, JSON.stringify(payload)).run();
+    await auditExports(c, invoices, exportId, fileName);
+  } catch (e) {
+    await unclaimExport(c, exportId);
+    throw e;
+  }
 
   return c.json(payload, 201);
 });

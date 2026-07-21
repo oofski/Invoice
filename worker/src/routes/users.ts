@@ -87,10 +87,10 @@ users.patch("/:id", async (c) => {
   const wantsRoleChange = "role" in b;
   if (wantsDeactivate || wantsRoleChange) {
     const target = await c.env.DB.prepare(
-      "SELECT id, role FROM users WHERE id = ?",
+      "SELECT id, role, is_active FROM users WHERE id = ?",
     )
       .bind(targetId)
-      .first<{ id: string; role: string }>();
+      .first<{ id: string; role: string; is_active: number }>();
     if (!target) return c.json({ error: "Not found" }, 404);
     const demotesFromAdmin =
       wantsRoleChange && target.role === ROLES.ADMIN && b.role !== ROLES.ADMIN;
@@ -101,8 +101,14 @@ users.patch("/:id", async (c) => {
         { error: "You can't deactivate or change the role of your own account" },
         400,
       );
-    // Deactivating or demoting the last active admin (anyone) is blocked.
-    if ((wantsDeactivate || demotesFromAdmin) && target.role === ROLES.ADMIN) {
+    // Deactivating or demoting the last active admin is blocked. Only counts when
+    // the target is CURRENTLY an active admin — touching an already-inactive admin
+    // can't reduce the active-admin count, so it must stay allowed (v1.9.10).
+    if (
+      (wantsDeactivate || demotesFromAdmin) &&
+      target.role === ROLES.ADMIN &&
+      target.is_active
+    ) {
       const admins = await c.env.DB.prepare(
         "SELECT COUNT(*) as n FROM users WHERE role = ? AND is_active = 1",
       )
@@ -154,12 +160,14 @@ users.delete("/:id", async (c) => {
   if (id === me.id)
     return c.json({ error: "You can't delete your own account" }, 400);
 
-  const target = await c.env.DB.prepare("SELECT id, role FROM users WHERE id = ?")
+  const target = await c.env.DB.prepare("SELECT id, role, is_active FROM users WHERE id = ?")
     .bind(id)
-    .first<{ id: string; role: string }>();
+    .first<{ id: string; role: string; is_active: number }>();
   if (!target) return c.json({ error: "Not found" }, 404);
 
-  if (target.role === ROLES.ADMIN) {
+  // Only an ACTIVE admin counts toward the last-active-admin floor — deleting an
+  // already-inactive admin can't cause lockout, so it stays allowed (v1.9.10).
+  if (target.role === ROLES.ADMIN && target.is_active) {
     const admins = await c.env.DB.prepare(
       "SELECT COUNT(*) as n FROM users WHERE role = ? AND is_active = 1",
     )

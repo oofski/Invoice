@@ -189,6 +189,7 @@ receipts.post("/transactions/:id/receipts", async (c) => {
     uploadedBy: u.id,
     fireAlert: !isManager(c),
     uploaderName: u.name,
+    sourceIsShared: false, // bytes already stored at a private receipt key (H5)
   });
 
   return c.json(
@@ -273,40 +274,40 @@ receipts.delete("/receipts/:id", async (c) => {
   await c.env.DB.prepare("DELETE FROM cc_receipts WHERE id = ?").bind(id).run();
   await ccMaybeDeleteObject(c.env, receipt.r2_key);
 
-  // If this tx now has zero receipts, cascade its coding children and revert
-  // status. v1.9.10 (H6): the single-delete previously left cc_receipt_lines /
-  // cc_line_allocations / cc_entity_splits orphaned (the batch-delete cascades
-  // them; this path didn't), so the ledger kept counting a deleted receipt's
-  // splits and a re-upload doubled the line rows. NOT_REQUIRED/WAIVED are
-  // deliberate manager states, so the status revert stays guarded to
-  // UPLOADED/RECEIVED. Never break the delete.
+  // v1.9.10 (H6): remove ONLY this deleted receipt's own OCR line-coding (keyed
+  // by receipt_id) and its allocations — always, even when sibling receipts
+  // remain — so a re-upload can't leave orphaned rows that double the tx's lines.
+  // cc_entity_splits is intentionally NOT touched: it is authoritative manager
+  // coding (a manager can enter it via PUT /splits with no receipt at all), not
+  // receipt-owned, so deleting a receipt must not destroy it. If the tx now has
+  // zero receipts, revert its status (guarded to UPLOADED/RECEIVED; the deliberate
+  // NOT_REQUIRED/WAIVED manager states are left alone). Never break the delete.
   try {
     const txId = receipt.transaction_id;
+    await c.env.DB.batch([
+      c.env.DB
+        .prepare(
+          "DELETE FROM cc_line_allocations WHERE line_id IN (SELECT id FROM cc_receipt_lines WHERE receipt_id = ?)",
+        )
+        .bind(id),
+      c.env.DB
+        .prepare("DELETE FROM cc_receipt_lines WHERE receipt_id = ?")
+        .bind(id),
+    ]);
     const remaining = await c.env.DB.prepare(
       "SELECT COUNT(*) AS n FROM cc_receipts WHERE transaction_id = ?",
     )
       .bind(txId)
       .first<{ n: number }>();
     if ((remaining?.n ?? 0) === 0) {
-      await c.env.DB.batch([
-        c.env.DB
-          .prepare("DELETE FROM cc_line_allocations WHERE transaction_id = ?")
-          .bind(txId),
-        c.env.DB
-          .prepare("DELETE FROM cc_receipt_lines WHERE transaction_id = ?")
-          .bind(txId),
-        c.env.DB
-          .prepare("DELETE FROM cc_entity_splits WHERE transaction_id = ?")
-          .bind(txId),
-        c.env.DB
-          .prepare(
-            "UPDATE cc_transactions SET receipt_status = 'PENDING', updated_at = ? WHERE id = ? AND receipt_status IN ('UPLOADED','RECEIVED')",
-          )
-          .bind(new Date().toISOString(), txId),
-      ]);
+      await c.env.DB.prepare(
+        "UPDATE cc_transactions SET receipt_status = 'PENDING', updated_at = ? WHERE id = ? AND receipt_status IN ('UPLOADED','RECEIVED')",
+      )
+        .bind(new Date().toISOString(), txId)
+        .run();
     }
   } catch (e) {
-    console.error("[cc] receipt delete cascade/revert failed:", e);
+    console.error("[cc] receipt delete cleanup/revert failed:", e);
   }
 
   return c.body(null, 204);

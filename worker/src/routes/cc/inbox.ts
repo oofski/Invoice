@@ -509,6 +509,7 @@ inbox.post("/", async (c) => {
           uploadedBy: u.id,
           fireAlert: !managerActing,
           uploaderName: u.name,
+          sourceIsShared: true, // shared inbox-drop key (H5)
         });
         await c.env.DB.prepare(
           `INSERT INTO cc_receipt_inbox
@@ -745,6 +746,7 @@ inbox.post("/:id/assign", async (c) => {
     uploadMethod: "MANAGER_UPLOAD",
     uploadedBy: row.uploaded_by,
     fireAlert: false,
+    sourceIsShared: true, // assigns from a surviving inbox row's key (H5)
   });
 
   // Apply-on-later-match (C.6c): if this queued row carried an exec split, apply it

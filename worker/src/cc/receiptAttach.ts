@@ -159,6 +159,15 @@ export interface AttachReceiptArgs {
   txId: string;
   /** R2 key where the bytes were already stored (re-used, not re-written). */
   r2Key: string;
+  /**
+   * v1.9.10 (H5): true when `r2Key` is a SHARED inbox-drop key that a surviving
+   * cc_receipt_inbox row also references (auto-match / manager-assign / mobile
+   * drop) — the attach then copies the bytes to a receipt-owned key so deleting
+   * either side can't destroy the other's object. The direct tx-first upload path
+   * already stored the bytes under a private receipt-owned key, so it passes
+   * false and skips the copy (avoiding an orphaned object + sidecar).
+   */
+  sourceIsShared?: boolean;
   fileName: string;
   fileType: string;
   sizeBytes: number;
@@ -208,29 +217,33 @@ export async function attachReceiptToTx(
     uploadedBy,
     fireAlert,
     uploaderName,
+    sourceIsShared,
   } = args;
 
   const receiptId = uuid();
   const at = nowIso();
 
-  // v1.9.10 (H5): give the attached receipt its OWN R2 object. The inbox drop
-  // and the cc_receipts row used to share one key, so deleting either (batch
-  // delete, inbox delete) destroyed the other's bytes. Copy the stored bytes to
-  // a receipt-keyed object; on any failure fall back to sharing the source key
-  // (best-effort — never block the attach). The refcount-guarded deletes
-  // (`ccMaybeDeleteObject`) keep legacy shared keys safe too.
+  // v1.9.10 (H5): when the source key is a SHARED inbox-drop key, give the
+  // attached receipt its OWN R2 object so deleting either side can't destroy the
+  // other's bytes. The direct upload path already stored bytes under a private
+  // receipt-owned key (sourceIsShared=false), so it skips the copy — copying
+  // there would orphan the original object + its reducto sidecar. On any copy
+  // failure we fall back to sharing the source key (best-effort, never block the
+  // attach); the refcount-guarded deletes keep legacy shared keys safe too.
   let receiptR2Key = r2Key;
-  try {
-    const copyKey = ccReceiptKey(receiptId, ccExtForType(fileType));
-    if (copyKey !== r2Key) {
-      const src = await ccGet(env, r2Key);
-      if (src) {
-        await ccPut(env, copyKey, await src.arrayBuffer(), fileType || undefined);
-        receiptR2Key = copyKey;
+  if (sourceIsShared) {
+    try {
+      const copyKey = ccReceiptKey(receiptId, ccExtForType(fileType));
+      if (copyKey !== r2Key) {
+        const src = await ccGet(env, r2Key);
+        if (src) {
+          await ccPut(env, copyKey, await src.arrayBuffer(), fileType || undefined);
+          receiptR2Key = copyKey;
+        }
       }
+    } catch (e) {
+      console.error("[cc attach] receipt object copy failed; sharing source key:", e);
     }
-  } catch (e) {
-    console.error("[cc attach] receipt object copy failed; sharing source key:", e);
   }
 
   const ocrData: ReceiptOcrData = {
