@@ -10,8 +10,9 @@ import {
   hydrateInvoice,
 } from "../lib/db";
 import { processInvoiceAI, ingestInvoicePdf, recomputeReconciliation } from "../lib/process";
-import { getPdf, deletePdf, getReductoRaw, stampedKey } from "../lib/storage";
+import { getPdf, putPdf, deletePdf, getReductoRaw, stampedKey } from "../lib/storage";
 import { getStampedPdf } from "../lib/pdfStamp";
+import { normalizeToStorable, sniffBytes, withExt } from "../lib/pdfNormalize";
 import {
   sendReminderEmail,
   sendRejectionEmail,
@@ -610,6 +611,108 @@ invoices.post("/:id/accept-review", async (c) => {
     manually_reviewed_at: at,
     manually_reviewed_by: u.name,
     status: advanced ? INVOICE_STATUS.PENDING_APPROVAL : inv.status,
+  });
+});
+
+// ----- POST /admin/repair-pdfs -----------------------------------------
+// v1.9.9: repair attachments historically stored mislabeled as application/pdf
+// (a scanned image / HTML email body written verbatim under a .pdf label). The
+// bulk-zip then downloaded those as unreadable "text". Batched (cursor by
+// invoice_id) so each request stays within Worker CPU/subrequest limits — the
+// client loops until nextCursor is null. Each object is sniffed via a cheap R2
+// range read; images are converted to real one-page PDFs, other non-PDFs are
+// relabeled with their true mime, and the "APPROVED" stamp sidecar is dropped so
+// it re-renders from the corrected bytes.
+invoices.post("/admin/repair-pdfs", async (c) => {
+  if (!hasRole(c, ROLES.ADMIN)) return c.json({ error: "Forbidden" }, 403);
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 20, 1), 100);
+  const cursor = c.req.query("cursor") || "";
+
+  const rows = await c.env.DB.prepare(
+    "SELECT invoice_id, file_name, r2_key, mime FROM pdf_files WHERE invoice_id > ? ORDER BY invoice_id ASC LIMIT ?",
+  )
+    .bind(cursor, limit)
+    .all<{
+      invoice_id: string;
+      file_name: string | null;
+      r2_key: string;
+      mime: string;
+    }>();
+
+  const list = rows.results ?? [];
+  let converted = 0;
+  let relabeled = 0;
+  let okPdf = 0;
+  let missing = 0;
+  let failed = 0;
+
+  for (const row of list) {
+    try {
+      // Cheap magic-byte sniff via a 16-byte range read.
+      const head = await c.env.PDFS.get(row.r2_key, {
+        range: { offset: 0, length: 16 },
+      });
+      if (!head) {
+        missing++;
+        continue;
+      }
+      const t = sniffBytes(new Uint8Array(await head.arrayBuffer()));
+
+      if (t === "pdf") {
+        // Real PDF already; just make sure the label agrees.
+        if (row.mime !== "application/pdf") {
+          await c.env.DB.prepare(
+            "UPDATE pdf_files SET mime = 'application/pdf' WHERE invoice_id = ?",
+          )
+            .bind(row.invoice_id)
+            .run();
+        }
+        okPdf++;
+        continue;
+      }
+
+      // Non-PDF: full read + normalize (image -> PDF, else keep true mime).
+      const obj = await getPdf(c.env, row.r2_key);
+      if (!obj) {
+        missing++;
+        continue;
+      }
+      const norm = await normalizeToStorable(await obj.arrayBuffer());
+      await putPdf(c.env, row.r2_key, norm.bytes, norm.mime);
+      await c.env.DB.prepare(
+        "UPDATE pdf_files SET mime = ?, size = ?, file_name = ? WHERE invoice_id = ?",
+      )
+        .bind(
+          norm.mime,
+          norm.bytes.byteLength,
+          withExt(row.file_name || "invoice", norm.isPdf ? "pdf" : norm.ext),
+          row.invoice_id,
+        )
+        .run();
+      // Drop any stale "APPROVED" stamp so it re-stamps from the corrected bytes.
+      try {
+        await deletePdf(c.env, stampedKey(row.r2_key));
+      } catch {
+        /* sidecar may not exist — ignore */
+      }
+      if (norm.converted) converted++;
+      else relabeled++;
+    } catch (e) {
+      console.error("[repair-pdfs] failed for", row.invoice_id, e);
+      failed++;
+    }
+  }
+
+  const nextCursor =
+    list.length === limit ? list[list.length - 1].invoice_id : null;
+  return c.json({
+    processed: list.length,
+    converted,
+    relabeled,
+    okPdf,
+    missing,
+    failed,
+    nextCursor,
   });
 });
 

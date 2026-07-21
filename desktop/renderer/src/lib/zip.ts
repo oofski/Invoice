@@ -24,9 +24,53 @@ export interface ZipPdfItem {
   fileName: string;
 }
 
+export interface ZipResult {
+  blob: Blob;
+  /** Number of real files written into the archive. */
+  zipped: number;
+  /** Human labels of attachments that weren't a viewable document (see manifest). */
+  skipped: string[];
+}
+
 /** Strips characters that are unsafe in a zip entry / OS file name. */
 function safeName(name: string): string {
   return name.replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, " ").trim() || "invoice";
+}
+
+/**
+ * Magic-byte sniff of the fetched bytes (NOT the response content-type, which
+ * older mislabeled invoices report as application/pdf even for non-PDFs). Returns
+ * the correct extension, or ok=false for anything that isn't a viewable document
+ * (HTML/text/JSON/unknown) so the caller never forges a broken `.pdf`.
+ */
+function sniff(b: Uint8Array): { ext: string; ok: boolean } {
+  if (b.length >= 4 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46)
+    return { ext: "pdf", ok: true }; // %PDF
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff)
+    return { ext: "jpg", ok: true };
+  if (b.length >= 4 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47)
+    return { ext: "png", ok: true };
+  if (b.length >= 3 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46)
+    return { ext: "gif", ok: true };
+  if (
+    b.length >= 12 &&
+    b[0] === 0x52 &&
+    b[1] === 0x49 &&
+    b[2] === 0x46 &&
+    b[3] === 0x46 &&
+    b[8] === 0x57 &&
+    b[9] === 0x45 &&
+    b[10] === 0x42 &&
+    b[11] === 0x50
+  )
+    return { ext: "webp", ok: true };
+  if (
+    b.length >= 4 &&
+    ((b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2a && b[3] === 0x00) ||
+      (b[0] === 0x4d && b[1] === 0x4d && b[2] === 0x00 && b[3] === 0x2a))
+  )
+    return { ext: "tiff", ok: true };
+  return { ext: "", ok: false }; // text / html / json / unknown — not a real doc
 }
 
 /**
@@ -38,10 +82,11 @@ function safeName(name: string): string {
 export async function zipPdfs(
   items: ZipPdfItem[],
   onProgress?: (done: number, total: number) => void,
-): Promise<Blob> {
+): Promise<ZipResult> {
   const total = items.length;
   let done = 0;
   const entries: Zippable = {};
+  const skipped: string[] = [];
 
   let cursor = 0;
   async function worker() {
@@ -50,9 +95,17 @@ export async function zipPdfs(
       try {
         const blob = await api.getBlob(`/api/invoices/${item.id}/pdf`);
         const bytes = new Uint8Array(await blob.arrayBuffer());
-        // id prefix guarantees uniqueness even on duplicate vendor+number.
-        const entryName = `${safeName(item.fileName)}_${item.id}.pdf`;
-        entries[entryName] = [bytes, { level: STORE_LEVEL }];
+        const kind = sniff(bytes);
+        if (!kind.ok) {
+          // Not a viewable document (e.g. an HTML email body stored as a "PDF").
+          // Record it instead of writing an unreadable `.pdf` into the archive.
+          skipped.push(`${item.fileName} (${item.id})`);
+        } else {
+          // id prefix guarantees uniqueness even on duplicate vendor+number;
+          // extension reflects the REAL content, not a forged `.pdf`.
+          const entryName = `${safeName(item.fileName)}_${item.id}.${kind.ext}`;
+          entries[entryName] = [bytes, { level: STORE_LEVEL }];
+        }
       } catch {
         // Missing PDF / 403 / 404 / network — skip this invoice silently.
       } finally {
@@ -68,6 +121,17 @@ export async function zipPdfs(
   );
   await Promise.all(pool);
 
-  const zipped = zipSync(entries);
-  return new Blob([zipped], { type: ZIP_MIME });
+  const zipped = Object.keys(entries).length;
+  if (skipped.length > 0) {
+    // Surface exactly which invoices have no usable PDF, inside the archive.
+    const manifest =
+      "These approved invoices had no usable PDF (the stored attachment isn't a " +
+      "viewable document — re-upload a PDF, or run Repair attachments):\n\n" +
+      skipped.map((s) => `  - ${s}`).join("\n") +
+      "\n";
+    entries["_UNREADABLE.txt"] = [new TextEncoder().encode(manifest), { level: STORE_LEVEL }];
+  }
+
+  const zippedBytes = zipSync(entries);
+  return { blob: new Blob([zippedBytes], { type: ZIP_MIME }), zipped, skipped };
 }

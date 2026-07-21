@@ -8,7 +8,9 @@ import {
   FileSpreadsheet,
   FileArchive,
   Check,
+  Wrench,
 } from "lucide-react";
+import { useProfile } from "@/components/ProfileProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Button, Spinner, EmptyState } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
@@ -16,7 +18,7 @@ import { useInvoiceRefresh } from "@/lib/invoiceRefresh";
 import { api, ApiError } from "@/lib/api";
 import { toast } from "@/components/ui/Toast";
 import { formatCurrency, formatDate, cn, downloadBlob } from "@/lib/utils";
-import { INVOICE_STATUS } from "@/lib/constants";
+import { INVOICE_STATUS, ROLES } from "@/lib/constants";
 import { buildBillWorkbook } from "@/lib/workbook";
 import { zipPdfs } from "@/lib/zip";
 import type { QueueInvoice } from "@/components/InvoiceTable";
@@ -121,6 +123,11 @@ export default function ExportPage() {
   const [zipProgress, setZipProgress] = useState<{ done: number; total: number } | null>(
     null,
   );
+  const [repairing, setRepairing] = useState(false);
+  const [repairProgress, setRepairProgress] = useState<string | null>(null);
+
+  const profile = useProfile();
+  const isAdmin = profile.role === ROLES.ADMIN;
 
   const invoices = data?.invoices ?? [];
   // v1.6.0: only sentinel (REQUIRES_MANUAL_REVIEW) lines hard-block export.
@@ -264,16 +271,64 @@ export default function ExportPage() {
     setZipping(true);
     setZipProgress({ done: 0, total: items.length });
     try {
-      const blob = await zipPdfs(items, (done, total) =>
+      const { blob, zipped, skipped } = await zipPdfs(items, (done, total) =>
         setZipProgress({ done, total }),
       );
       downloadBlob(blob, `InvoiceIQ_Approved_PDFs_${yyyymmdd()}.zip`);
-      toast.success(`Zipped ${items.length} approved PDF(s)`);
+      if (skipped.length > 0) {
+        toast.info(
+          `Zipped ${zipped} file(s); ${skipped.length} had no usable PDF (see _UNREADABLE.txt). Try "Repair attachments".`,
+        );
+      } else {
+        toast.success(`Zipped ${zipped} approved PDF(s)`);
+      }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Zip download failed");
     } finally {
       setZipping(false);
       setZipProgress(null);
+    }
+  }
+
+  // v1.9.9 (admin): one-time backfill that repairs attachments historically
+  // stored mislabeled as application/pdf (a scanned image or HTML email body).
+  // Loops the batched worker endpoint (cursor-paged) until every row is scanned.
+  async function repairAttachments() {
+    setRepairing(true);
+    const totals = { processed: 0, converted: 0, relabeled: 0, failed: 0 };
+    let cursor = "";
+    try {
+      for (;;) {
+        const r = await api.post<{
+          processed: number;
+          converted: number;
+          relabeled: number;
+          okPdf: number;
+          missing: number;
+          failed: number;
+          nextCursor: string | null;
+        }>(
+          `/api/invoices/admin/repair-pdfs?limit=20&cursor=${encodeURIComponent(cursor)}`,
+        );
+        totals.processed += r.processed;
+        totals.converted += r.converted;
+        totals.relabeled += r.relabeled;
+        totals.failed += r.failed;
+        setRepairProgress(
+          `Scanned ${totals.processed} · fixed ${totals.converted + totals.relabeled}`,
+        );
+        if (!r.nextCursor) break;
+        cursor = r.nextCursor;
+      }
+      toast.success(
+        `Repair complete — scanned ${totals.processed}, ${totals.converted} image(s) converted to PDF, ${totals.relabeled} relabeled${totals.failed ? `, ${totals.failed} failed` : ""}.`,
+      );
+      refreshAll();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Repair failed");
+    } finally {
+      setRepairing(false);
+      setRepairProgress(null);
     }
   }
 
@@ -336,6 +391,17 @@ export default function ExportPage() {
                 ? `Zipping ${zipProgress.done} of ${zipProgress.total}…`
                 : "Download approved PDFs (.zip)"}
             </Button>
+            {isAdmin && (
+              <Button
+                variant="secondary"
+                onClick={repairAttachments}
+                loading={repairing}
+                title="One-time repair: convert mislabeled image/non-PDF attachments into real PDFs across all invoices"
+              >
+                <Wrench className="h-4 w-4" />
+                {repairing && repairProgress ? repairProgress : "Repair attachments"}
+              </Button>
+            )}
           </div>
         }
       />

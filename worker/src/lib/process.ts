@@ -6,6 +6,7 @@ import {
   type ExtractedInvoice,
 } from "./extract";
 import { getPdf, putPdf, deletePdf, pdfKey, putReductoRaw } from "./storage";
+import { normalizeToStorable, withExt } from "./pdfNormalize";
 import { runRulesPipeline } from "./pipeline";
 import { audit, resolveApproverUser, getInvoice } from "./db";
 import { sendApprovalEmail } from "./email";
@@ -727,11 +728,21 @@ export async function ingestInvoicePdf(
   }
 
   const key = pdfKey(id);
-  await putPdf(env, key, buf);
+  // v1.9.9: sniff the real type and normalize (image -> real one-page PDF; a
+  // genuine PDF is stored as-is; anything else keeps its TRUE mime) so nothing
+  // is ever silently stored as a mislabeled "application/pdf".
+  const norm = await normalizeToStorable(buf);
+  await putPdf(env, key, norm.bytes, norm.mime);
   await env.DB.prepare(
     "INSERT INTO pdf_files (invoice_id, file_name, mime, r2_key, size) VALUES (?,?,?,?,?)",
   )
-    .bind(id, fileName, "application/pdf", key, buf.byteLength)
+    .bind(
+      id,
+      norm.isPdf ? withExt(fileName, "pdf") : withExt(fileName, norm.ext),
+      norm.mime,
+      key,
+      norm.bytes.byteLength,
+    )
     .run();
   // Persist the RAW Reducto response as an R2 sidecar next to the PDF for later
   // diagnosis (v1.1.8 A). Best-effort — never fail ingest on the sidecar write.
@@ -751,7 +762,13 @@ export async function ingestInvoicePdf(
       total_amount: total,
       submission_type: submissionType,
     },
-    note: source ? `Ingested ${fileName} from ${source}` : `Uploaded ${fileName}`,
+    note:
+      (source ? `Ingested ${fileName} from ${source}` : `Uploaded ${fileName}`) +
+      (norm.converted
+        ? ` (converted ${norm.sourceType.toUpperCase()} image to PDF)`
+        : norm.isPdf
+          ? ""
+          : ` (stored as ${norm.mime}; no usable PDF)`),
   });
 
   // v1.9.7 (bug #29): the row/PDF/audit are already committed. If AI coding

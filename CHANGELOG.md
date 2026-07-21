@@ -5,6 +5,29 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.9] — 2026-07-21
+
+Fixes the "zip export gives me text, not the approved PDFs" bug. Root cause: the
+SharePoint/email ingest stored **whatever bytes arrived** (a scanned JPEG/PNG, an
+HTML email body) under an `application/pdf` label with **no validation**, so the
+bulk-zip later downloaded them as unreadable `.pdf` files.
+
+### Fixed / Added
+- **Ingest now validates + normalizes every attachment (root cause).** Incoming
+  bytes are sniffed by magic number: a real PDF is stored as-is, a **JPEG/PNG is
+  converted into a true one-page PDF** (so the viewer, the "APPROVED" stamp, and
+  the zip all keep working), and anything else is stored with its **real** mime
+  instead of a forged `application/pdf`. The audit note records any conversion.
+- **The PDF zip is now content-aware.** Each entry is named by its real type
+  (`.pdf`/`.jpg`/…), and any attachment that isn't a viewable document is **listed
+  in a `_UNREADABLE.txt` manifest inside the archive** instead of being written as
+  a broken `.pdf`. The result toast tells you how many (if any) had no usable PDF.
+- **New admin "Repair attachments" backfill** (Batch Export page). One click
+  scans every existing invoice, converts mislabeled image attachments to real
+  PDFs, relabels other non-PDFs with their true type, and refreshes the "APPROVED"
+  stamp — so your *existing* approved invoices become clean without re-uploading.
+  Runs in cursor-paged batches and is safe to re-run (idempotent).
+
 ## [1.9.8] — 2026-07-15
 
 Makes "These are fine — proceed" a real, recorded **manual review check** and

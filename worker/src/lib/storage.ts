@@ -71,10 +71,10 @@ export function getStampedPdf_R2(env: Env, pdfR2Key: string) {
 export async function putPdf(
   env: Env,
   key: string,
-  bytes: ArrayBuffer,
+  bytes: ArrayBuffer | Uint8Array,
   mime = "application/pdf",
 ): Promise<void> {
-  await env.PDFS.put(key, bytes, {
+  await env.PDFS.put(key, bytes as ArrayBuffer, {
     httpMetadata: { contentType: mime },
   });
 }
