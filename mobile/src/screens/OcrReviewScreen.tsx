@@ -24,7 +24,7 @@ import { Spinner } from "../components/Spinner";
 export function OcrReviewScreen() {
   const navigate = useNavigate();
   const flow = useFlow();
-  const { file, ocr, status, total, applyDropResult, setTotal } = flow;
+  const { file, ocr, status, total, inboxId, applyDropResult, setTotal } = flow;
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [totalInput, setTotalInput] = useState<string>(
@@ -71,6 +71,11 @@ export function OcrReviewScreen() {
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
+    // v1.9.11 (M12): if this file was ALREADY dropped (Back navigation remounts
+    // this screen with a fresh ran ref), reuse the existing inbox row instead of
+    // re-posting — a re-drop created a duplicate receipt + a duplicate manager
+    // alert, and clobbered the exec's manually corrected total.
+    if (inboxId) return;
     void runDrop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -224,7 +224,7 @@ function serializePendingPayload(p: PendingPayload): string {
 export const inbox = new Hono<AppEnv>();
 
 const MAX_RECEIPT_BYTES = 20 * 1024 * 1024; // 20MB (mirrors receipts.ts)
-const ALLOWED_RECEIPT_TYPES = /pdf|jpe?g|png/i;
+const ALLOWED_RECEIPT_TYPES = /pdf|jpe?g|png|webp|heic|heif/i; // v1.9.11 (L7)
 const UPLOAD_METHODS: CcUploadMethod[] = [
   "CAPITAL_ONE_APP",
   "INVOICE_IQ_APP",
@@ -872,12 +872,24 @@ inbox.patch("/:id/pending_splits", async (c) => {
       payload.kind === "lines"
         ? await applyPendingLines(c.env, row.matched_transaction_id, payload.lines)
         : await applyPendingSplits(c.env, row.matched_transaction_id, payload.rows);
+    // v1.9.11 (M11): only clear the stash when it actually applied. If it failed
+    // (e.g. the coded lines don't reconcile to the CHARGE amount), KEEP it and
+    // report pending:true so the split isn't silently lost while the UI claims
+    // it was saved.
+    if (applied) {
+      await c.env.DB.prepare(
+        "UPDATE cc_receipt_inbox SET pending_splits = NULL, updated_at = ? WHERE id = ?",
+      )
+        .bind(at, id)
+        .run();
+      return c.json({ applied: true, pending: false });
+    }
     await c.env.DB.prepare(
-      "UPDATE cc_receipt_inbox SET pending_splits = NULL, updated_at = ? WHERE id = ?",
+      "UPDATE cc_receipt_inbox SET pending_splits = ?, updated_at = ? WHERE id = ?",
     )
-      .bind(at, id)
+      .bind(serializePendingPayload(payload), at, id)
       .run();
-    return c.json({ applied, pending: false });
+    return c.json({ applied: false, pending: true });
   }
 
   // Not yet matched: stash the (canonical) split to apply automatically on a later

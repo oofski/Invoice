@@ -45,7 +45,10 @@ export default function AuditPage() {
   const query = new URLSearchParams();
   if (action) query.set("action", action);
   if (userId) query.set("userId", userId);
-  if (from) query.set("from", new Date(from).toISOString());
+  // v1.9.11 (L8): anchor BOTH bounds to the local day. `new Date("2026-07-21")`
+  // parses as UTC midnight while `...T23:59:59` parses as local, so an un-anchored
+  // `from` pulled in the prior local evening for UTC-negative users.
+  if (from) query.set("from", new Date(from + "T00:00:00").toISOString());
   if (to) query.set("to", new Date(to + "T23:59:59").toISOString());
   if (showAll) query.set("showAll", "1");
 

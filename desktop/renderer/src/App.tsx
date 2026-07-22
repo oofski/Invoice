@@ -68,6 +68,30 @@ function ApOnly() {
   return <Outlet />;
 }
 
+/**
+ * v1.9.11 (L2): admin-only gate for /admin/users. The sidebar link is already
+ * admin-only, but the route was reachable by hash for accountants (who can read
+ * GET /api/users). Bounce every non-admin home.
+ */
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const profile = useProfile();
+  if (profile.role !== ROLES.ADMIN) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+/**
+ * v1.9.11 (L3): force a still-pending first-login password change. A user issued
+ * a temporary password who reloads (or deep-links) is routed to /change-password
+ * on every authenticated route until they change it. /change-password is a public
+ * route outside this shell, so there's no redirect loop.
+ */
+function PasswordGate({ children }: { children: React.ReactNode }) {
+  const profile = useProfile();
+  if (profile.must_change_password)
+    return <Navigate to="/change-password" replace />;
+  return <>{children}</>;
+}
+
 /** Landing redirect for /credit-cards — managers → dashboard, cardholders → my-receipts. */
 function CcHome() {
   const isManager = useCcManager();
@@ -96,7 +120,9 @@ export default function App() {
         <Route
           element={
             <ProfileProvider>
-              <AppShell />
+              <PasswordGate>
+                <AppShell />
+              </PasswordGate>
             </ProfileProvider>
           }
         >
@@ -112,7 +138,14 @@ export default function App() {
             <Route path="/export" element={<ExportPage />} />
             <Route path="/vendors" element={<VendorsPage />} />
             <Route path="/audit" element={<AuditPage />} />
-            <Route path="/admin/users" element={<AdminUsersPage />} />
+            <Route
+              path="/admin/users"
+              element={
+                <AdminOnly>
+                  <AdminUsersPage />
+                </AdminOnly>
+              }
+            />
           </Route>
           <Route path="/settings" element={<SettingsPage />} />
 

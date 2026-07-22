@@ -44,7 +44,7 @@ import type {
 export const receipts = new Hono<AppEnv>();
 
 const MAX_RECEIPT_BYTES = 20 * 1024 * 1024; // 20MB
-const ALLOWED_RECEIPT_TYPES = /pdf|jpe?g|png/i;
+const ALLOWED_RECEIPT_TYPES = /pdf|jpe?g|png|webp|heic|heif/i; // v1.9.11 (L7)
 const UPLOAD_METHODS: CcUploadMethod[] = [
   "CAPITAL_ONE_APP",
   "INVOICE_IQ_APP",

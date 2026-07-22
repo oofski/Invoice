@@ -20,7 +20,14 @@ import {
 } from "@/cc/ccApi";
 
 const MAX_BYTES = 20 * 1024 * 1024;
-const ALLOWED = ["application/pdf", "image/jpeg", "image/png"];
+const ALLOWED = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+];
 
 export default function CcMyReceiptsPage() {
   const [transactions, setTransactions] = useState<CcTransaction[]>([]);
@@ -363,7 +370,7 @@ export default function CcMyReceiptsPage() {
             <input
               ref={fileRef}
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];

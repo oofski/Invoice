@@ -224,4 +224,6 @@ export interface AuthUser {
   email: string;
   role: string;
   entity_access: string[] | null;
+  /** v1.9.11 (L3): surfaced on /me so the client can force a first-login change. */
+  must_change_password?: boolean;
 }

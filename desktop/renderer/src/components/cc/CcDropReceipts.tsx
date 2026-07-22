@@ -15,7 +15,14 @@ import { ccApi, type PerFileResult } from "@/cc/ccApi";
 import { emitCcRefresh } from "@/cc/ccRefresh";
 
 const MAX_BYTES = 20 * 1024 * 1024;
-const ALLOWED = ["application/pdf", "image/jpeg", "image/png"];
+const ALLOWED = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+];
 
 /** True when this device/build can open a live camera (getUserMedia). */
 function cameraSupported(): boolean {
@@ -210,7 +217,7 @@ export function CcDropReceipts({ onDropped }: { onDropped?: () => void }) {
           ref={fileRef}
           type="file"
           multiple
-          accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+          accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif"
           className="hidden"
           onChange={(e) => {
             const files = Array.from(e.target.files ?? []);

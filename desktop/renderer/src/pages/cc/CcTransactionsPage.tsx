@@ -70,6 +70,7 @@ export default function CcTransactionsPage() {
   const [filters, setFilters] = useState<TransactionsQuery>({ per_page: 200 });
   const [search, setSearch] = useState("");
   const [transactions, setTransactions] = useState<CcTransaction[]>([]);
+  const [total, setTotal] = useState(0); // v1.9.11 (M5): server match count
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
 
@@ -115,6 +116,7 @@ export default function CcTransactionsPage() {
     try {
       const res = await ccApi.listTransactions(queryString);
       setTransactions(res.transactions ?? []);
+      setTotal(res.total ?? (res.transactions?.length ?? 0));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed to load transactions");
     } finally {
@@ -719,6 +721,15 @@ export default function CcTransactionsPage() {
               />
             ) : (
               <div className="scroll-thin overflow-x-auto">
+                {total > transactions.length && (
+                  // v1.9.11 (M5): the list is capped — make the hidden rows
+                  // visible so bulk "select all" / archive isn't silently partial.
+                  <div className="mb-2 rounded-md bg-warning-soft-bg px-3 py-2 text-xs text-warning">
+                    Showing {transactions.length} of {total} matching transactions.
+                    Refine the filters to narrow the list — bulk actions apply only
+                    to the {transactions.length} shown.
+                  </div>
+                )}
                 <table className="w-full min-w-[820px] text-sm">
                   <thead>
                     <tr className="border-b border-line bg-surface-2 text-left text-xs uppercase tracking-[0.12em] text-ink-muted">

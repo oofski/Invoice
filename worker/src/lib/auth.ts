@@ -89,6 +89,7 @@ export async function userFromToken(
     email: row.email,
     role: row.role,
     entity_access: row.entity_access ? JSON.parse(row.entity_access) : null,
+    must_change_password: !!row.must_change_password,
   };
 }
 

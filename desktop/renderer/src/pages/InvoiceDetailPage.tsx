@@ -382,6 +382,19 @@ export default function InvoiceDetailPage() {
                       <>
                         <strong>{reviewCount}</strong> line item
                         {reviewCount === 1 ? " is" : "s are"} flagged for review.
+                        {/* v1.9.11 (M1): when a reconciliation gap is ALSO present,
+                            name it here — "These are fine" clears it too, so it
+                            must not be a silent side effect. */}
+                        {hasReconcileGap && invoice.reconciliation_delta != null && (
+                          <>
+                            {" "}
+                            The line items are also off from the invoice total by{" "}
+                            <strong>
+                              ${Math.abs(invoice.reconciliation_delta).toFixed(2)}
+                            </strong>
+                            , which accepting will also clear.
+                          </>
+                        )}{" "}
                         Export will warn until resolved.
                       </>
                     )}

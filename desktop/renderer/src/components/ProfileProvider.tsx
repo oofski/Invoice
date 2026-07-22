@@ -17,6 +17,8 @@ export interface CurrentProfile {
   email: string;
   role: AuthUser["role"];
   entity_access?: string[] | null;
+  /** v1.9.11 (L3): true while the user still owes a first-login password change. */
+  must_change_password?: boolean;
 }
 
 interface ProfileContextValue {
@@ -50,6 +52,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         email: res.user.email,
         role: res.user.role,
         entity_access: res.user.entity_access ?? null,
+        must_change_password: res.user.must_change_password ?? false,
       });
     } catch {
       clearToken();

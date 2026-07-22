@@ -184,12 +184,19 @@ export async function reviewCounts(
   for (const batch of chunk(invoiceIds)) {
     const placeholders = batch.map(() => "?").join(",");
     const rows = await env.DB.prepare(
-      `SELECT invoice_id,
-              SUM(CASE WHEN requires_review = 1 THEN 1 ELSE 0 END) AS review_count,
-              SUM(CASE WHEN gl_category = ? THEN 1 ELSE 0 END) AS blocking_count
-         FROM line_items
-        WHERE invoice_id IN (${placeholders})
-        GROUP BY invoice_id`,
+      // v1.9.11 (M3): allocation-based splits (QUICK_EVEN / CUSTOM) export from
+      // invoice_allocations, NOT line coding — the export hard-block already
+      // exempts them, so a stale sentinel line must not show them as "Blocked" in
+      // the export UI. Zero their blocking_count to mirror that exemption.
+      `SELECT li.invoice_id AS invoice_id,
+              SUM(CASE WHEN li.requires_review = 1 THEN 1 ELSE 0 END) AS review_count,
+              CASE WHEN i.split_type IN ('QUICK_EVEN','CUSTOM') THEN 0
+                   ELSE SUM(CASE WHEN li.gl_category = ? THEN 1 ELSE 0 END)
+              END AS blocking_count
+         FROM line_items li
+         JOIN invoices i ON i.id = li.invoice_id
+        WHERE li.invoice_id IN (${placeholders})
+        GROUP BY li.invoice_id, i.split_type`,
     )
       .bind(REQUIRES_MANUAL_REVIEW, ...batch)
       .all<{ invoice_id: string; review_count: number; blocking_count: number }>();

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Archive, CopyCheck } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Spinner, Input, Button } from "@/components/ui/primitives";
@@ -49,8 +49,26 @@ export default function InvoicesPage() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
 
+  // v1.9.11 (M4): push status/entity/search to the SERVER so the row cap applies
+  // AFTER filtering — otherwise filters only narrowed the newest N rows and
+  // "Clear"/Excel silently missed matches beyond the cap. Search is debounced so
+  // typing doesn't refetch on every keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+  const listUrl = useMemo(() => {
+    const q = new URLSearchParams();
+    q.set("limit", String(PAGE_LIMIT));
+    if (showArchived) q.set("includeArchived", "1");
+    if (status !== "ALL") q.set("status", status);
+    if (entity) q.set("entity", entity);
+    if (debouncedSearch) q.set("q", debouncedSearch);
+    return `/api/invoices?${q.toString()}`;
+  }, [status, entity, debouncedSearch, showArchived]);
   const { data, loading, error, refetch } = useApi<{ invoices: QueueInvoice[] }>(
-    `/api/invoices?limit=${PAGE_LIMIT}${showArchived ? "&includeArchived=1" : ""}`,
+    listUrl,
   );
 
   // Keep the list live (v1.9.6): refetch on the invoice-refresh bus (fired after
