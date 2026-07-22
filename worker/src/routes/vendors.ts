@@ -22,6 +22,17 @@ vendors.post("/", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const vendor_name = (b.vendor_name as string)?.trim();
   if (!vendor_name) return c.json({ error: "vendor_name required" }, 400);
+  // v1.9.11 (L9): reject case/whitespace-variant duplicates. The DB UNIQUE is on
+  // the raw string, but all matching runs on normalizeVendor(), so "Cintas" and
+  // "cintas " must not both exist or coding becomes capitalization-dependent.
+  const norm = normalizeVendor(vendor_name);
+  if (norm) {
+    const existing = await c.env.DB.prepare(
+      "SELECT vendor_name FROM vendor_mappings",
+    ).all<{ vendor_name: string }>();
+    if ((existing.results ?? []).some((v) => normalizeVendor(v.vendor_name) === norm))
+      return c.json({ error: "A vendor with an equivalent name already exists" }, 409);
+  }
   const id = uuid();
   try {
     await c.env.DB.prepare(
@@ -76,6 +87,22 @@ vendors.post("/aliases", async (c) => {
     "SELECT id, vendor_name FROM vendor_mappings WHERE id = ?",
   ).bind(canonical_id).first<{ id: string; vendor_name: string }>();
   if (!canon) return c.json({ error: "canonical_id is not a valid vendor" }, 400);
+  // v1.9.11 (M17): reject an alias that normalizes to an EXISTING vendor's own
+  // name. Alias resolution runs before the exact-vendor match, so such an alias
+  // would silently hijack that vendor's coding/approver.
+  const vendorRows = await c.env.DB.prepare(
+    "SELECT vendor_name FROM vendor_mappings",
+  ).all<{ vendor_name: string }>();
+  const shadowed = (vendorRows.results ?? []).find(
+    (v) => normalizeVendor(v.vendor_name) === alias_norm,
+  );
+  if (shadowed)
+    return c.json(
+      {
+        error: `That alias matches an existing vendor ("${shadowed.vendor_name}") and would override its coding — pick a different alias.`,
+      },
+      409,
+    );
   const id = uuid();
   try {
     await c.env.DB.prepare(

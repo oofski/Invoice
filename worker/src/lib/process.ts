@@ -5,7 +5,7 @@ import {
   normalizeExtract,
   type ExtractedInvoice,
 } from "./extract";
-import { getPdf, putPdf, deletePdf, pdfKey, putReductoRaw } from "./storage";
+import { getPdf, putPdf, deletePdf, pdfKey, putReductoRaw, reductoKey } from "./storage";
 import { normalizeToStorable, withExt } from "./pdfNormalize";
 import { runRulesPipeline } from "./pipeline";
 import { audit, resolveApproverUser, getInvoice } from "./db";
@@ -795,6 +795,9 @@ export async function ingestInvoicePdf(
         env.DB.prepare("DELETE FROM invoices WHERE id = ?").bind(id),
       ]);
       await deletePdf(env, key);
+      // v1.9.11 (L12): also remove the Reducto sidecar written before AI coding,
+      // else it leaks in R2 forever on a rolled-back ingest.
+      await deletePdf(env, reductoKey(key));
     } catch (cleanupErr) {
       console.error("[ingest] orphan cleanup after AI failure failed:", cleanupErr);
     }

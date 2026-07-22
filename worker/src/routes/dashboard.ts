@@ -121,6 +121,10 @@ function periodFilter(
   if (from) { clauses.push(`date(${p}created_at) >= ?`); params.push(from); }
   if (to) { clauses.push(`date(${p}created_at) <= ?`); params.push(to); }
   if (archived) clauses.push(`${p}archived_at IS NULL`);
+  // v1.9.11 (M7): REJECTED invoices are never payable — exclude them from every
+  // analytics rollup (Total AP, trend, entity/vendor/GL spend) so payables aren't
+  // overstated. (PROCESSING is transient and left in; it becomes payable.)
+  clauses.push(`${p}status != ?`); params.push(INVOICE_STATUS.REJECTED);
   return { and: clauses.length ? ` AND ${clauses.join(" AND ")}` : "", params };
 }
 
@@ -200,9 +204,12 @@ dashboard.get("/analytics", async (c) => {
 
   // ----- Top vendors ---------------------------------------------------
   const vendorRows = await c.env.DB.prepare(
-    `SELECT vendor, COALESCE(SUM(total_amount), 0) AS spend, COUNT(*) AS count
+    // v1.9.11 (M16): group case/whitespace-insensitively so "Cintas", "cintas",
+    // and "Cintas " collapse into one bar instead of splitting a vendor's spend
+    // across rows. (Full alias/OCR-variant canonicalization is a larger change.)
+    `SELECT MAX(vendor) AS vendor, COALESCE(SUM(total_amount), 0) AS spend, COUNT(*) AS count
        FROM invoices WHERE 1=1${period.and}
-      GROUP BY vendor
+      GROUP BY lower(trim(vendor))
       ORDER BY spend DESC
       LIMIT ?`,
   )

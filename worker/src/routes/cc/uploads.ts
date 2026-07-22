@@ -314,8 +314,24 @@ uploads.post("/:batch_id/confirm", async (c) => {
     }
 
     let txId: string;
+    // v1.9.11 (M13): true when overwriting a tx that has ALREADY collected a
+    // receipt/coding — we then preserve its receipt_status and skip the splits
+    // replace-all so a re-imported overlapping statement can't silently revert a
+    // collected charge to PENDING and wipe manual entity splits.
+    let preserveCollected = false;
     if (existingId && forceOverwrite) {
       txId = existingId;
+      const existingState = await c.env.DB.prepare(
+        "SELECT t.receipt_status, (SELECT COUNT(*) FROM cc_receipts r WHERE r.transaction_id = t.id) AS receipts FROM cc_transactions t WHERE t.id = ?",
+      )
+        .bind(existingId)
+        .first<{ receipt_status: string; receipts: number }>();
+      preserveCollected =
+        (existingState?.receipts ?? 0) > 0 ||
+        (!!existingState?.receipt_status && existingState.receipt_status !== "PENDING");
+      const receiptStatusToStore = preserveCollected
+        ? existingState!.receipt_status
+        : row.receipt_status;
       await c.env.DB.prepare(
         `UPDATE cc_transactions SET
            source = ?, upload_batch_id = ?, cardholder_id = ?, transaction_date = ?,
@@ -336,7 +352,7 @@ uploads.post("/:batch_id/confirm", async (c) => {
           roundCents(row.amount),
           row.is_credit ? 1 : 0,
           row.is_payment ? 1 : 0,
-          row.receipt_status,
+          receiptStatusToStore,
           row.in_qb ? 1 : 0,
           row.exp_acct,
           at,
@@ -390,7 +406,9 @@ uploads.post("/:batch_id/confirm", async (c) => {
     }
 
     // Replace-all entity splits for Amex rows with non-zero entity columns.
-    if (row.source === "AMEX" && row.splits.length) {
+    // v1.9.11 (M13): skip when overwriting an already-collected tx so a re-import
+    // doesn't overwrite manual coding.
+    if (row.source === "AMEX" && row.splits.length && !preserveCollected) {
       await c.env.DB.prepare("DELETE FROM cc_entity_splits WHERE transaction_id = ?")
         .bind(txId)
         .run();

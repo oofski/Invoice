@@ -305,7 +305,10 @@ notifications.post("/send", async (c) => {
         null,
         chId,
         sender.id,
-        recipient || managerEmail || "",
+        // v1.9.11 (L11): store the cardholder's OWN address (empty when they have
+        // none) — never the manager's. The NOT_CONFIGURED mailto fallback keyed
+        // off email_to was otherwise drafting reminders addressed to the manager.
+        recipient || "",
         subject,
         bodyHtml,
         txIdsJson,

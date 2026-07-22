@@ -39,8 +39,14 @@ export const AMOUNT_TOLERANCE = 0.02;
  */
 export const DATE_WINDOW_DAYS = 5;
 
-/** The open receipt-statuses an un-receipted candidate transaction can be in. */
-const OPEN_STATUSES = ["PENDING", "UPLOADED"] as const;
+/**
+ * The receipt-statuses an auto-match candidate transaction can be in. v1.9.11
+ * (M8): only PENDING (genuinely awaiting a receipt). UPLOADED means a receipt is
+ * already attached, so auto-attaching a second one to it — often the WRONG tx
+ * when it's the only in-window amount match — is exactly the false positive we
+ * want to avoid. Managers can still manually attach to an UPLOADED tx.
+ */
+const OPEN_STATUSES = ["PENDING"] as const;
 
 // --- candidate row shape ---------------------------------------------------
 

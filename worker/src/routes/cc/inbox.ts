@@ -710,6 +710,21 @@ inbox.post("/:id/assign", async (c) => {
   const tx = await fetchTx(c.env, txId);
   if (!tx) return c.json({ error: "Transaction not found" }, 400);
 
+  // v1.9.11 (M14): claim the queued row atomically before attaching, so two
+  // managers assigning the same item (or a retried request) can't each create a
+  // cc_receipts row. Only a still-PENDING_MATCH row may be assigned; the final
+  // UPDATE below fills in the receipt/tx linkage.
+  const claim = await c.env.DB.prepare(
+    "UPDATE cc_receipt_inbox SET status = 'MATCHED', updated_at = ? WHERE id = ? AND status = 'PENDING_MATCH'",
+  )
+    .bind(nowIso(), id)
+    .run();
+  if ((claim.meta?.changes ?? 0) === 0)
+    return c.json(
+      { error: "This item is no longer pending — it was already assigned or matched." },
+      409,
+    );
+
   // Parse the persisted OCR JSON to rebuild the normalized receipt + match.
   let ocr: ReceiptOcrData | null = null;
   if (row.ocr_extracted_data) {

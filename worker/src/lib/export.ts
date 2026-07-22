@@ -642,7 +642,16 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
 
   const entities: EntitySheet[] = [];
   let totalRowCount = 0;
-  for (const entity of BUSINESS_ENTITIES) {
+  // v1.9.11 (M2): render canonical entities first, then ANY leftover entity keys
+  // (a null/legacy `business` maps to "") so their bills land on an "Unassigned"
+  // sheet instead of silently vanishing while still being counted as exported.
+  const orderedEntities: string[] = [
+    ...BUSINESS_ENTITIES,
+    ...[...billsByEntity.keys()].filter(
+      (e) => !(BUSINESS_ENTITIES as readonly string[]).includes(e),
+    ),
+  ];
+  for (const entity of orderedEntities) {
     const entityBills = billsByEntity.get(entity);
     if (!entityBills || entityBills.length === 0) continue;
     const rows: QboBillRow[] = [];
@@ -674,7 +683,9 @@ export function generateQboBillFactor(invoices: ExportInvoice[]): {
         totalRowCount++;
       });
     }
-    entities.push({ entity, sheetName: label(entity), rows });
+    const isCanonical = (BUSINESS_ENTITIES as readonly string[]).includes(entity);
+    const sheetName = isCanonical ? label(entity) : entity || "Unassigned";
+    entities.push({ entity: entity || "Unassigned", sheetName, rows });
   }
 
   return { entities, header: [...QBO_BILL_HEADER], totalRowCount };

@@ -157,7 +157,11 @@ dashboard.get("/summary", async (c) => {
     (r) => {
       const total = r.total ?? 0;
       const received = r.received ?? 0;
-      const pct = total > 0 ? roundCents((received / total) * 100) : 0;
+      // v1.9.11 (M6): completion = RESOLVED / total, where resolved = total − open
+      // (open = still-PENDING). NOT_REQUIRED/WAIVED count as resolved, so a
+      // cardholder who owes nothing reaches 100% instead of stalling below it.
+      const open = r.open ?? 0;
+      const pct = total > 0 ? roundCents(((total - open) / total) * 100) : 0;
       return {
         cardholder_id: r.cardholder_id,
         name: (r.name || "").trim() || "UNMATCHED",
@@ -330,33 +334,38 @@ dashboard.get("/analytics", async (c) => {
     `SELECT strftime('%Y-%m', transaction_date) AS month,
             COALESCE(SUM(amount), 0) AS spend,
             COUNT(*) AS tx_count,
-            SUM(CASE WHEN receipt_status IN ('RECEIVED','UPLOADED') THEN 1 ELSE 0 END) AS receipts_received
+            SUM(CASE WHEN receipt_status IN ('RECEIVED','UPLOADED') THEN 1 ELSE 0 END) AS receipts_received,
+            SUM(CASE WHEN receipt_status != 'PENDING' THEN 1 ELSE 0 END) AS resolved
        FROM cc_transactions
       WHERE transaction_date >= ? AND is_payment = 0 AND archived_at IS NULL
       GROUP BY month`,
   )
     .bind(startDate)
-    .all<{ month: string; spend: number; tx_count: number; receipts_received: number }>();
+    .all<{ month: string; spend: number; tx_count: number; receipts_received: number; resolved: number }>();
 
-  const byMonth = new Map<string, { spend: number; tx_count: number; receipts_received: number }>();
+  const byMonth = new Map<string, { spend: number; tx_count: number; receipts_received: number; resolved: number }>();
   for (const r of monthlyRows.results ?? []) {
     byMonth.set(r.month, {
       spend: r.spend ?? 0,
       tx_count: r.tx_count ?? 0,
       receipts_received: r.receipts_received ?? 0,
+      resolved: r.resolved ?? 0,
     });
   }
   const monthly: CcMonthlyPoint[] = keys.map((month) => {
     const row = byMonth.get(month);
     const txCount = row?.tx_count ?? 0;
     const received = row?.receipts_received ?? 0;
+    // v1.9.11 (M6): completion counts RESOLVED (not just received) so
+    // NOT_REQUIRED/WAIVED credits don't cap the month below 100%.
+    const resolved = row?.resolved ?? 0;
     return {
       month,
       spend: roundCents(row?.spend ?? 0),
       tx_count: txCount,
       receipts_received: received,
       receipts_total: txCount,
-      completion_pct: txCount > 0 ? roundCents((received / txCount) * 100) : 0,
+      completion_pct: txCount > 0 ? roundCents((resolved / txCount) * 100) : 0,
     };
   });
 
