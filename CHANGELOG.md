@@ -5,6 +5,59 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.11] — 2026-07-22
+
+Clears out the Medium and Low findings from the end-to-end audit, and adds a
+unit-test suite (vitest) to the worker.
+
+### Fixed — reporting & money
+- Invoice analytics (Total AP, trend, entity/vendor/GL spend) exclude REJECTED
+  invoices, so payables aren't overstated.
+- The dashboard "Spend by GL category" chart no longer double-counts split
+  invoices (already fixed for the parent chart in 1.9.10; this covers the rest).
+- Credit-card receipt-completion % now reaches 100% when nothing is outstanding
+  (credits/refunds no longer hold it below).
+- Top-vendors chart merges case/whitespace vendor variants into one bar.
+- Split validation sums per-row rounded amounts, matching what's stored.
+- Credits/refunds written as "(x)", "x-", or "x CR" now parse as negative.
+
+### Fixed — export
+- Factor (.xlsx) renders bills with a missing/legacy entity on an "Unassigned"
+  sheet instead of silently dropping them.
+- QuickBooks CSV cells that start with = + - @ are neutralized against
+  spreadsheet formula-injection.
+- Allocation-split invoices (quick/even/custom) are no longer stuck in the export
+  "Blocked" list over a stale line flag.
+
+### Fixed — credit cards & receipts
+- Auto-match only considers transactions still awaiting a receipt (no more
+  attaching a second receipt to the wrong, already-receipted charge).
+- Re-importing an overlapping statement preserves a transaction's already-collected
+  receipt status and manual entity splits.
+- Assigning a queued receipt is atomic (no duplicate receipt rows on a double-click).
+- The mobile split screen no longer re-submits the same photo on back-navigation
+  (no duplicate receipt or manager alert), and a split that can't be applied is
+  kept rather than silently dropped.
+- HEIC/HEIF/WebP receipt photos are accepted.
+- A reminder for a cardholder with no email on file no longer drafts to the manager.
+
+### Fixed — invoices, vendors, admin, audit
+- Invoice list filters (status/entity/search) run server-side, so "Clear",
+  Excel export, and filtering work across the whole list, not just the newest page.
+- The combined review banner names a reconciliation gap that "These are fine"
+  will also clear.
+- Reject case/whitespace-duplicate vendors and aliases that would shadow a real
+  vendor's coding.
+- /admin/users is admin-only; a pending first-login password change is enforced
+  on reload; "Remember me" no longer stores your password on disk.
+- Audit date filter respects your local day on both ends.
+- Ingest rollback also cleans up its Reducto sidecar; PDFs with bytes before the
+  header are recognized instead of stored as unknown files.
+
+### Added
+- A vitest unit-test suite for the worker's pure logic (money parsing, CSV
+  escaping, PDF sniffing, split validation) — run with `npm test` in `worker/`.
+
 ## [1.9.10] — 2026-07-21
 
 Fixes the eight High-severity issues found in the full end-to-end audit. Every

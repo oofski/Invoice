@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { LogIn, UserPlus, ArrowLeft, Server, Banknote } from "lucide-react";
 import { Button, Card, Input } from "@/components/ui/primitives";
@@ -44,9 +44,13 @@ export default function LoginPage() {
   const [email, setEmail] = useState(() =>
     rememberedOn() ? localStorage.getItem(REMEMBER_EMAIL) ?? "" : "",
   );
-  const [password, setPassword] = useState(() =>
-    rememberedOn() ? localStorage.getItem(REMEMBER_PW) ?? "" : "",
-  );
+  // v1.9.11 (L1): never prefill/persist the password. "Remember me" keeps only
+  // the email; staying signed in is handled by the session token (setToken).
+  // Purge any password a prior version stored in plaintext on this device.
+  const [password, setPassword] = useState("");
+  useEffect(() => {
+    localStorage.removeItem(REMEMBER_PW);
+  }, []);
   const [remember, setRemember] = useState(() => rememberedOn());
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -74,12 +78,11 @@ export default function LoginPage() {
       if (remember) {
         localStorage.setItem(REMEMBER_KEY, "1");
         localStorage.setItem(REMEMBER_EMAIL, email);
-        localStorage.setItem(REMEMBER_PW, password);
       } else {
         localStorage.removeItem(REMEMBER_KEY);
         localStorage.removeItem(REMEMBER_EMAIL);
-        localStorage.removeItem(REMEMBER_PW);
       }
+      localStorage.removeItem(REMEMBER_PW); // never persist the password (L1)
       if (res.user.must_change_password) {
         navigate("/change-password", { replace: true });
       } else {
