@@ -1,5 +1,5 @@
 import type { Env } from "./types";
-import { runExtract, MIN_CONFIDENCE_KEY } from "./reducto";
+import { runExtract, MIN_CONFIDENCE_KEY, type ExtractMode } from "./reducto";
 import { GL_CATEGORIES_FLAT, REQUIRES_MANUAL_REVIEW } from "./constants";
 import { parseAmount } from "./util";
 
@@ -243,11 +243,11 @@ export function normalizeExtract(data: unknown): ExtractedInvoice {
 export async function extractInvoice(
   env: Env,
   documentUrl: string,
-): Promise<{ raw: unknown; data: ExtractedInvoice }> {
-  const { raw, data } = await runExtract(env, documentUrl, {
+): Promise<{ raw: unknown; data: ExtractedInvoice; mode: ExtractMode }> {
+  const { raw, data, mode } = await runExtract(env, documentUrl, {
     schema: INVOICE_SCHEMA,
     systemPrompt: SYSTEM_PROMPT,
     arrayExtract: true,
   });
-  return { raw, data: normalizeExtract(data) };
+  return { raw, data: normalizeExtract(data), mode };
 }

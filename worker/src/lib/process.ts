@@ -659,7 +659,7 @@ export async function ingestInvoicePdf(
   // processInvoiceAI, so Reducto is not billed twice. Business/Class/approver are
   // filled in by the rules pipeline in processInvoiceAI.
   const reductoId = await uploadToReducto(env, buf, fileName);
-  const { raw: reductoRaw, data } = await extractInvoice(env, reductoId);
+  const { raw: reductoRaw, data, mode: extractMode } = await extractInvoice(env, reductoId);
   const vendor = data.vendor || "Unknown Vendor";
   const invoiceNumber = data.invoice_number || `NO-INV-${Date.now()}`;
   const total =
@@ -776,7 +776,10 @@ export async function ingestInvoicePdf(
         ? ` (converted ${norm.sourceType.toUpperCase()} image to PDF)`
         : norm.isPdf
           ? ""
-          : ` (stored as ${norm.mime}; no usable PDF)`),
+          : ` (stored as ${norm.mime}; no usable PDF)`) +
+      // Per-invoice observability (v1.9.x): record which Reducto path actually ran
+      // so a silent downgrade from Deep Extract is visible in the audit trail.
+      ` · ${extractMode === "deep" ? "Deep Extract" : "standard OCR (Deep Extract unavailable)"}`,
   });
 
   // v1.9.7 (bug #29): the row/PDF/audit are already committed. If AI coding

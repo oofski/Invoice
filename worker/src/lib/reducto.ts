@@ -102,13 +102,15 @@ export async function runExtract(
   env: Env,
   documentUrl: string,
   opts: { schema: unknown; systemPrompt?: string; arrayExtract?: boolean },
-): Promise<{ raw: unknown; data: unknown }> {
+): Promise<{ raw: unknown; data: unknown; mode: ExtractMode }> {
   const arrayExtract = opts.arrayExtract ?? true;
   // ENHANCED settings (v1.1.8 O): deep_extract is the main accuracy lever;
   // citations wraps each value as {value, citations:[{bbox,page,confidence}]}
-  // (used by the light confidence gating in P). DEFENSIVE: if the enhanced call
-  // returns a non-2xx (e.g. a setting unsupported on this account), retry ONCE
-  // with the minimal settings so a tuning flag can NEVER break extraction.
+  // (used by the light confidence gating in P). DEFENSIVE: if Deep Extract is
+  // genuinely UNAVAILABLE we fall back to a minimal single-pass extract so the
+  // invoice still processes — but (v1.9.x) we first retry the DEEP call on a
+  // transient blip, and we report which mode actually ran so a silent downgrade
+  // is visible instead of quietly costing accuracy.
   const enhancedSettings = {
     array_extract: arrayExtract,
     deep_extract: true,
@@ -131,17 +133,47 @@ export async function runExtract(
       body: JSON.stringify(body),
     });
   };
-
-  let res = await post(enhancedSettings);
-  if (!res.ok) {
-    const detail = (await res.text()).slice(0, 300);
-    console.warn(
-      `[reducto] enhanced /extract ${res.status} (${detail}); retrying once with minimal settings`,
-    );
-    res = await post(minimalSettings);
-    if (!res.ok) {
-      throw new Error(`Reducto extract ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  // A network throw becomes null so the retry/fallback logic can treat it like a
+  // transient failure rather than aborting the whole extraction.
+  const tryPost = async (
+    settings: Record<string, unknown>,
+  ): Promise<Response | null> => {
+    try {
+      return await post(settings);
+    } catch (e) {
+      console.warn(`[reducto] /extract network error: ${e instanceof Error ? e.message : e}`);
+      return null;
     }
+  };
+
+  // 1) Deep Extract. On a TRANSIENT failure (network / 408 / 429 / 5xx) retry the
+  //    DEEP call ONCE before considering any downgrade — a blip must not silently
+  //    cost us Deep Extract accuracy.
+  let res = await tryPost(enhancedSettings);
+  if (!res || (!res.ok && isTransientStatus(res.status))) {
+    await new Promise((r) => setTimeout(r, 600));
+    res = await tryPost(enhancedSettings);
+  }
+
+  let mode: ExtractMode = "deep";
+  if (!res || !res.ok) {
+    // Deep Extract is unavailable (unsupported on this plan, or a persistent
+    // outage). Fall back to a standard single-pass extract so the invoice STILL
+    // processes — but log loudly that accuracy was reduced for this document.
+    const detail = res
+      ? `status ${res.status}: ${(await res.text()).slice(0, 300)}`
+      : "network error";
+    console.error(
+      `[reducto] Deep Extract unavailable (${detail}) — falling back to STANDARD extraction for this document`,
+    );
+    const min = await post(minimalSettings);
+    if (!min.ok) {
+      throw new Error(`Reducto extract ${min.status}: ${(await min.text()).slice(0, 300)}`);
+    }
+    res = min;
+    mode = "minimal";
+  } else {
+    console.log("[reducto] /extract succeeded via Deep Extract");
   }
 
   const raw = await res.json();
@@ -154,9 +186,17 @@ export async function runExtract(
   ) {
     const full = await (await fetch((node as Record<string, unknown>).url as string)).json();
     node = pickExtractResult(full);
-    return { raw: full, data: unwrapCitations(node) };
+    return { raw: full, data: unwrapCitations(node), mode };
   }
-  return { raw, data: unwrapCitations(node) };
+  return { raw, data: unwrapCitations(node), mode };
+}
+
+/** Which Reducto extraction path actually ran (observability for a silent downgrade). */
+export type ExtractMode = "deep" | "minimal";
+
+/** Transient HTTP statuses worth retrying the Deep Extract call for. */
+function isTransientStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
 }
 
 function pickExtractResult(raw: unknown): unknown {
