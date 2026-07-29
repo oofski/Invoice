@@ -58,6 +58,14 @@ const MONTH_NAMES = [
  * reconciliation gap.
  */
 function needsReview(i: QueueInvoice): boolean {
+  // v1.9.12: once an invoice is APPROVED (or already EXPORTED) it's a decided
+  // invoice — it should drop out of the Manual Review Queue / "Needs Review" tab
+  // even if a soft flag still lingers on it. Manual review is a pre-approval step.
+  if (
+    i.status === INVOICE_STATUS.APPROVED ||
+    i.status === INVOICE_STATUS.EXPORTED
+  )
+    return false;
   return (
     (i.review_count ?? 0) > 0 ||
     !!i.location_ambiguous ||

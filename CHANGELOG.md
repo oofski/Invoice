@@ -5,6 +5,14 @@ All notable changes to InvoiceIQ are documented here. Format follows
 version in `desktop/package.json`. Each release is published as a Windows
 installer on the GitHub Releases page.
 
+## [1.9.12] — 2026-07-22
+
+### Changed
+- Once an invoice is **Approved** (or Exported) it no longer appears in the
+  dashboard **Manual Review Queue** or the "Needs Review" tab, even if a soft
+  review flag still lingers on it — manual review is a pre-approval step, so a
+  decided invoice drops out of it.
+
 ## [1.9.11] — 2026-07-22
 
 Clears out the Medium and Low findings from the end-to-end audit, and adds a
